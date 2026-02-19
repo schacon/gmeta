@@ -13,7 +13,7 @@ pub fn run(
     file: Option<&str>,
     value_type_str: &str,
 ) -> Result<()> {
-    let target = Target::parse(target_str)?;
+    let mut target = Target::parse(target_str)?;
     let value_type = ValueType::from_str(value_type_str)?;
 
     let raw_value = match (value, file) {
@@ -26,6 +26,7 @@ pub fn run(
     };
 
     let repo = git_utils::discover_repo()?;
+    target.resolve(&repo)?;
     let db_path = git_utils::db_path(&repo)?;
     let email = git_utils::get_email(&repo)?;
     let timestamp = Utc::now().timestamp_millis();

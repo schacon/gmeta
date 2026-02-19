@@ -78,6 +78,20 @@ impl Target {
         self.value.as_deref().unwrap_or("")
     }
 
+    /// If this is a commit target with a partial SHA, expand it to 40 chars
+    /// using the given Git repository.
+    pub fn resolve(&mut self, repo: &git2::Repository) -> anyhow::Result<()> {
+        if self.target_type == TargetType::Commit {
+            if let Some(ref v) = self.value {
+                if v.len() < 40 {
+                    let full = crate::git_utils::resolve_commit_sha(repo, v)?;
+                    self.value = Some(full);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Build the tree base path for serialization.
     /// Format: {type}/{first_2}/{last_3}/{full_value}
     /// For project: just "project"

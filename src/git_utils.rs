@@ -46,6 +46,18 @@ pub fn remote_ref(repo: &Repository, remote: &str) -> Result<String> {
     Ok(format!("refs/{}/{}", ns, remote))
 }
 
+/// Expand a partial commit SHA to the full 40-char hex string.
+/// Returns an error if the SHA is ambiguous or not found.
+pub fn resolve_commit_sha(repo: &Repository, partial: &str) -> Result<String> {
+    let obj = repo
+        .revparse_single(partial)
+        .with_context(|| format!("could not resolve commit: {}", partial))?;
+    let commit = obj
+        .peel_to_commit()
+        .with_context(|| format!("{} does not point to a commit", partial))?;
+    Ok(commit.id().to_string())
+}
+
 /// Check if a tree entry name looks like a list entry (timestamp-hash format).
 pub fn is_list_entry_name(name: &str) -> bool {
     // Format: {ms_epoch}-{first_5_sha256}

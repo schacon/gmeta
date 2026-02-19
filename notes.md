@@ -1,0 +1,1 @@
+- if a chat list is updated, make sure the ts are kept in the sqlite db to be used in the serialization

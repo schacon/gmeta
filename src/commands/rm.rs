@@ -6,9 +6,10 @@ use crate::git_utils;
 use crate::types::Target;
 
 pub fn run(target_str: &str, key: &str) -> Result<()> {
-    let target = Target::parse(target_str)?;
+    let mut target = Target::parse(target_str)?;
 
     let repo = git_utils::discover_repo()?;
+    target.resolve(&repo)?;
     let db_path = git_utils::db_path(&repo)?;
     let email = git_utils::get_email(&repo)?;
     let timestamp = Utc::now().timestamp_millis();

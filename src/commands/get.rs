@@ -6,9 +6,10 @@ use crate::git_utils;
 use crate::types::Target;
 
 pub fn run(target_str: &str, key: Option<&str>, json_output: bool, with_authorship: bool) -> Result<()> {
-    let target = Target::parse(target_str)?;
+    let mut target = Target::parse(target_str)?;
 
     let repo = git_utils::discover_repo()?;
+    target.resolve(&repo)?;
     let db_path = git_utils::db_path(&repo)?;
     let db = Db::open(&db_path)?;
 

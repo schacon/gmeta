@@ -3,8 +3,8 @@ use predicates::prelude::*;
 use std::path::Path;
 use tempfile::TempDir;
 
-/// Create a temporary git repo and return the TempDir handle.
-fn setup_repo() -> TempDir {
+/// Create a temporary git repo and return the TempDir handle + the initial commit SHA.
+fn setup_repo() -> (TempDir, String) {
     let dir = TempDir::new().unwrap();
     let repo = git2::Repository::init(dir.path()).unwrap();
 
@@ -17,10 +17,11 @@ fn setup_repo() -> TempDir {
     let sig = git2::Signature::now("Test User", "test@example.com").unwrap();
     let tree_oid = repo.treebuilder(None).unwrap().write().unwrap();
     let tree = repo.find_tree(tree_oid).unwrap();
-    repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+    let commit_oid = repo
+        .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
         .unwrap();
 
-    dir
+    (dir, commit_oid.to_string())
 }
 
 fn gmeta(dir: &Path) -> Command {
@@ -29,17 +30,23 @@ fn gmeta(dir: &Path) -> Command {
     cmd
 }
 
+/// Helper to build a commit target string from a full SHA.
+fn commit_target(sha: &str) -> String {
+    format!("commit:{}", sha)
+}
+
 #[test]
 fn test_set_and_get_string() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "claude-4.6"])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "commit:abc123def"])
+        .args(["get", &target])
         .assert()
         .success()
         .stdout(predicate::str::contains("agent:model"))
@@ -47,22 +54,50 @@ fn test_set_and_get_string() {
 }
 
 #[test]
+fn test_set_and_get_with_partial_sha() {
+    let (dir, sha) = setup_repo();
+    let full_target = commit_target(&sha);
+    let partial_target = commit_target(&sha[..8]);
+
+    // Set with partial SHA
+    gmeta(dir.path())
+        .args(["set", &partial_target, "agent:model", "claude-4.6"])
+        .assert()
+        .success();
+
+    // Get with full SHA should find it (was expanded on set)
+    gmeta(dir.path())
+        .args(["get", &full_target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("claude-4.6"));
+
+    // Get with partial SHA should also find it
+    gmeta(dir.path())
+        .args(["get", &partial_target])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("claude-4.6"));
+}
+
+#[test]
 fn test_set_and_get_specific_key() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "claude-4.6"])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:provider", "anthropic"])
+        .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
     // Get specific key
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "agent:model"])
+        .args(["get", &target, "agent:model"])
         .assert()
         .success()
         .stdout(predicate::str::contains("claude-4.6"))
@@ -71,20 +106,21 @@ fn test_set_and_get_specific_key() {
 
 #[test]
 fn test_set_and_get_json() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "claude-4.6"])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:provider", "anthropic"])
+        .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "--json", "commit:abc123def"])
+        .args(["get", "--json", &target])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"model\": \"claude-4.6\""))
@@ -93,20 +129,16 @@ fn test_set_and_get_json() {
 
 #[test]
 fn test_json_with_authorship() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "claude-4.6"])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args([
-            "get",
-            "--json",
-            "--with-authorship",
-            "commit:abc123def",
-        ])
+        .args(["get", "--json", "--with-authorship", &target])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"value\": \"claude-4.6\""))
@@ -116,26 +148,27 @@ fn test_json_with_authorship() {
 
 #[test]
 fn test_partial_key_matching() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "claude-4.6"])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:provider", "anthropic"])
+        .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "other:key", "value"])
+        .args(["set", &target, "other:key", "value"])
         .assert()
         .success();
 
     // Partial key "agent" should match both agent: keys
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "agent"])
+        .args(["get", &target, "agent"])
         .assert()
         .success()
         .stdout(predicate::str::contains("agent:model"))
@@ -145,21 +178,22 @@ fn test_partial_key_matching() {
 
 #[test]
 fn test_rm_removes_value() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "claude-4.6"])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["rm", "commit:abc123def", "agent:model"])
+        .args(["rm", &target, "agent:model"])
         .assert()
         .success();
 
     // Should produce no output now
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "agent:model"])
+        .args(["get", &target, "agent:model"])
         .assert()
         .success()
         .stdout(predicate::str::is_empty());
@@ -167,20 +201,21 @@ fn test_rm_removes_value() {
 
 #[test]
 fn test_list_push() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["list:push", "commit:abc123def", "tags", "first"])
+        .args(["list:push", &target, "tags", "first"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["list:push", "commit:abc123def", "tags", "second"])
+        .args(["list:push", &target, "tags", "second"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "tags"])
+        .args(["get", &target, "tags"])
         .assert()
         .success()
         .stdout(predicate::str::contains("first"))
@@ -189,20 +224,21 @@ fn test_list_push() {
 
 #[test]
 fn test_list_push_converts_string_to_list() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "note", "original"])
+        .args(["set", &target, "note", "original"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["list:push", "commit:abc123def", "note", "appended"])
+        .args(["list:push", &target, "note", "appended"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "note"])
+        .args(["get", &target, "note"])
         .assert()
         .success()
         .stdout(predicate::str::contains("original"))
@@ -211,25 +247,26 @@ fn test_list_push_converts_string_to_list() {
 
 #[test]
 fn test_list_pop() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["list:push", "commit:abc123def", "tags", "a"])
+        .args(["list:push", &target, "tags", "a"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["list:push", "commit:abc123def", "tags", "b"])
+        .args(["list:push", &target, "tags", "b"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["list:pop", "commit:abc123def", "tags", "b"])
+        .args(["list:pop", &target, "tags", "b"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "tags"])
+        .args(["get", &target, "tags"])
         .assert()
         .success()
         .stdout(predicate::str::contains("a"))
@@ -238,22 +275,16 @@ fn test_list_pop() {
 
 #[test]
 fn test_set_list_type() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args([
-            "set",
-            "-t",
-            "list",
-            "commit:abc123def",
-            "items",
-            r#"["hello","world"]"#,
-        ])
+        .args(["set", "-t", "list", &target, "items", r#"["hello","world"]"#])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "items"])
+        .args(["get", &target, "items"])
         .assert()
         .success()
         .stdout(predicate::str::contains("hello"))
@@ -262,15 +293,11 @@ fn test_set_list_type() {
 
 #[test]
 fn test_serialize_creates_ref() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args([
-            "set",
-            "commit:13a7d29cde8f8557b54fd6474f547a56822180ae",
-            "agent:model",
-            "claude-4.6",
-        ])
+        .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
@@ -286,11 +313,16 @@ fn test_serialize_creates_ref() {
     let commit = reference.peel_to_commit().unwrap();
     let tree = commit.tree().unwrap();
 
+    // Build the expected path from the full SHA
+    let first2 = &sha[..2];
+    let last3 = &sha[sha.len() - 3..];
+    let expected_path = format!("commit/{}/{}/{}/agent/model", first2, last3, sha);
+
     // Walk the tree and verify structure
     let mut found = false;
     tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         let full_path = format!("{}{}", root, entry.name().unwrap_or(""));
-        if full_path == "commit/13/0ae/13a7d29cde8f8557b54fd6474f547a56822180ae/agent/model" {
+        if full_path == expected_path {
             // Verify blob content
             let blob = repo.find_blob(entry.id()).unwrap();
             let content = std::str::from_utf8(blob.content()).unwrap();
@@ -306,7 +338,7 @@ fn test_serialize_creates_ref() {
 
 #[test]
 fn test_project_target() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args(["set", "project", "name", "my-project"])
@@ -322,7 +354,7 @@ fn test_project_target() {
 
 #[test]
 fn test_invalid_target_type() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args(["set", "unknown:abc123", "key", "value"])
@@ -333,7 +365,7 @@ fn test_invalid_target_type() {
 
 #[test]
 fn test_target_value_too_short() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args(["set", "commit:ab", "key", "value"])
@@ -344,7 +376,7 @@ fn test_target_value_too_short() {
 
 #[test]
 fn test_serialize_list_values() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args([
@@ -392,32 +424,43 @@ fn test_serialize_list_values() {
     for entry_path in &list_entries {
         let filename = entry_path.rsplit('/').next().unwrap();
         let parts: Vec<&str> = filename.split('-').collect();
-        assert_eq!(parts.len(), 2, "list entry should be timestamp-hash: {}", filename);
+        assert_eq!(
+            parts.len(),
+            2,
+            "list entry should be timestamp-hash: {}",
+            filename
+        );
         assert!(
             parts[0].chars().all(|c| c.is_ascii_digit()),
             "first part should be digits: {}",
             filename
         );
-        assert_eq!(parts[1].len(), 5, "hash part should be 5 chars: {}", filename);
+        assert_eq!(
+            parts[1].len(),
+            5,
+            "hash part should be 5 chars: {}",
+            filename
+        );
     }
 }
 
 #[test]
 fn test_upsert_overwrites() {
-    let dir = setup_repo();
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "v1"])
+        .args(["set", &target, "agent:model", "v1"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["set", "commit:abc123def", "agent:model", "v2"])
+        .args(["set", &target, "agent:model", "v2"])
         .assert()
         .success();
 
     gmeta(dir.path())
-        .args(["get", "commit:abc123def", "agent:model"])
+        .args(["get", &target, "agent:model"])
         .assert()
         .success()
         .stdout(predicate::str::contains("v2"))
@@ -426,7 +469,7 @@ fn test_upsert_overwrites() {
 
 #[test]
 fn test_path_target() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args(["set", "path:src/main.rs", "review:status", "approved"])
@@ -443,7 +486,7 @@ fn test_path_target() {
 
 #[test]
 fn test_change_id_target() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args([
@@ -465,7 +508,7 @@ fn test_change_id_target() {
 
 #[test]
 fn test_serialize_empty() {
-    let dir = setup_repo();
+    let (dir, _sha) = setup_repo();
 
     gmeta(dir.path())
         .args(["serialize"])
