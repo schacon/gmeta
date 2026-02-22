@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:docs.rs)",
+      "Bash(cargo:*)",
+      "Bash(ls:*)",
+      "Bash(but:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}
