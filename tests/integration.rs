@@ -516,3 +516,482 @@ fn test_serialize_empty() {
         .success()
         .stdout(predicate::str::contains("no metadata to serialize"));
 }
+
+#[test]
+fn test_serialize_list_uses_stored_timestamp() {
+    let (dir, _sha) = setup_repo();
+
+    // Set a list value
+    gmeta(dir.path())
+        .args([
+            "set",
+            "-t",
+            "list",
+            "branch:sc-branch-1-deadbeef",
+            "agent:chat",
+            r#"["hello","world"]"#,
+        ])
+        .assert()
+        .success();
+
+    // Serialize once
+    gmeta(dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // Collect list entry names from first serialization
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let first_entries = collect_list_entry_names(&repo);
+    assert_eq!(first_entries.len(), 2);
+
+    // Serialize again without any changes — timestamps should be identical
+    // because serialize uses the stored last_timestamp, not the current time
+    gmeta(dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    let second_entries = collect_list_entry_names(&repo);
+    assert_eq!(second_entries.len(), 2);
+
+    // Entry names (timestamp-hash) should be exactly the same both times
+    assert_eq!(
+        first_entries, second_entries,
+        "list entry names should be stable across serializations when data is unchanged"
+    );
+}
+
+fn collect_list_entry_names(repo: &git2::Repository) -> Vec<String> {
+    let reference = repo.find_reference("refs/meta/local").unwrap();
+    let commit = reference.peel_to_commit().unwrap();
+    let tree = commit.tree().unwrap();
+
+    let mut entries = Vec::new();
+    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+        let full_path = format!("{}{}", root, entry.name().unwrap_or(""));
+        if full_path.starts_with("branch/sc/eef/sc-branch-1-deadbeef/agent/chat/")
+            && entry.kind() == Some(git2::ObjectType::Blob)
+        {
+            let name = entry.name().unwrap().to_string();
+            entries.push(name);
+        }
+        git2::TreeWalkResult::Ok
+    })
+    .unwrap();
+
+    entries.sort();
+    entries
+}
+
+#[test]
+fn test_custom_namespace() {
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
+
+    // Set meta.namespace to a custom value
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    repo.config().unwrap().set_str("meta.namespace", "notes").unwrap();
+    drop(repo);
+
+    gmeta(dir.path())
+        .args(["set", &target, "agent:model", "claude-4.6"])
+        .assert()
+        .success();
+
+    gmeta(dir.path())
+        .args(["serialize"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("refs/notes/local"));
+
+    // Verify the ref exists under the custom namespace
+    let repo = git2::Repository::open(dir.path()).unwrap();
+    assert!(repo.find_reference("refs/notes/local").is_ok());
+    assert!(repo.find_reference("refs/meta/local").is_err());
+}
+
+/// Simulate the full round-trip described in the bug report:
+///
+/// 1. User A sets metadata, serializes, "pushes" (we copy the ref)
+/// 2. User B pulls, materializes (no new data), "pushes" the materialize commit
+/// 3. User A pulls that back, overwrites a value locally, serializes
+/// 4. User A materializes — the local change should NOT be overwritten
+///    because the remote side didn't actually change that key.
+#[test]
+fn test_materialize_preserves_local_changes_over_stale_remote() {
+    // === Setup: two repos sharing via bare intermediary ===
+    let bare_dir = TempDir::new().unwrap();
+    let repo_a_dir = TempDir::new().unwrap();
+    let repo_b_dir = TempDir::new().unwrap();
+
+    // Create bare repo
+    git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+    // Clone into repo A
+    let repo_a = git2::Repository::init(repo_a_dir.path()).unwrap();
+    {
+        let mut config = repo_a.config().unwrap();
+        config.set_str("user.email", "alice@example.com").unwrap();
+        config.set_str("user.name", "Alice").unwrap();
+    }
+    repo_a
+        .remote("origin", bare_dir.path().to_str().unwrap())
+        .unwrap();
+    // Initial commit so repo is valid
+    let sig_a = git2::Signature::now("Alice", "alice@example.com").unwrap();
+    let tree_oid = repo_a.treebuilder(None).unwrap().write().unwrap();
+    let tree = repo_a.find_tree(tree_oid).unwrap();
+    let init_oid = repo_a
+        .commit(Some("HEAD"), &sig_a, &sig_a, "initial", &tree, &[])
+        .unwrap();
+
+    // Push initial commit to bare so repo B can work
+    repo_a
+        .reference(
+            "refs/remotes/origin/main",
+            init_oid,
+            true,
+            "init",
+        )
+        .unwrap();
+
+    // Clone into repo B
+    let repo_b = git2::Repository::init(repo_b_dir.path()).unwrap();
+    {
+        let mut config = repo_b.config().unwrap();
+        config.set_str("user.email", "bob@example.com").unwrap();
+        config.set_str("user.name", "Bob").unwrap();
+    }
+    repo_b
+        .remote("origin", bare_dir.path().to_str().unwrap())
+        .unwrap();
+    // Give repo B the same initial commit
+    let sig_b = git2::Signature::now("Bob", "bob@example.com").unwrap();
+    let tree_oid_b = repo_b.treebuilder(None).unwrap().write().unwrap();
+    let tree_b = repo_b.find_tree(tree_oid_b).unwrap();
+    repo_b
+        .commit(Some("HEAD"), &sig_b, &sig_b, "initial", &tree_b, &[])
+        .unwrap();
+
+    // === Step 1: User A sets metadata and serializes ===
+    gmeta(repo_a_dir.path())
+        .args(["set", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp", "testing:user", "alice@example.com"])
+        .assert()
+        .success();
+
+    gmeta(repo_a_dir.path())
+        .args(["set", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp", "license", "apache"])
+        .assert()
+        .success();
+
+    gmeta(repo_a_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // "Push": copy refs/meta/local from A to bare
+    let a_local_ref = repo_a.find_reference("refs/meta/local").unwrap();
+    let a_local_oid = a_local_ref.peel_to_commit().unwrap().id();
+    copy_meta_objects(&repo_a, &bare_dir);
+    let bare_repo = git2::Repository::open_bare(bare_dir.path()).unwrap();
+    bare_repo
+        .reference("refs/meta/local", a_local_oid, true, "push from A")
+        .unwrap();
+
+    // === Step 2: User B pulls and materializes (no new data) ===
+    // "Fetch": copy meta objects from bare to B, set refs/meta/origin
+    copy_meta_objects_from(&bare_dir, &repo_b);
+    repo_b
+        .reference("refs/meta/origin", a_local_oid, true, "fetch from bare")
+        .unwrap();
+
+    gmeta(repo_b_dir.path())
+        .args(["materialize"])
+        .assert()
+        .success();
+
+    // B serializes (just the materialize merge commit, no new data)
+    gmeta(repo_b_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // "Push" B's local ref back to bare
+    let b_local_ref = repo_b.find_reference("refs/meta/local").unwrap();
+    let b_local_oid = b_local_ref.peel_to_commit().unwrap().id();
+    copy_meta_objects(&repo_b, &bare_dir);
+    let bare_repo = git2::Repository::open_bare(bare_dir.path()).unwrap();
+    bare_repo
+        .reference("refs/meta/local", b_local_oid, true, "push from B")
+        .unwrap();
+
+    // === Step 3: User A pulls B's ref, overwrites a value locally, serializes ===
+    // "Fetch": copy objects from bare to A, update refs/meta/origin
+    copy_meta_objects_from(&bare_dir, &repo_a);
+    let bare_repo = git2::Repository::open_bare(bare_dir.path()).unwrap();
+    let bare_local = bare_repo
+        .find_reference("refs/meta/local")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id();
+    repo_a
+        .reference("refs/meta/origin", bare_local, true, "fetch from bare")
+        .unwrap();
+
+    // A overwrites testing:user locally
+    gmeta(repo_a_dir.path())
+        .args(["set", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp", "testing:user", "tom@example.com"])
+        .assert()
+        .success();
+
+    gmeta(repo_a_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // === Step 4: User A materializes — local change must survive ===
+    gmeta(repo_a_dir.path())
+        .args(["materialize"])
+        .assert()
+        .success();
+
+    // Verify: testing:user should be tom (the local change), NOT alice (stale remote)
+    gmeta(repo_a_dir.path())
+        .args(["get", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("testing:user"))
+        .stdout(predicate::str::contains("tom@example.com"))
+        .stdout(predicate::str::contains("alice@example.com").not());
+
+    // license should still be there (unchanged on both sides)
+    gmeta(repo_a_dir.path())
+        .args(["get", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp", "license"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("apache"));
+}
+
+/// Both User A and User B modify the same key. The one with the later
+/// commit timestamp should win in the three-way merge.
+///
+/// 1. User A sets testing:user=alice, serializes, pushes
+/// 2. User B pulls, materializes, changes testing:user=bob, serializes, pushes
+/// 3. User A changes testing:user=tom, serializes (AFTER B), materializes
+///    → A's value wins because A serialized later
+/// 4. Repeat but have A serialize BEFORE B pushes, then materialize
+///    → B's value wins because B serialized later
+#[test]
+fn test_materialize_both_sides_modified_later_timestamp_wins() {
+    // === Setup: two repos sharing via bare intermediary ===
+    let bare_dir = TempDir::new().unwrap();
+    let repo_a_dir = TempDir::new().unwrap();
+    let repo_b_dir = TempDir::new().unwrap();
+
+    git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+    // Init repo A
+    let repo_a = git2::Repository::init(repo_a_dir.path()).unwrap();
+    {
+        let mut config = repo_a.config().unwrap();
+        config.set_str("user.email", "alice@example.com").unwrap();
+        config.set_str("user.name", "Alice").unwrap();
+    }
+    repo_a
+        .remote("origin", bare_dir.path().to_str().unwrap())
+        .unwrap();
+    let sig_a = git2::Signature::now("Alice", "alice@example.com").unwrap();
+    let tree_oid = repo_a.treebuilder(None).unwrap().write().unwrap();
+    let tree = repo_a.find_tree(tree_oid).unwrap();
+    repo_a
+        .commit(Some("HEAD"), &sig_a, &sig_a, "initial", &tree, &[])
+        .unwrap();
+
+    // Init repo B
+    let repo_b = git2::Repository::init(repo_b_dir.path()).unwrap();
+    {
+        let mut config = repo_b.config().unwrap();
+        config.set_str("user.email", "bob@example.com").unwrap();
+        config.set_str("user.name", "Bob").unwrap();
+    }
+    repo_b
+        .remote("origin", bare_dir.path().to_str().unwrap())
+        .unwrap();
+    let sig_b = git2::Signature::now("Bob", "bob@example.com").unwrap();
+    let tree_oid_b = repo_b.treebuilder(None).unwrap().write().unwrap();
+    let tree_b = repo_b.find_tree(tree_oid_b).unwrap();
+    repo_b
+        .commit(Some("HEAD"), &sig_b, &sig_b, "initial", &tree_b, &[])
+        .unwrap();
+
+    // === Step 1: User A sets initial data and serializes ===
+    gmeta(repo_a_dir.path())
+        .args([
+            "set",
+            "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
+            "testing:user",
+            "alice@example.com",
+        ])
+        .assert()
+        .success();
+
+    gmeta(repo_a_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // Push A → bare
+    let a_oid = repo_a
+        .find_reference("refs/meta/local")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id();
+    copy_meta_objects(&repo_a, &bare_dir);
+    git2::Repository::open_bare(bare_dir.path())
+        .unwrap()
+        .reference("refs/meta/local", a_oid, true, "push A")
+        .unwrap();
+
+    // === Step 2: User B pulls, materializes, modifies, serializes ===
+    // Fetch bare → B
+    copy_meta_objects_from(&bare_dir, &repo_b);
+    repo_b
+        .reference("refs/meta/origin", a_oid, true, "fetch")
+        .unwrap();
+
+    gmeta(repo_b_dir.path())
+        .args(["materialize"])
+        .assert()
+        .success();
+
+    // B changes the same key
+    gmeta(repo_b_dir.path())
+        .args([
+            "set",
+            "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
+            "testing:user",
+            "bob@example.com",
+        ])
+        .assert()
+        .success();
+
+    gmeta(repo_b_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // Push B → bare
+    let b_oid = repo_b
+        .find_reference("refs/meta/local")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id();
+    copy_meta_objects(&repo_b, &bare_dir);
+    git2::Repository::open_bare(bare_dir.path())
+        .unwrap()
+        .reference("refs/meta/local", b_oid, true, "push B")
+        .unwrap();
+
+    // === Step 3: User A modifies the same key AFTER B, serializes, then materializes ===
+    // A changes the value (this serialize will have a later timestamp than B's)
+    gmeta(repo_a_dir.path())
+        .args([
+            "set",
+            "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
+            "testing:user",
+            "tom@example.com",
+        ])
+        .assert()
+        .success();
+
+    gmeta(repo_a_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    // Fetch B's changes into A
+    copy_meta_objects_from(&bare_dir, &repo_a);
+    repo_a
+        .reference("refs/meta/origin", b_oid, true, "fetch B")
+        .unwrap();
+
+    // Materialize — both sides changed, A's commit is newer → A wins
+    gmeta(repo_a_dir.path())
+        .args(["materialize"])
+        .assert()
+        .success();
+
+    gmeta(repo_a_dir.path())
+        .args(["get", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp", "testing:user"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tom@example.com"));
+
+    // === Now test the reverse: B materializes A's newer changes, B's commit is older ===
+    // Fetch A's latest into B
+    let a_oid_new = repo_a
+        .find_reference("refs/meta/local")
+        .unwrap()
+        .peel_to_commit()
+        .unwrap()
+        .id();
+    copy_meta_objects(&repo_a, &bare_dir);
+    git2::Repository::open_bare(bare_dir.path())
+        .unwrap()
+        .reference("refs/meta/local", a_oid_new, true, "push A new")
+        .unwrap();
+
+    copy_meta_objects_from(&bare_dir, &repo_b);
+    repo_b
+        .reference("refs/meta/origin", a_oid_new, true, "fetch A new")
+        .unwrap();
+
+    // B materializes — A's commit is newer → A's value (tom) wins over B's (bob)
+    gmeta(repo_b_dir.path())
+        .args(["materialize"])
+        .assert()
+        .success();
+
+    gmeta(repo_b_dir.path())
+        .args(["get", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp", "testing:user"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tom@example.com"));
+}
+
+/// Copy all git objects from src repo into a bare repo (simulates push).
+fn copy_meta_objects(src: &git2::Repository, bare_dir: &TempDir) {
+    let src_objects = src.path().join("objects");
+    let dst_objects = bare_dir.path().join("objects");
+    copy_dir_contents(&src_objects, &dst_objects);
+}
+
+/// Copy all git objects from a bare repo into dst repo (simulates fetch).
+fn copy_meta_objects_from(bare_dir: &TempDir, dst: &git2::Repository) {
+    let src_objects = bare_dir.path().join("objects");
+    let dst_objects = dst.path().join("objects");
+    copy_dir_contents(&src_objects, &dst_objects);
+}
+
+/// Recursively copy directory contents (for loose objects + pack files).
+fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) {
+    if !src.exists() {
+        return;
+    }
+    for entry in std::fs::read_dir(src).unwrap() {
+        let entry = entry.unwrap();
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            std::fs::create_dir_all(&dst_path).ok();
+            copy_dir_contents(&src_path, &dst_path);
+        } else {
+            std::fs::copy(&src_path, &dst_path).ok();
+        }
+    }
+}
