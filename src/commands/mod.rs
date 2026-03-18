@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod get;
 pub mod import;
 pub mod list;
