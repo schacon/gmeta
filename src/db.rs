@@ -274,7 +274,10 @@ impl Db {
                     false,
                 )))
             }
-            Some((_, value, value_type, is_git_ref)) => Ok(Some((value, value_type, is_git_ref))),
+            Some((_, value, value_type, is_git_ref)) => {
+                let resolved = resolve_blob(self.repo.as_ref(), &value, is_git_ref)?;
+                Ok(Some((resolved, value_type, is_git_ref)))
+            }
             None => Ok(None),
         }
     }
@@ -335,7 +338,8 @@ impl Db {
                 )?;
                 results.push((key, encoded, value_type, false));
             } else {
-                results.push((key, value, value_type, is_git_ref));
+                let resolved = resolve_blob(self.repo.as_ref(), &value, is_git_ref)?;
+                results.push((key, resolved, value_type, is_git_ref));
             }
         }
         Ok(results)

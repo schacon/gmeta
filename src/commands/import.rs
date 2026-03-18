@@ -23,6 +23,7 @@ pub fn run(format: &str, dry_run: bool, since: Option<&str>) -> Result<()> {
 
     match format {
         "entire" => run_entire(dry_run, since_epoch),
+        "git-ai" => run_git_ai(dry_run, since_epoch),
         _ => bail!("unsupported import format: {}", format),
     }
 }
@@ -774,19 +775,6 @@ fn json_encode_value(val: &Value) -> Result<String> {
     }
 }
 
-fn to_kebab(s: &str) -> String {
-    let mut result = String::new();
-    for (i, ch) in s.chars().enumerate() {
-        if ch.is_uppercase() && i > 0 {
-            result.push('-');
-            result.push(ch.to_lowercase().next().unwrap_or(ch));
-        } else {
-            result.push(ch);
-        }
-    }
-    result
-}
-
 fn sanitize_key_segment(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -805,4 +793,319 @@ fn truncate(s: &str, max: usize) -> String {
     } else {
         format!("{}...", &s[..max])
     }
+}
+
+// ── git-ai notes importer ─────────────────────────────────────────────────────
+//
+// Reads the git-ai authorship notes stored in refs/remotes/notes/ai (or the
+// local mirror refs/notes/ai).  Each blob in that fanout tree is a note for
+// one commit.  The note format is:
+//
+//   <path>
+//     <prompt_id> <lines>
+//   ...
+//   ---
+//   { JSON with schema_version, git_ai_version, prompts: { <id>: { agent_id: { tool, model }, ... } } }
+//
+// We import three metadata keys per commit:
+//   agent.blame           — the raw blame section (paths + line ranges), as-is
+//   agent.git-ai.schema-version — schema_version from the JSON
+//   agent.git-ai.version  — git_ai_version from the JSON (omitted if absent)
+//   agent.model           — comma-separated "tool/model" for each unique prompt
+//
+// When multiple prompts exist the model values are deduplicated and joined with
+// ", " so the field stays a simple string.
+
+const NOTES_REFS: &[&str] = &["refs/remotes/notes/ai", "refs/notes/ai"];
+
+fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
+    let repo = git_utils::discover_repo()?;
+    let email = git_utils::get_email(&repo)?;
+    let now = Utc::now().timestamp_millis();
+
+    let db_path = git_utils::db_path(&repo)?;
+    let db = if dry_run {
+        None
+    } else {
+        Some(Db::open(&db_path)?)
+    };
+
+    // Locate the notes ref — prefer remote mirror, fall back to local.
+    let notes_ref = NOTES_REFS
+        .iter()
+        .find(|r| repo.find_reference(r).is_ok())
+        .copied();
+
+    let notes_ref = match notes_ref {
+        Some(r) => r,
+        None => bail!(
+            "no git-ai notes ref found; expected one of: {}",
+            NOTES_REFS.join(", ")
+        ),
+    };
+
+    eprintln!("importing git-ai notes from {}", notes_ref);
+
+    // Resolve to the notes tree OID (the ref points to a commit whose tree is
+    // the fanout directory).
+    let notes_tree_oid = {
+        let reference = repo.find_reference(notes_ref)?;
+        let obj = reference.peel(git2::ObjectType::Commit)?;
+        let commit = obj.as_commit().context("notes ref is not a commit")?;
+        commit.tree_id()
+    };
+    let notes_tree = repo.find_tree(notes_tree_oid)?;
+
+    // Walk the two-level fanout tree: top-level entries are two-hex-char
+    // directory names; their children are blobs named with the remaining 38
+    // chars of the commit SHA.
+    let mut total = 0u64;
+    let mut imported = 0u64;
+    let mut skipped_date = 0u64;
+    let mut skipped_exists = 0u64;
+    let mut errors = 0u64;
+
+    for shard_entry in notes_tree.iter() {
+        let shard_name = match shard_entry.name() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        // Only descend into two-char hex shard dirs.
+        if shard_name.len() != 2 || !shard_name.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let shard_tree = match repo.find_tree(shard_entry.id()) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        for note_entry in shard_tree.iter() {
+            let rest = match note_entry.name() {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            // Full commit SHA = shard prefix + remaining chars.
+            let commit_sha = format!("{}{}", shard_name, rest);
+
+            // Verify the annotated commit exists and is within --since range.
+            let commit_oid = match git2::Oid::from_str(&commit_sha) {
+                Ok(o) => o,
+                Err(_) => {
+                    errors += 1;
+                    continue;
+                }
+            };
+            if let Some(since) = since_epoch {
+                match repo.find_commit(commit_oid) {
+                    Ok(c) => {
+                        if c.time().seconds() < since {
+                            skipped_date += 1;
+                            continue;
+                        }
+                    }
+                    Err(_) => {
+                        errors += 1;
+                        continue;
+                    }
+                }
+            }
+
+            total += 1;
+
+            // Read the note blob.
+            let blob = match repo.find_blob(note_entry.id()) {
+                Ok(b) => b,
+                Err(_) => {
+                    errors += 1;
+                    continue;
+                }
+            };
+            let note_text = match std::str::from_utf8(blob.content()) {
+                Ok(s) => s,
+                Err(_) => {
+                    errors += 1;
+                    continue;
+                }
+            };
+
+            // Parse the note.
+            let parsed = match parse_git_ai_note(note_text) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!(
+                        "  warning: could not parse note for {}: {}",
+                        &commit_sha[..8],
+                        e
+                    );
+                    errors += 1;
+                    continue;
+                }
+            };
+
+            // Check whether we already have data for this commit so we can
+            // report skips without touching the DB on a real run.
+            if let Some(ref db) = db {
+                if db.get("commit", &commit_sha, "agent.blame")?.is_some() {
+                    skipped_exists += 1;
+                    continue;
+                }
+            }
+
+            eprintln!(
+                "  commit {}  schema={}{}",
+                &commit_sha[..8],
+                parsed.schema_version,
+                if parsed.model == "unknown" {
+                    String::new()
+                } else {
+                    format!("  model={}", parsed.model)
+                },
+            );
+
+            if let Some(ref db) = db {
+                // agent.blame — store as git blob ref if large
+                let (blame_val, is_ref) = if parsed.blame.len() > GIT_REF_THRESHOLD {
+                    let oid = repo.blob(parsed.blame.as_bytes())?;
+                    (oid.to_string(), true)
+                } else {
+                    (json_string(&parsed.blame), false)
+                };
+                db.set_with_git_ref(
+                    None,
+                    "commit",
+                    &commit_sha,
+                    "agent.blame",
+                    &blame_val,
+                    "string",
+                    &email,
+                    now,
+                    is_ref,
+                )?;
+
+                db.set(
+                    "commit",
+                    &commit_sha,
+                    "agent.git-ai.schema-version",
+                    &json_string(&parsed.schema_version),
+                    "string",
+                    &email,
+                    now,
+                )?;
+
+                if let Some(ref ver) = parsed.git_ai_version {
+                    db.set(
+                        "commit",
+                        &commit_sha,
+                        "agent.git-ai.version",
+                        &json_string(ver),
+                        "string",
+                        &email,
+                        now,
+                    )?;
+                }
+
+                if parsed.model != "unknown" {
+                    db.set(
+                        "commit",
+                        &commit_sha,
+                        "agent.model",
+                        &json_string(&parsed.model),
+                        "string",
+                        &email,
+                        now,
+                    )?;
+                }
+            }
+
+            imported += 1;
+        }
+    }
+
+    eprintln!();
+    if dry_run {
+        eprintln!(
+            "dry-run: would import {} commits ({} skipped: date filter={}, already exists={}; {} errors)",
+            total.saturating_sub(skipped_date + skipped_exists + errors),
+            skipped_date + skipped_exists,
+            skipped_date,
+            skipped_exists,
+            errors,
+        );
+    } else {
+        eprintln!(
+            "imported {} commits  (skipped: date={} already-exists={}  errors={})",
+            imported, skipped_date, skipped_exists, errors,
+        );
+    }
+
+    Ok(())
+}
+
+struct GitAiNote {
+    blame: String, // raw blame section (everything before ---)
+    schema_version: String,
+    git_ai_version: Option<String>,
+    model: String, // deduplicated "tool/model" joined with ", "
+}
+
+fn parse_git_ai_note(text: &str) -> Result<GitAiNote> {
+    // Split on the `---` separator between blame and JSON.
+    // Notes with no blame section start with `---\n` directly.
+    let (blame_raw, json_raw) = if text.starts_with("---\n") {
+        ("", &text[4..])
+    } else {
+        let sep = "\n---\n";
+        match text.find(sep) {
+            Some(pos) => (&text[..pos], &text[pos + sep.len()..]),
+            None => bail!("no '---' separator found in note"),
+        }
+    };
+
+    let blame = blame_raw.trim_end().to_string();
+
+    let json: Value = serde_json::from_str(json_raw.trim()).context("failed to parse note JSON")?;
+
+    let schema_version = json
+        .get("schema_version")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let git_ai_version = json
+        .get("git_ai_version")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Collect unique "tool/model" strings across all prompts.
+    let mut models: Vec<String> = Vec::new();
+    if let Some(prompts) = json.get("prompts").and_then(|v| v.as_object()) {
+        for prompt in prompts.values() {
+            if let Some(agent_id) = prompt.get("agent_id") {
+                let tool = agent_id
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let model = agent_id
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let entry = format!("{}/{}", tool, model);
+                if !models.contains(&entry) {
+                    models.push(entry);
+                }
+            }
+        }
+    }
+    let model = if models.is_empty() {
+        "unknown".to_string()
+    } else {
+        models.join(", ")
+    };
+
+    Ok(GitAiNote {
+        blame,
+        schema_version,
+        git_ai_version,
+        model,
+    })
 }

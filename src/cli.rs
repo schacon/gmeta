@@ -96,7 +96,7 @@ pub enum Commands {
 
     /// Import metadata from another format
     Import {
-        /// Source format (e.g. "entire")
+        /// Source format: "entire" or "git-ai"
         #[arg(long)]
         format: String,
 
