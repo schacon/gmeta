@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::db::Db;
 use crate::git_utils;
@@ -21,6 +21,8 @@ pub fn run() -> Result<()> {
     let local_ref_name = git_utils::local_ref(&repo)?;
     let last_materialized = db.get_last_materialized()?;
 
+    eprintln!("Reading metadata from database...");
+
     // Determine if we're doing incremental or full serialization
     // If we have a previous local ref commit, start from existing tree
     let existing_tree = repo
@@ -34,7 +36,7 @@ pub fn run() -> Result<()> {
         // Incremental: only modified entries
         let modified = db.get_modified_since(since)?;
         if modified.is_empty() && existing_tree.is_some() {
-            // Nothing changed
+            eprintln!("Nothing changed since last serialize");
             return Ok(());
         }
         // We need the full metadata to rebuild the tree properly
@@ -49,6 +51,38 @@ pub fn run() -> Result<()> {
         return Ok(());
     }
 
+    // Summarize what we're serializing
+    let mut targets: BTreeSet<String> = BTreeSet::new();
+    let mut string_count = 0u64;
+    let mut list_count = 0u64;
+    for (target_type, target_value, _key, _value, value_type, _ts, _is_git_ref) in &metadata_entries
+    {
+        let label = if target_type == "project" {
+            "project".to_string()
+        } else {
+            format!(
+                "{}:{}",
+                target_type,
+                &target_value[..7.min(target_value.len())]
+            )
+        };
+        targets.insert(label);
+        match value_type.as_str() {
+            "string" => string_count += 1,
+            "list" => list_count += 1,
+            _ => {}
+        }
+    }
+    eprintln!(
+        "Serializing {} keys ({} string, {} list) across {} targets, {} tombstones",
+        metadata_entries.len(),
+        string_count,
+        list_count,
+        targets.len(),
+        tombstone_entries.len(),
+    );
+
+    eprintln!("Building git tree...");
     let tree_oid = build_tree(&repo, &metadata_entries, &tombstone_entries)?;
 
     // Create commit
@@ -66,6 +100,7 @@ pub fn run() -> Result<()> {
 
     let parents: Vec<&git2::Commit> = parent.iter().collect();
 
+    eprintln!("Writing commit to {}...", local_ref_name);
     let commit_oid = repo.commit(Some(&local_ref_name), &sig, &sig, "", &tree, &parents)?;
 
     let now = Utc::now().timestamp_millis();
@@ -83,13 +118,15 @@ pub fn run() -> Result<()> {
 /// Build a complete Git tree from all metadata entries.
 fn build_tree(
     repo: &git2::Repository,
-    metadata_entries: &[(String, String, String, String, String, i64)],
+    metadata_entries: &[(String, String, String, String, String, i64, bool)],
     tombstone_entries: &[(String, String, String, i64, String)],
 ) -> Result<git2::Oid> {
     // Collect all file paths -> blob content
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
-    for (target_type, target_value, key, value, value_type, _last_timestamp) in metadata_entries {
+    for (target_type, target_value, key, value, value_type, _last_timestamp, is_git_ref) in
+        metadata_entries
+    {
         let target = if target_type == "project" {
             Target::parse("project")?
         } else {
@@ -98,10 +135,27 @@ fn build_tree(
 
         match value_type.as_str() {
             "string" => {
-                let raw_value: String =
-                    serde_json::from_str(value).context("failed to decode string value")?;
                 let full_path = build_tree_path(&target, key)?;
-                files.insert(full_path, raw_value.into_bytes());
+                if *is_git_ref {
+                    // Value is a git blob SHA — read the blob content directly
+                    let oid = git2::Oid::from_str(value)?;
+                    let blob = repo.find_blob(oid)?;
+                    files.insert(full_path, blob.content().to_vec());
+                } else {
+                    let raw_value: String = match serde_json::from_str(value) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            // Value is valid JSON but not a JSON string (e.g. an object or array).
+                            // Store the raw JSON as-is.
+                            eprintln!(
+                                "warning: key '{}' on {}:{} is not a JSON string ({}), storing raw JSON",
+                                key, target_type, &target_value[..7.min(target_value.len())], e
+                            );
+                            value.to_string()
+                        }
+                    };
+                    files.insert(full_path, raw_value.into_bytes());
+                }
             }
             "list" => {
                 let list_entries = parse_entries(value).context("failed to decode list value")?;
@@ -124,7 +178,10 @@ fn build_tree(
         };
 
         let full_path = build_tombstone_tree_path(&target, key)?;
-        let payload = serde_json::to_vec(&TombstoneBlob { timestamp: *timestamp, email })?;
+        let payload = serde_json::to_vec(&TombstoneBlob {
+            timestamp: *timestamp,
+            email,
+        })?;
         files.insert(full_path, payload);
     }
 

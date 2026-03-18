@@ -7,7 +7,7 @@ use crate::git_utils;
 use crate::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
 use crate::types::{
     build_list_tree_dir_path, build_tombstone_tree_path, build_tree_path, decode_key_path_segments,
-    KEY_TREE_ROOT, LIST_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_BLOB, TOMBSTONE_ROOT, Target,
+    Target, KEY_TREE_ROOT, LIST_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_BLOB, TOMBSTONE_ROOT,
 };
 
 type Key = (String, String, String); // (target_type, target_value, key)
@@ -187,6 +187,7 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
 
             // Fast-forward: update SQLite from remote tree first.
             update_db_from_tree(
+                &repo,
                 &db,
                 &remote_entries.values,
                 &remote_entries.tombstones,
@@ -306,7 +307,7 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             }
 
             // Update SQLite
-            update_db_from_tree(&db, &merged_values, &merged_tombstones, &email, now)?;
+            update_db_from_tree(&repo, &db, &merged_values, &merged_tombstones, &email, now)?;
 
             // Handle removals where no explicit tombstone exists (legacy trees)
             if let Some(base_values) = &legacy_base_values {
@@ -346,27 +347,50 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
 
 /// Update the SQLite database from parsed tree data.
 fn update_db_from_tree(
+    repo: &git2::Repository,
     db: &Db,
     values: &BTreeMap<Key, TreeValue>,
     tombstones: &BTreeMap<Key, TombstoneEntry>,
     email: &str,
     now: i64,
 ) -> Result<()> {
+    use crate::types::GIT_REF_THRESHOLD;
+
     for ((target_type, target_value, key_name), tree_val) in values {
         match tree_val {
             TreeValue::String(s) => {
-                let json_val = serde_json::to_string(s)?;
-                let existing = db.get(target_type, target_value, key_name)?;
-                if existing.as_ref().map(|(v, _)| v.as_str()) != Some(&json_val) {
-                    db.set(
-                        target_type,
-                        target_value,
-                        key_name,
-                        &json_val,
-                        "string",
-                        email,
-                        now,
-                    )?;
+                if s.len() > GIT_REF_THRESHOLD {
+                    // Large value: store as git blob reference
+                    let blob_oid = repo.blob(s.as_bytes())?;
+                    let oid_str = blob_oid.to_string();
+                    let existing = db.get(target_type, target_value, key_name)?;
+                    if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&oid_str) {
+                        db.set_with_git_ref(
+                            None,
+                            target_type,
+                            target_value,
+                            key_name,
+                            &oid_str,
+                            "string",
+                            email,
+                            now,
+                            true,
+                        )?;
+                    }
+                } else {
+                    let json_val = serde_json::to_string(s)?;
+                    let existing = db.get(target_type, target_value, key_name)?;
+                    if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
+                        db.set(
+                            target_type,
+                            target_value,
+                            key_name,
+                            &json_val,
+                            "string",
+                            email,
+                            now,
+                        )?;
+                    }
                 }
             }
             TreeValue::List(list_entries) => {
@@ -381,7 +405,7 @@ fn update_db_from_tree(
                 }
                 let json_val = encode_entries(&items)?;
                 let existing = db.get(target_type, target_value, key_name)?;
-                if existing.as_ref().map(|(v, _)| v.as_str()) != Some(&json_val) {
+                if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
                     db.set(
                         target_type,
                         target_value,
@@ -425,7 +449,7 @@ fn collect_db_changes_from_tree(
             TreeValue::String(s) => {
                 let json_val = serde_json::to_string(s)?;
                 let existing = db.get(target_type, target_value, key_name)?;
-                if existing.as_ref().map(|(v, _)| v.as_str()) != Some(&json_val) {
+                if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: target_type.clone(),
                         target_value: target_value.clone(),
@@ -447,7 +471,7 @@ fn collect_db_changes_from_tree(
                 }
                 let json_val = encode_entries(&items)?;
                 let existing = db.get(target_type, target_value, key_name)?;
-                if existing.as_ref().map(|(v, _)| v.as_str()) != Some(&json_val) {
+                if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: target_type.clone(),
                         target_value: target_value.clone(),
@@ -553,11 +577,7 @@ fn format_target_for_display(target_type: &str, target_value: &str) -> String {
 }
 
 fn format_key_for_display(key: &Key) -> String {
-    format!(
-        "{} {}",
-        format_target_for_display(&key.0, &key.1),
-        key.2
-    )
+    format!("{} {}", format_target_for_display(&key.0, &key.1), key.2)
 }
 
 /// Three-way merge: base vs local vs remote.
@@ -988,9 +1008,10 @@ fn parse_tree(repo: &git2::Repository, tree: &git2::Tree, prefix: &str) -> Resul
                     Err(_) => continue,
                 };
                 let content_str = String::from_utf8_lossy(content).to_string();
-                parsed
-                    .values
-                    .insert((target_type, target_value, key), TreeValue::String(content_str));
+                parsed.values.insert(
+                    (target_type, target_value, key),
+                    TreeValue::String(content_str),
+                );
                 continue;
             }
 
@@ -1207,7 +1228,10 @@ mod tests {
         let (merged, conflicts) = three_way_merge(&base, &local, &BTreeMap::new(), 100, 200)
             .expect("merge should succeed");
 
-        assert_eq!(merged.get(&key("agent:model")), Some(&string_value("local")));
+        assert_eq!(
+            merged.get(&key("agent:model")),
+            Some(&string_value("local"))
+        );
         assert_eq!(conflicts.len(), 1);
         assert_eq!(
             conflicts[0].reason,
