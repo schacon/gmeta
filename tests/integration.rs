@@ -322,8 +322,7 @@ fn test_serialize_creates_ref() {
 
     // Build the expected path from the full SHA
     let first2 = &sha[..2];
-    let last3 = &sha[sha.len() - 3..];
-    let expected_path = format!("commit/{}/{}/{}/k/agent/model/__value", first2, last3, sha);
+    let expected_path = format!("commit/{}/{}/k/agent/model/__value", first2, sha);
 
     // Walk the tree and verify structure
     let mut found = false;
@@ -408,7 +407,7 @@ fn test_serialize_list_values() {
     let mut list_entries = Vec::new();
     tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         let full_path = format!("{}{}", root, entry.name().unwrap_or(""));
-        if full_path.starts_with("branch/sc/eef/sc-branch-1-deadbeef/k/agent/chat/__list/") {
+        if full_path.starts_with("branch/d6/sc-branch-1-deadbeef/k/agent/chat/__list/") {
             if entry.kind() == Some(git2::ObjectType::Blob) {
                 list_entries.push(full_path);
             }
@@ -584,11 +583,10 @@ fn test_serialize_rm_writes_tombstone_blob() {
     let tree = commit.tree().unwrap();
 
     let first2 = &sha[..2];
-    let last3 = &sha[sha.len() - 3..];
-    let value_path = format!("commit/{}/{}/{}/k/agent/model/__value", first2, last3, sha);
+    let value_path = format!("commit/{}/{}/k/agent/model/__value", first2, sha);
     let tombstone_path = format!(
-        "commit/{}/{}/{}/__tombstones/k/agent/model/__deleted",
-        first2, last3, sha
+        "commit/{}/{}/__tombstones/k/agent/model/__deleted",
+        first2, sha
     );
 
     let mut found_value = false;
@@ -663,10 +661,7 @@ fn test_materialize_fast_forward_applies_remote_removal() {
         .assert()
         .success();
 
-    gmeta(dir.path())
-        .args(["materialize"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["materialize"]).assert().success();
 
     // Key should be removed after materialize.
     gmeta(dir.path())
@@ -739,10 +734,7 @@ fn test_materialize_fast_forward_applies_remote_list_entry_removal() {
         .assert()
         .success();
 
-    gmeta(dir.path())
-        .args(["materialize"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["materialize"]).assert().success();
 
     // Removed list entry should be gone after materialize.
     gmeta(dir.path())
@@ -762,7 +754,7 @@ fn collect_list_entry_names(repo: &git2::Repository) -> Vec<String> {
     let mut entries = Vec::new();
     tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
         let full_path = format!("{}{}", root, entry.name().unwrap_or(""));
-        if full_path.starts_with("branch/sc/eef/sc-branch-1-deadbeef/k/agent/chat/__list/")
+        if full_path.starts_with("branch/d6/sc-branch-1-deadbeef/k/agent/chat/__list/")
             && entry.kind() == Some(git2::ObjectType::Blob)
         {
             let name = entry.name().unwrap().to_string();
@@ -1349,7 +1341,10 @@ fn test_materialize_no_common_ancestor_uses_two_way_merge_remote_wins() {
         .args(["set", "project", "local:only", "keep-me"])
         .assert()
         .success();
-    gmeta(repo_a_dir.path()).args(["serialize"]).assert().success();
+    gmeta(repo_a_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
 
     let repo_a = git2::Repository::open(repo_a_dir.path()).unwrap();
     let a_oid = repo_a
@@ -1368,7 +1363,10 @@ fn test_materialize_no_common_ancestor_uses_two_way_merge_remote_wins() {
         .args(["set", "project", "remote:only", "keep-too"])
         .assert()
         .success();
-    gmeta(repo_b_dir.path()).args(["serialize"]).assert().success();
+    gmeta(repo_b_dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
 
     let repo_b = git2::Repository::open(repo_b_dir.path()).unwrap();
     let b_oid = repo_b
@@ -1395,8 +1393,12 @@ fn test_materialize_no_common_ancestor_uses_two_way_merge_remote_wins() {
         .assert()
         .success()
         .stdout(predicate::str::contains("no common ancestor"))
-        .stdout(predicate::str::contains("strategy=two-way-no-common-ancestor"))
-        .stdout(predicate::str::contains("reason=no-common-ancestor-remote-wins"))
+        .stdout(predicate::str::contains(
+            "strategy=two-way-no-common-ancestor",
+        ))
+        .stdout(predicate::str::contains(
+            "reason=no-common-ancestor-remote-wins",
+        ))
         .stdout(predicate::str::contains("agent:model"));
 
     // Dry-run should not move local ref.

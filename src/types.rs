@@ -1,4 +1,6 @@
 use anyhow::{bail, Result};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TargetType {
@@ -93,15 +95,38 @@ impl Target {
     }
 
     /// Build the tree base path for serialization.
-    /// Format: {type}/{first_2}/{last_3}/{full_value}
-    /// For project: just "project"
+    ///
+    /// Scheme per target type:
+    ///   commit    → commit/{first2_of_sha}/{full_sha}
+    ///               SHA is already uniform; one prefix level is enough.
+    ///   change-id → change-id/{first2_of_id}/{full_id}
+    ///               Change IDs are opaque hex; already uniform.
+    ///   branch    → branch/{first2_of_hash(name)}/{name}
+    ///               Branch names cluster on prefixes (feature/, fix/, …);
+    ///               hashing guarantees uniform shard distribution.
+    ///   path      → path/{path}
+    ///               The path itself is already hierarchical; git's tree
+    ///               structure provides natural directory-level fanout for free.
+    ///   project   → project   (singleton, no sharding)
     pub fn tree_base_path(&self) -> String {
-        match &self.value {
-            None => self.type_str().to_string(),
-            Some(v) => {
+        match self.target_type {
+            TargetType::Project => "project".to_string(),
+
+            TargetType::Commit | TargetType::ChangeId => {
+                let v = self.value.as_deref().unwrap_or("");
                 let first2 = &v[..2];
-                let last3 = &v[v.len() - 3..];
-                format!("{}/{}/{}/{}", self.type_str(), first2, last3, v)
+                format!("{}/{}/{}", self.type_str(), first2, v)
+            }
+
+            TargetType::Branch => {
+                let v = self.value.as_deref().unwrap_or("");
+                let first2 = branch_shard_prefix(v);
+                format!("{}/{}/{}", self.type_str(), first2, v)
+            }
+
+            TargetType::Path => {
+                let v = self.value.as_deref().unwrap_or("");
+                format!("{}/{}", self.type_str(), v)
             }
         }
     }
@@ -147,6 +172,16 @@ pub const TOMBSTONE_ROOT: &str = "__tombstones";
 
 /// Reserved filename for tombstone blobs.
 pub const TOMBSTONE_BLOB: &str = "__deleted";
+
+/// Compute a stable 2-char hex shard prefix for a branch name by hashing it.
+/// Branch names cluster on their textual prefix (feature/, fix/, sc-, …) so
+/// we hash first to get a uniform distribution across the 256 buckets.
+fn branch_shard_prefix(name: &str) -> String {
+    let mut h = DefaultHasher::new();
+    name.hash(&mut h);
+    let n = h.finish();
+    format!("{:02x}", (n & 0xff) as u8)
+}
 
 fn validate_key_segment(segment: &str) -> Result<()> {
     if segment.is_empty() {
@@ -275,7 +310,7 @@ mod tests {
         let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
         assert_eq!(
             t.tree_base_path(),
-            "commit/13/0ae/13a7d29cde8f8557b54fd6474f547a56822180ae"
+            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae"
         );
     }
 
@@ -291,7 +326,7 @@ mod tests {
         let path = build_tree_path(&t, "agent:model").unwrap();
         assert_eq!(
             path,
-            "commit/13/0ae/13a7d29cde8f8557b54fd6474f547a56822180ae/k/agent/model/__value"
+            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/k/agent/model/__value"
         );
     }
 
@@ -318,7 +353,12 @@ mod tests {
     #[test]
     fn test_tree_base_path_branch() {
         let t = Target::parse("branch:sc-branch-1-deadbeef").unwrap();
-        assert_eq!(t.tree_base_path(), "branch/sc/eef/sc-branch-1-deadbeef");
+        // shard prefix is hash("sc-branch-1-deadbeef") & 0xff, formatted as 2-char hex
+        let expected_prefix = super::branch_shard_prefix("sc-branch-1-deadbeef");
+        assert_eq!(
+            t.tree_base_path(),
+            format!("branch/{}/sc-branch-1-deadbeef", expected_prefix)
+        );
     }
 
     #[test]
@@ -353,7 +393,7 @@ mod tests {
         let path = super::build_list_tree_dir_path(&t, "agent:chat").unwrap();
         assert_eq!(
             path,
-            "commit/13/0ae/13a7d29cde8f8557b54fd6474f547a56822180ae/k/agent/chat/__list"
+            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/k/agent/chat/__list"
         );
     }
 
@@ -363,7 +403,7 @@ mod tests {
         let path = super::build_tombstone_tree_path(&t, "agent:chat").unwrap();
         assert_eq!(
             path,
-            "commit/13/0ae/13a7d29cde8f8557b54fd6474f547a56822180ae/__tombstones/k/agent/chat/__deleted"
+            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/__tombstones/k/agent/chat/__deleted"
         );
     }
 }

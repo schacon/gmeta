@@ -1129,14 +1129,31 @@ fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a [&'
         return Ok(("project".to_string(), "".to_string(), &parts[1..]));
     }
 
-    // Sharded format: type/first2/last3/full_value/key_parts...
-    if parts.len() < 4 {
+    // Path targets: path/{the/file/path}/k/...
+    // The target value is everything between the type and the key-root sentinel,
+    // joined back with '/' since git splits path components naturally.
+    if target_type == "path" {
+        // Find the key-root sentinel 'k' (or tombstone root) after the type.
+        let sentinel_pos = parts[1..]
+            .iter()
+            .position(|&p| p == crate::types::KEY_TREE_ROOT || p == crate::types::TOMBSTONE_ROOT)
+            .map(|i| i + 1); // adjust for the slice offset
+        if let Some(pos) = sentinel_pos {
+            let target_value = parts[1..pos].join("/");
+            return Ok((target_type.to_string(), target_value, &parts[pos..]));
+        }
+        anyhow::bail!("could not find key root in path target: {:?}", parts);
+    }
+
+    // All other sharded targets use two-level scheme:
+    //   type/first2/full_value/key_parts...
+    if parts.len() < 3 {
         anyhow::bail!("path too short for sharded target: {:?}", parts);
     }
 
-    let target_value = parts[3].to_string();
+    let target_value = parts[2].to_string();
 
-    Ok((target_type.to_string(), target_value, &parts[4..]))
+    Ok((target_type.to_string(), target_value, &parts[3..]))
 }
 
 /// Build a nested Git tree structure from flat file paths.
