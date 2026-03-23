@@ -361,4 +361,3 @@ With multiple remotes, the meta refs structure might look like this:
     └── private
 ```
 
-## Benchmarking
