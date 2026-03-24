@@ -50,12 +50,13 @@ That combination is meant to make metadata:
 
 Ordered lists are intentionally not covered yet.
 
-## Implementation specific
+## Implementation
 
-- [Local storage](./implementation-specific/storage.md)
-- [CLI surface](./implementation-specific/cli.md)
-- [Output and query semantics](./implementation-specific/output.md)
-- [Workflow](./implementation-specific/workflow.md)
+- [Local storage](./implementation/storage.md)
+- [Standard keys](./implementation/standard-keys.md)
+- [CLI surface](./implementation/cli.md)
+- [Output and query semantics](./implementation/output.md)
+- [Workflow](./implementation/workflow.md)
 
 ## Design status
 

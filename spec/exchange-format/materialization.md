@@ -2,7 +2,7 @@
 
 This document describes the exchange-level rules for turning serialized metadata commits back into local current state.
 
-For higher-level coordination with a version control system's push and pull operations, see [Workflow](../implementation-specific/workflow.md).
+For higher-level coordination with a version control system's push and pull operations, see [Workflow](../implementation/workflow.md).
 
 ## Materialize responsibilities
 

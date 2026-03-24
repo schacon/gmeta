@@ -16,8 +16,8 @@ Start here:
 - [spec/exchange-format/exchange.md](./spec/exchange-format/exchange.md)
 - [spec/exchange-format/materialization.md](./spec/exchange-format/materialization.md)
 - [spec/exchange-format/output.md](./spec/exchange-format/output.md)
-- [spec/implementation-specific/storage.md](./spec/implementation-specific/storage.md)
-- [spec/implementation-specific/cli.md](./spec/implementation-specific/cli.md)
+- [spec/implementation/storage.md](./spec/implementation/storage.md)
+- [spec/implementation/cli.md](./spec/implementation/cli.md)
 
 ## Value-type spec docs
 

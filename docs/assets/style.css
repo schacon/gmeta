@@ -18,8 +18,8 @@
   --callout: #12203b;
   --callout-border: #335b94;
   --button-bg: transparent;
-  --button-hover: rgba(255,255,255,0.05);
-  --button-active: rgba(255,255,255,0.08);
+  --button-hover: rgba(255,255,255,0.04);
+  --button-active: rgba(255,255,255,0.06);
 }
 
 :root[data-theme='light'] {
@@ -52,9 +52,9 @@
     --accent: #0369a1;
     --callout: #eff6ff;
     --callout-border: #60a5fa;
-    --button-bg: rgba(15,23,42,0.04);
-    --button-hover: rgba(15,23,42,0.08);
-    --button-active: rgba(29,78,216,0.12);
+    --button-bg: rgba(15,23,42,0.03);
+    --button-hover: rgba(15,23,42,0.05);
+    --button-active: rgba(15,23,42,0.07);
   }
 }
 
@@ -89,46 +89,50 @@ body.sidebar-collapsed {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding-top: 16px;
+  gap: 10px;
+  padding-top: 12px;
   border-top: 1px solid var(--border);
+  opacity: 0.72;
 }
 .theme-control {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px;
+  gap: 2px;
+  padding: 2px;
   border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--button-bg);
+  background: transparent;
 }
 .theme-icon-button,
 .sidebar-toggle {
   appearance: none;
   border: 1px solid transparent;
   background: transparent;
-  color: var(--text);
+  color: var(--muted);
   border-radius: 999px;
-  width: 40px;
-  height: 40px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   font: inherit;
+  font-size: 0.9rem;
 }
 .theme-icon-button:hover,
 .sidebar-toggle:hover {
   background: var(--button-hover);
+  color: var(--text);
 }
 .theme-icon-button.active {
   background: var(--button-active);
-  border-color: var(--accent);
+  border-color: transparent;
+  color: var(--text);
 }
 .sidebar-toggle {
   border-color: var(--border);
-  background: var(--button-bg);
-  font-size: 1.05rem;
+  background: transparent;
+  font-size: 0.82rem;
 }
 .sidebar.collapsed {
   padding-left: 12px;
