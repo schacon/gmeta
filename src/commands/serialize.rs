@@ -54,27 +54,71 @@ pub fn run(verbose: bool) -> Result<()> {
         }
     }
 
-    // Build new tree entries
-    let metadata_entries = if let Some(since) = last_materialized {
-        // Incremental: only modified entries
-        let modified = db.get_modified_since(since)?;
-        if verbose {
-            eprintln!("[verbose] incremental mode: {} entries modified since last materialize", modified.len());
-        }
-        if modified.is_empty() && existing_tree.is_some() {
-            eprintln!("Nothing changed since last serialize");
-            return Ok(());
-        }
-        // We need the full metadata to rebuild the tree properly
-        db.get_all_metadata()?
-    } else {
-        if verbose {
-            eprintln!("[verbose] full serialization mode (no previous materialize)");
-        }
-        db.get_all_metadata()?
-    };
-    let tombstone_entries = db.get_all_tombstones()?;
-    let set_tombstone_entries = db.get_all_set_tombstones()?;
+    // Build new tree entries.
+    // In incremental mode, compute which targets are dirty so we can reuse
+    // unchanged subtrees from the existing git tree.
+    let (metadata_entries, tombstone_entries, set_tombstone_entries, dirty_target_bases) =
+        if let Some(since) = last_materialized {
+            let modified = db.get_modified_since(since)?;
+            if verbose {
+                eprintln!(
+                    "[verbose] incremental mode: {} entries modified since last materialize",
+                    modified.len()
+                );
+            }
+            if modified.is_empty() && existing_tree.is_some() {
+                eprintln!("Nothing changed since last serialize");
+                return Ok(());
+            }
+
+            // Compute dirty target base paths from modified entries
+            let mut dirty_bases: BTreeSet<String> = BTreeSet::new();
+            for (target_type, target_value, _key, _op, _val, _vtype) in &modified {
+                let target = if target_type == "project" {
+                    Target::parse("project")?
+                } else {
+                    Target::parse(&format!("{}:{}", target_type, target_value))?
+                };
+                dirty_bases.insert(target.tree_base_path());
+            }
+
+            let metadata = db.get_all_metadata()?;
+            let tombstones = db.get_all_tombstones()?;
+            let set_tombstones = db.get_all_set_tombstones()?;
+
+            // Note: tombstone/set-tombstone targets don't need to be added to
+            // dirty_bases separately — delete operations are logged in metadata_log,
+            // so they're already captured by get_modified_since. Clean targets'
+            // tombstones are preserved via subtree reuse from the existing tree.
+
+            if verbose {
+                eprintln!("[verbose] dirty target bases: {}", dirty_bases.len());
+                for base in &dirty_bases {
+                    eprintln!("  {}", base);
+                }
+            }
+
+            (
+                metadata,
+                tombstones,
+                set_tombstones,
+                if existing_tree.is_some() {
+                    Some(dirty_bases)
+                } else {
+                    None
+                },
+            )
+        } else {
+            if verbose {
+                eprintln!("[verbose] full serialization mode (no previous materialize)");
+            }
+            (
+                db.get_all_metadata()?,
+                db.get_all_tombstones()?,
+                db.get_all_set_tombstones()?,
+                None,
+            )
+        };
 
     if metadata_entries.is_empty() && tombstone_entries.is_empty() {
         println!("no metadata to serialize");
@@ -191,6 +235,8 @@ pub fn run(verbose: bool) -> Result<()> {
         &metadata_entries,
         &tombstone_entries,
         &set_tombstone_entries,
+        existing_tree.as_ref(),
+        dirty_target_bases.as_ref(),
         verbose,
     )?;
 
@@ -315,15 +361,21 @@ pub fn run(verbose: bool) -> Result<()> {
 }
 
 /// Build a complete Git tree from all metadata entries.
+/// When `existing_tree` and `dirty_target_bases` are provided, only entries
+/// belonging to dirty targets are processed; unchanged subtrees are reused
+/// from the existing tree by OID.
 fn build_tree(
     repo: &git2::Repository,
     metadata_entries: &[(String, String, String, String, String, i64, bool)],
     tombstone_entries: &[(String, String, String, i64, String)],
     set_tombstone_entries: &[(String, String, String, String, String, i64, String)],
+    existing_tree: Option<&git2::Tree>,
+    dirty_target_bases: Option<&BTreeSet<String>>,
     verbose: bool,
 ) -> Result<git2::Oid> {
-    // Collect all file paths -> blob content
+    // Collect file paths -> blob content, skipping clean targets in incremental mode
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut skipped_entries = 0u64;
 
     for (target_type, target_value, key, value, value_type, _last_timestamp, is_git_ref) in
         metadata_entries
@@ -334,11 +386,18 @@ fn build_tree(
             Target::parse(&format!("{}:{}", target_type, target_value))?
         };
 
+        // Skip entries for clean targets — their subtrees will be reused
+        if let Some(dirty) = dirty_target_bases {
+            if !dirty.contains(&target.tree_base_path()) {
+                skipped_entries += 1;
+                continue;
+            }
+        }
+
         match value_type.as_str() {
             "string" => {
                 let full_path = build_tree_path(&target, key)?;
                 if *is_git_ref {
-                    // Value is a git blob SHA — read the blob content directly
                     let oid = git2::Oid::from_str(value)?;
                     let blob = repo.find_blob(oid)?;
                     if verbose {
@@ -353,8 +412,6 @@ fn build_tree(
                     let raw_value: String = match serde_json::from_str(value) {
                         Ok(s) => s,
                         Err(e) => {
-                            // Value is valid JSON but not a JSON string (e.g. an object or array).
-                            // Store the raw JSON as-is.
                             eprintln!(
                                 "warning: key '{}' on {}:{} is not a JSON string ({}), storing raw JSON",
                                 key, target_type, &target_value[..7.min(target_value.len())], e
@@ -416,6 +473,12 @@ fn build_tree(
             Target::parse(&format!("{}:{}", target_type, target_value))?
         };
 
+        if let Some(dirty) = dirty_target_bases {
+            if !dirty.contains(&target.tree_base_path()) {
+                continue;
+            }
+        }
+
         let full_path = build_tombstone_tree_path(&target, key)?;
         if verbose {
             eprintln!("[verbose] tree: {} -> tombstone", full_path);
@@ -436,6 +499,12 @@ fn build_tree(
             Target::parse(&format!("{}:{}", target_type, target_value))?
         };
 
+        if let Some(dirty) = dirty_target_bases {
+            if !dirty.contains(&target.tree_base_path()) {
+                continue;
+            }
+        }
+
         let full_path = build_set_member_tombstone_tree_path(&target, key, member_id)?;
         if verbose {
             eprintln!(
@@ -447,51 +516,63 @@ fn build_tree(
     }
 
     if verbose {
-        eprintln!("[verbose] total tree paths: {}", files.len());
+        eprintln!(
+            "[verbose] total tree paths: {} (skipped {} clean entries)",
+            files.len(),
+            skipped_entries
+        );
     }
 
-    // Build nested tree from flat paths
-    build_tree_from_paths(repo, &files)
+    // Build nested tree, reusing unchanged subtrees from existing tree
+    if let (Some(existing), Some(dirty_bases)) = (existing_tree, dirty_target_bases) {
+        if verbose {
+            eprintln!(
+                "[verbose] incremental tree build: patching existing tree with {} dirty targets",
+                dirty_bases.len()
+            );
+        }
+        build_tree_incremental(repo, existing, &files, dirty_bases)
+    } else {
+        build_tree_from_paths(repo, &files)
+    }
 }
 
-/// Build a nested Git tree structure from flat file paths.
+#[derive(Default)]
+struct Dir {
+    files: BTreeMap<String, Vec<u8>>,
+    dirs: BTreeMap<String, Dir>,
+}
+
+fn insert_path(dir: &mut Dir, parts: &[&str], content: Vec<u8>) {
+    if parts.len() == 1 {
+        dir.files.insert(parts[0].to_string(), content);
+    } else {
+        let child = dir.dirs.entry(parts[0].to_string()).or_default();
+        insert_path(child, &parts[1..], content);
+    }
+}
+
+fn build_dir(repo: &git2::Repository, dir: &Dir) -> Result<git2::Oid> {
+    let mut tb = repo.treebuilder(None)?;
+
+    for (name, content) in &dir.files {
+        let blob_oid = repo.blob(content)?;
+        tb.insert(name, blob_oid, 0o100644)?;
+    }
+
+    for (name, child_dir) in &dir.dirs {
+        let child_oid = build_dir(repo, child_dir)?;
+        tb.insert(name, child_oid, 0o040000)?;
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Build a nested Git tree structure from flat file paths (full rebuild).
 fn build_tree_from_paths(
     repo: &git2::Repository,
     files: &BTreeMap<String, Vec<u8>>,
 ) -> Result<git2::Oid> {
-    // Build a nested structure
-    #[derive(Default)]
-    struct Dir {
-        files: BTreeMap<String, Vec<u8>>,
-        dirs: BTreeMap<String, Dir>,
-    }
-
-    fn insert_path(dir: &mut Dir, parts: &[&str], content: Vec<u8>) {
-        if parts.len() == 1 {
-            dir.files.insert(parts[0].to_string(), content);
-        } else {
-            let child = dir.dirs.entry(parts[0].to_string()).or_default();
-            insert_path(child, &parts[1..], content);
-        }
-    }
-
-    fn build_dir(repo: &git2::Repository, dir: &Dir) -> Result<git2::Oid> {
-        let mut tb = repo.treebuilder(None)?;
-
-        for (name, content) in &dir.files {
-            let blob_oid = repo.blob(content)?;
-            tb.insert(name, blob_oid, 0o100644)?;
-        }
-
-        for (name, child_dir) in &dir.dirs {
-            let child_oid = build_dir(repo, child_dir)?;
-            tb.insert(name, child_oid, 0o040000)?;
-        }
-
-        let oid = tb.write()?;
-        Ok(oid)
-    }
-
     let mut root = Dir::default();
 
     for (path, content) in files {
@@ -500,6 +581,113 @@ fn build_tree_from_paths(
     }
 
     build_dir(repo, &root)
+}
+
+/// Incrementally build a tree by patching an existing tree.
+/// Only dirty target subtrees are rebuilt from `files`; all other subtrees
+/// are reused from the existing tree by OID.
+///
+/// Strategy:
+/// 1. Remove dirty target subtrees from the existing tree
+/// 2. Build a Dir from the dirty files
+/// 3. Merge the new Dir into the cleaned tree
+fn build_tree_incremental(
+    repo: &git2::Repository,
+    existing_tree: &git2::Tree,
+    files: &BTreeMap<String, Vec<u8>>,
+    dirty_target_bases: &BTreeSet<String>,
+) -> Result<git2::Oid> {
+    // Step 1: Remove dirty target subtrees from existing tree
+    let cleaned_oid = remove_subtrees(repo, existing_tree, dirty_target_bases)?;
+    let cleaned_tree = repo.find_tree(cleaned_oid)?;
+
+    // Step 2: Build Dir from dirty files only
+    let mut root = Dir::default();
+    for (path, content) in files {
+        let parts: Vec<&str> = path.split('/').collect();
+        insert_path(&mut root, &parts, content.clone());
+    }
+
+    // Step 3: Merge new content into cleaned tree
+    merge_dir_into_tree(repo, &root, &cleaned_tree)
+}
+
+/// Remove subtrees at specific paths from an existing tree.
+/// Paths like "commit/ab/abc123" are recursively navigated and the leaf
+/// entry is removed, cleaning up empty parent dirs.
+fn remove_subtrees(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    paths: &BTreeSet<String>,
+) -> Result<git2::Oid> {
+    let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let mut direct_removes: BTreeSet<String> = BTreeSet::new();
+
+    for path in paths {
+        if let Some((first, rest)) = path.split_once('/') {
+            grouped
+                .entry(first.to_string())
+                .or_default()
+                .insert(rest.to_string());
+        } else {
+            direct_removes.insert(path.clone());
+        }
+    }
+
+    let mut tb = repo.treebuilder(Some(tree))?;
+
+    for name in &direct_removes {
+        let _ = tb.remove(name);
+    }
+
+    for (name, sub_paths) in &grouped {
+        if let Some(entry) = tree.get_name(name) {
+            if entry.kind() == Some(git2::ObjectType::Tree) {
+                let subtree = repo.find_tree(entry.id())?;
+                let new_oid = remove_subtrees(repo, &subtree, &sub_paths)?;
+                let new_tree = repo.find_tree(new_oid)?;
+                if new_tree.len() > 0 {
+                    tb.insert(name, new_oid, 0o040000)?;
+                } else {
+                    let _ = tb.remove(name);
+                }
+            }
+        }
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Merge a Dir structure into an existing tree.
+/// Existing entries not present in `dir` are preserved.
+/// Entries in `dir` overwrite existing entries with the same name.
+fn merge_dir_into_tree(
+    repo: &git2::Repository,
+    dir: &Dir,
+    existing: &git2::Tree,
+) -> Result<git2::Oid> {
+    let mut tb = repo.treebuilder(Some(existing))?;
+
+    for (name, content) in &dir.files {
+        let blob_oid = repo.blob(content)?;
+        tb.insert(name, blob_oid, 0o100644)?;
+    }
+
+    for (name, child_dir) in &dir.dirs {
+        let existing_child = existing
+            .get_name(name)
+            .filter(|e| e.kind() == Some(git2::ObjectType::Tree))
+            .and_then(|e| repo.find_tree(e.id()).ok());
+
+        let child_oid = if let Some(ref existing_child) = existing_child {
+            merge_dir_into_tree(repo, child_dir, existing_child)?
+        } else {
+            build_dir(repo, child_dir)?
+        };
+        tb.insert(name, child_oid, 0o040000)?;
+    }
+
+    Ok(tb.write()?)
 }
 
 /// Prune a serialized tree by dropping entries older than the cutoff.

@@ -10,7 +10,23 @@
       "Bash(grep -r transcript /Users/schacon/projects/gmeta --exclude-dir=target --exclude-dir=.git --exclude=*.lock)",
       "Bash(chmod:*)",
       "Bash(echo \"exit: $?\")",
-      "Bash(grep -r \"eprintln\\\\|println\\\\|verbose\\\\|debug\" /Users/schacon/projects/gmeta/src/commands/*.rs)"
+      "Bash(grep -r \"eprintln\\\\|println\\\\|verbose\\\\|debug\" /Users/schacon/projects/gmeta/src/commands/*.rs)",
+      "Bash(for sha:*)",
+      "Bash(do echo:*)",
+      "Bash(git show:*)",
+      "Bash(done)",
+      "Bash(find ~/.claude/projects -name *.jsonl -type f)",
+      "Bash(find ~/.claude/projects -name *.jsonl -type f 2)",
+      "Bash(/dev/null -exec ls -lh {})",
+      "Bash(sort -k2)",
+      "Bash(find ~/.claude -maxdepth 1 -name *.jsonl -o -name *.json)",
+      "Bash(find ~/.claude -name *.jsonl -type f)",
+      "Bash(find ~/.claude -name *.jsonl -type f -print0)",
+      "Bash(xargs -0 du -ch)",
+      "Bash(find ~/.claude/projects -maxdepth 1 -type d -name -Users-*)",
+      "Bash(sort -k5 -hr)",
+      "Bash(grep:*)",
+      "Bash(git -C /Users/schacon/projects/gmeta log --oneline -- docs/example-serialize.html)"
     ]
   }
 }

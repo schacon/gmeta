@@ -178,6 +178,13 @@ pub enum Commands {
         commits: usize,
     },
 
+    /// Benchmark serialize performance: insert random keys and serialize across multiple rounds
+    SerializeBench {
+        /// Number of insert+serialize rounds (default: 10)
+        #[arg(long, default_value = "10")]
+        rounds: usize,
+    },
+
     /// Get or set project configuration (meta:* keys)
     Config {
         /// List all config values

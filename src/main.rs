@@ -74,6 +74,8 @@ fn main() -> Result<()> {
 
         Commands::HistoryWalker { commits } => commands::bench::history_walker::run(commits),
 
+        Commands::SerializeBench { rounds } => commands::bench::serialize_bench::run(rounds),
+
         Commands::Config {
             list,
             unset,
