@@ -94,5 +94,7 @@ fn main() -> Result<()> {
         Commands::Prune { dry_run } => commands::prune::run(dry_run),
 
         Commands::Teardown => commands::teardown::run(),
+
+        Commands::Watch { agent, debounce } => commands::watch::run(&agent, debounce),
     }
 }

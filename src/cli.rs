@@ -228,4 +228,15 @@ pub enum Commands {
 
     /// Remove the gmeta database and all meta refs
     Teardown,
+
+    /// Watch agent transcripts and auto-attach to commits
+    Watch {
+        /// Agent to watch (default: claude)
+        #[arg(long, default_value = "claude")]
+        agent: String,
+
+        /// Seconds of inactivity before considering agent stopped
+        #[arg(long, default_value = "30")]
+        debounce: u64,
+    },
 }

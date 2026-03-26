@@ -1,9 +1,9 @@
 ## Notes
 
-- delete specific list entries (by value?)
 - serialize filter rules
 - path based pruning rules (path no longer exists, etc)
 - remote management and pushspecs
+- serialize check for keys (high entropy)
 - run initial blobless fetch and first tree materialization
 - namespaces (local, shared, internal, etc - push targets (none, remote)
   - materialize targets too
