@@ -1,0 +1,980 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>gmeta Serialized Commit/Tree Structure</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: "SF Mono", "Menlo", "Consolas", monospace;
+        background: #0d1117;
+        color: #c9d1d9;
+        padding: 32px;
+        min-height: 100vh;
+      }
+      h1 {
+        font-size: 18px;
+        color: #58a6ff;
+        margin-bottom: 8px;
+      }
+      .subtitle {
+        font-size: 13px;
+        color: #8b949e;
+        margin-bottom: 32px;
+      }
+      .columns {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+      }
+      .column {
+        flex: 0 0 auto;
+        min-width: 260px;
+      }
+      .column-header {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        color: #8b949e;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #21262d;
+        margin-bottom: 12px;
+      }
+
+      /* Commit list with connecting line */
+      .commit-list {
+        position: relative;
+      }
+      .commit-list::before {
+        content: "";
+        position: absolute;
+        left: 18px;
+        top: 18px;
+        bottom: 18px;
+        width: 2px;
+        background: #30363d;
+        z-index: 0;
+      }
+      .commit-wrapper {
+        position: relative;
+        z-index: 1;
+      }
+      .commit-dot {
+        position: absolute;
+        left: 12px;
+        top: 14px;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: #0d1117;
+        border: 2px solid #3fb950;
+        z-index: 2;
+      }
+      .commit-wrapper .obj {
+        margin-left: 36px;
+      }
+
+      /* Object boxes */
+      .obj {
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        margin-bottom: 12px;
+        overflow: hidden;
+        transition: border-color 0.15s;
+      }
+      .obj.active {
+        border-color: #58a6ff;
+      }
+      .obj-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #161b22;
+        cursor: pointer;
+        user-select: none;
+      }
+      .obj-header:hover {
+        background: #1c2128;
+      }
+      .obj-type {
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        flex-shrink: 0;
+      }
+      .type-commit {
+        background: #1f3a1f;
+        color: #3fb950;
+      }
+      .type-tree {
+        background: #1a2a3f;
+        color: #58a6ff;
+      }
+      .type-blob {
+        background: #3d2a1a;
+        color: #d29922;
+      }
+      .obj-sha {
+        font-size: 12px;
+        color: #8b949e;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .obj-body {
+        padding: 10px 12px;
+        font-size: 12px;
+        line-height: 1.7;
+      }
+      .obj-body .row {
+        display: flex;
+        gap: 8px;
+      }
+      .obj-body .label {
+        color: #8b949e;
+        min-width: 60px;
+        flex-shrink: 0;
+      }
+      .obj-body .val {
+        color: #c9d1d9;
+      }
+      .obj-body .link {
+        color: #58a6ff;
+        cursor: pointer;
+        text-decoration: underline;
+        text-decoration-style: dotted;
+        text-underline-offset: 3px;
+      }
+      .obj-body .link:hover {
+        color: #79c0ff;
+      }
+
+      /* File tree */
+      .file-tree {
+        font-size: 12px;
+        line-height: 1.3;
+        user-select: none;
+      }
+      .tree-row {
+        display: flex;
+        align-items: center;
+        padding: 3px 6px;
+        border-radius: 3px;
+        white-space: nowrap;
+      }
+      .tree-row.clickable {
+        cursor: pointer;
+      }
+      .tree-row.clickable:hover {
+        background: #1c2128;
+      }
+      .tree-row.selected {
+        background: #1a2a3f;
+      }
+      .tree-row.collapsed .tree-icon {
+        transform: rotate(0deg);
+      }
+      .tree-row.expanded .tree-icon {
+        transform: rotate(90deg);
+      }
+      .tree-children.hidden {
+        display: none;
+      }
+      .tree-indent {
+        display: inline-block;
+        width: 20px;
+        flex-shrink: 0;
+      }
+      .tree-guide {
+        display: inline-block;
+        width: 20px;
+        flex-shrink: 0;
+        color: #21262d;
+        text-align: center;
+      }
+      .tree-icon {
+        width: 18px;
+        flex-shrink: 0;
+        text-align: center;
+        font-size: 11px;
+        transition: transform 0.12s ease;
+        display: inline-block;
+      }
+      .tree-name {
+        margin-left: 4px;
+        color: #c9d1d9;
+      }
+      .tree-name.is-reserved {
+        color: #d29922;
+      }
+      .tree-name.is-dir {
+        color: #58a6ff;
+      }
+      .tree-sha {
+        margin-left: auto;
+        padding-left: 16px;
+        color: #484f58;
+        font-size: 11px;
+      }
+      .tree-type-tag {
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 1px 5px;
+        border-radius: 3px;
+        margin-left: 8px;
+        flex-shrink: 0;
+      }
+      .tag-string {
+        background: #3d2a1a;
+        color: #d29922;
+      }
+      .tag-list {
+        background: #2a1a3d;
+        color: #bc8cff;
+      }
+      .tag-set {
+        background: #1a3d2a;
+        color: #3fb950;
+      }
+
+      /* Blob content */
+      .blob-content {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 16px;
+        font-size: 12px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        min-height: 60px;
+      }
+      .blob-content .val-type {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        margin-bottom: 8px;
+        display: inline-block;
+      }
+      .vt-string {
+        background: #3d2a1a;
+        color: #d29922;
+      }
+      .vt-list {
+        background: #2a1a3d;
+        color: #bc8cff;
+      }
+      .vt-set {
+        background: #1a3d2a;
+        color: #3fb950;
+      }
+
+      .blob-path {
+        font-size: 11px;
+        color: #8b949e;
+        margin-bottom: 12px;
+        word-break: break-all;
+      }
+
+      /* Arrows */
+      .arrow-area {
+        flex: 0 0 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-top: 40px;
+      }
+
+      /* Legend */
+      .legend {
+        margin-top: 32px;
+        padding-top: 16px;
+        border-top: 1px solid #21262d;
+        display: flex;
+        gap: 24px;
+        flex-wrap: wrap;
+        font-size: 12px;
+      }
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .legend-swatch {
+        width: 10px;
+        height: 10px;
+        border-radius: 2px;
+      }
+
+      .scope-separator {
+        border-top: 1px solid #21262d;
+        margin: 6px 0;
+      }
+      .scope-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: #484f58;
+        padding: 4px 6px 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>gmeta Serialized Structure</h1>
+    <p class="subtitle">
+      Click a commit to see its full tree. Click blob entries (leaf nodes) to
+      view their contents.
+    </p>
+
+    <div class="columns" id="app">
+      <!-- Commits column -->
+      <div class="column" id="col-commits" style="min-width: 280px">
+        <div class="column-header">Commits (refs/meta/local)</div>
+      </div>
+
+      <div class="arrow-area">
+        <svg width="40" height="20">
+          <line
+            x1="0"
+            y1="10"
+            x2="34"
+            y2="10"
+            stroke="#30363d"
+            stroke-width="1.5"
+          />
+          <polygon points="34,5 40,10 34,15" fill="#30363d" />
+        </svg>
+      </div>
+
+      <!-- Tree column -->
+      <div class="column" id="col-tree" style="min-width: 440px">
+        <div class="column-header">Tree</div>
+        <div id="tree-view" style="color: #484f58; font-size: 13px">
+          Select a commit to view its tree
+        </div>
+      </div>
+
+      <div class="arrow-area">
+        <svg width="40" height="20">
+          <line
+            x1="0"
+            y1="10"
+            x2="34"
+            y2="10"
+            stroke="#30363d"
+            stroke-width="1.5"
+          />
+          <polygon points="34,5 40,10 34,15" fill="#30363d" />
+        </svg>
+      </div>
+
+      <!-- Blob column -->
+      <div class="column" id="col-blob" style="min-width: 340px">
+        <div class="column-header">Blob / Value</div>
+        <div id="blob-view" style="color: #484f58; font-size: 13px">
+          Click a blob entry to view its content
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-swatch" style="background: #3fb950"></div>
+        commit
+      </div>
+      <div class="legend-item">
+        <div class="legend-swatch" style="background: #58a6ff"></div>
+        tree (directory)
+      </div>
+      <div class="legend-item">
+        <div class="legend-swatch" style="background: #d29922"></div>
+        blob (string)
+      </div>
+      <div class="legend-item">
+        <div class="legend-swatch" style="background: #bc8cff"></div>
+        blob (list entry)
+      </div>
+      <div class="legend-item">
+        <div class="legend-swatch" style="background: #3fb950"></div>
+        blob (set member)
+      </div>
+    </div>
+
+    <script>
+      // ── Fake SHA helper ──
+      function sha(s) {
+        let h = 0x811c9dc5;
+        for (let i = 0; i < s.length; i++) {
+          h ^= s.charCodeAt(i);
+          h = Math.imul(h, 0x01000193);
+        }
+        const hex = (h >>> 0).toString(16).padStart(8, "0");
+        return (
+          hex +
+          hex.slice(0, 4) +
+          hex.slice(2, 6) +
+          hex +
+          hex.slice(1, 5)
+        ).slice(0, 40);
+      }
+      function blobSha(content) {
+        return sha("blob:" + content);
+      }
+
+      // ── Data model as a nested structure ──
+      // Each node: { name, type: 'tree'|'blob', sha, children?, blobContent? }
+
+      const commitSha = "13a7d29cde8f8557b54fd6474f547a56822180ae";
+
+      const SET_MEMBERS = ["schacon", "aturing"];
+      const LIST_ENTRIES = [
+        {
+          id: "1711232450203-23c0f",
+          value: "Fix: null check on empty metadata",
+        },
+        { id: "1711232451890-a8e12", value: "Add: list merge strategy" },
+        { id: "1711232467001-f91bb", value: "Update: serialization docs" },
+      ];
+
+      function buildFullTree() {
+        return {
+          name: "/",
+          sha: sha("root-tree"),
+          type: "tree",
+          children: [
+            {
+              name: "commit",
+              sha: sha("commit-dir"),
+              type: "tree",
+              scope: "commit",
+              children: [
+                {
+                  name: commitSha.slice(0, 2),
+                  sha: sha("commit-fanout"),
+                  type: "tree",
+                  children: [
+                    {
+                      name: commitSha,
+                      sha: sha("commit-target"),
+                      type: "tree",
+                      truncName: commitSha.slice(0, 16) + "...",
+                      children: [
+                        {
+                          name: "agent",
+                          sha: sha("commit-agent"),
+                          type: "tree",
+                          children: [
+                            {
+                              name: "model",
+                              sha: sha("commit-agent-model"),
+                              type: "tree",
+                              children: [
+                                {
+                                  name: "__value",
+                                  sha: blobSha("claude-opus-4.6"),
+                                  type: "blob",
+                                  blobContent: {
+                                    type: "string",
+                                    value: "claude-opus-4.6",
+                                  },
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              name: "path",
+              sha: sha("path-dir"),
+              type: "tree",
+              scope: "path",
+              children: [
+                {
+                  name: "src",
+                  sha: sha("path-src"),
+                  type: "tree",
+                  children: [
+                    {
+                      name: "metrics",
+                      sha: sha("path-src-metrics"),
+                      type: "tree",
+                      children: [
+                        {
+                          name: "__target__",
+                          sha: sha("path-target"),
+                          type: "tree",
+                          children: [
+                            {
+                              name: "owners",
+                              sha: sha("path-owners"),
+                              type: "tree",
+                              children: [
+                                {
+                                  name: "__set",
+                                  sha: sha("path-owners-set"),
+                                  type: "tree",
+                                  children: SET_MEMBERS.map((m) => ({
+                                    name: sha(m).slice(0, 8),
+                                    sha: blobSha(m),
+                                    type: "blob",
+                                    blobContent: { type: "set", value: m },
+                                  })),
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              name: "branch",
+              sha: sha("branch-dir"),
+              type: "tree",
+              scope: "branch",
+              children: [
+                {
+                  name: sha("sc-feature-1").slice(0, 2),
+                  sha: sha("branch-fanout"),
+                  type: "tree",
+                  children: [
+                    {
+                      name: "sc-feature-1",
+                      sha: sha("branch-target"),
+                      type: "tree",
+                      children: [
+                        {
+                          name: "review",
+                          sha: sha("branch-review"),
+                          type: "tree",
+                          children: [
+                            {
+                              name: "comments",
+                              sha: sha("branch-review-comments"),
+                              type: "tree",
+                              children: [
+                                {
+                                  name: "__list",
+                                  sha: sha("branch-list"),
+                                  type: "tree",
+                                  children: LIST_ENTRIES.map((e) => ({
+                                    name: e.id,
+                                    sha: blobSha(e.value),
+                                    type: "blob",
+                                    blobContent: {
+                                      type: "list",
+                                      value: e.value,
+                                      id: e.id,
+                                    },
+                                  })),
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              name: "project",
+              sha: sha("project-dir"),
+              type: "tree",
+              scope: "project",
+              children: [
+                {
+                  name: "config",
+                  sha: sha("project-config"),
+                  type: "tree",
+                  children: [
+                    {
+                      name: "default-branch",
+                      sha: sha("project-default-branch"),
+                      type: "tree",
+                      children: [
+                        {
+                          name: "__value",
+                          sha: blobSha("main"),
+                          type: "blob",
+                          blobContent: { type: "string", value: "main" },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        };
+      }
+
+      // Smaller tree for commit 1
+      function buildPrevTree() {
+        return {
+          name: "/",
+          sha: sha("prev-root"),
+          type: "tree",
+          children: [
+            {
+              name: "commit",
+              sha: sha("commit-dir"),
+              type: "tree",
+              scope: "commit",
+              children: [
+                {
+                  name: commitSha.slice(0, 2),
+                  sha: sha("commit-fanout"),
+                  type: "tree",
+                  children: [
+                    {
+                      name: commitSha,
+                      sha: sha("commit-target"),
+                      type: "tree",
+                      truncName: commitSha.slice(0, 16) + "...",
+                      children: [
+                        {
+                          name: "agent",
+                          sha: sha("commit-agent"),
+                          type: "tree",
+                          children: [
+                            {
+                              name: "model",
+                              sha: sha("commit-agent-model"),
+                              type: "tree",
+                              children: [
+                                {
+                                  name: "__value",
+                                  sha: blobSha("claude-opus-4.6"),
+                                  type: "blob",
+                                  blobContent: {
+                                    type: "string",
+                                    value: "claude-opus-4.6",
+                                  },
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              name: "project",
+              sha: sha("project-dir"),
+              type: "tree",
+              scope: "project",
+              children: [
+                {
+                  name: "config",
+                  sha: sha("project-config"),
+                  type: "tree",
+                  children: [
+                    {
+                      name: "default-branch",
+                      sha: sha("project-default-branch"),
+                      type: "tree",
+                      children: [
+                        {
+                          name: "__value",
+                          sha: blobSha("main"),
+                          type: "blob",
+                          blobContent: { type: "string", value: "main" },
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        };
+      }
+
+      // ── Commits ──
+      const commits = [
+        {
+          sha: sha("commit-2"),
+          parentSha: sha("commit-1"),
+          treeSha: sha("root-tree"),
+          tree: buildFullTree(),
+          message: "Add owners set, review comments",
+          date: "2026-03-26 09:14:02",
+        },
+        {
+          sha: sha("commit-1"),
+          parentSha: null,
+          treeSha: sha("prev-root"),
+          tree: buildPrevTree(),
+          message: "Initial metadata commit",
+          date: "2026-03-25 14:30:11",
+        },
+      ];
+
+      // ── Rendering ──
+      const colCommits = document.getElementById("col-commits");
+      const treeView = document.getElementById("tree-view");
+      const blobView = document.getElementById("blob-view");
+
+      let activeCommitEl = null;
+      let selectedRowEl = null;
+
+      function renderCommits() {
+        const list = document.createElement("div");
+        list.className = "commit-list";
+
+        commits.forEach((c) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "commit-wrapper";
+          wrapper.innerHTML = `<div class="commit-dot"></div>`;
+
+          const el = document.createElement("div");
+          el.className = "obj";
+          el.innerHTML = `
+      <div class="obj-header">
+        <span class="obj-type type-commit">commit</span>
+        <span class="obj-sha">${c.sha.slice(0, 12)}</span>
+      </div>
+      <div class="obj-body">
+        <div class="row"><span class="label">date</span><span class="val">${c.date}</span></div>
+        <div class="row"><span class="label">tree</span><span class="val link">${c.treeSha.slice(0, 10)}...</span></div>
+        ${c.parentSha ? `<div class="row"><span class="label">parent</span><span class="val">${c.parentSha.slice(0, 10)}...</span></div>` : ""}
+        <div class="row"><span class="label">desc</span><span class="val">${c.message}</span></div>
+      </div>`;
+          const clickHandler = () => selectCommit(el, c);
+          el.querySelector(".obj-header").addEventListener(
+            "click",
+            clickHandler,
+          );
+          el.querySelector(".link").addEventListener("click", (e) => {
+            e.stopPropagation();
+            clickHandler();
+          });
+          wrapper.appendChild(el);
+          list.appendChild(wrapper);
+        });
+
+        colCommits.appendChild(list);
+      }
+
+      function selectCommit(el, commit) {
+        if (activeCommitEl) activeCommitEl.classList.remove("active");
+        el.classList.add("active");
+        activeCommitEl = el;
+        selectedRowEl = null;
+        renderTree(commit.tree);
+        blobView.innerHTML =
+          '<span style="color:#484f58">Click a blob entry to view its content</span>';
+      }
+
+      function renderTree(root) {
+        const container = document.createElement("div");
+        container.className = "file-tree";
+
+        let lastScope = { val: null };
+        buildTreeDOM(root.children, 0, [], container, null, lastScope);
+
+        treeView.innerHTML = "";
+        treeView.appendChild(container);
+      }
+
+      function buildTreeDOM(
+        children,
+        depth,
+        pathParts,
+        parentEl,
+        currentScope,
+        lastScope,
+      ) {
+        children.forEach((node) => {
+          const scope = node.scope || currentScope;
+          const isBlob = node.type === "blob";
+          const isReserved = node.name.startsWith("__");
+          const displayName = node.truncName || node.name;
+          const path = [...pathParts, displayName];
+          const hasChildren =
+            !isBlob && node.children && node.children.length > 0;
+
+          // Scope separator
+          if (scope && scope !== lastScope.val) {
+            if (lastScope.val !== null) {
+              const sep = document.createElement("div");
+              sep.className = "scope-separator";
+              parentEl.appendChild(sep);
+            }
+            const scopeLabels = {
+              commit: "Commit scope (string)",
+              path: "Path scope (set)",
+              branch: "Branch scope (list)",
+              project: "Project scope (string)",
+            };
+            const label = document.createElement("div");
+            label.className = "scope-label";
+            label.textContent = scopeLabels[scope] || scope;
+            parentEl.appendChild(label);
+            lastScope.val = scope;
+          }
+
+          let nameClass = "";
+          if (isReserved) nameClass = "is-reserved";
+          else if (!isBlob) nameClass = "is-dir";
+
+          const iconChar = isBlob ? "\u25CB" : "\u25B8";
+          const iconColor = isBlob
+            ? node.blobContent?.type === "set"
+              ? "#3fb950"
+              : node.blobContent?.type === "list"
+                ? "#bc8cff"
+                : "#d29922"
+            : "#58a6ff";
+
+          // Row element
+          const row = document.createElement("div");
+          row.className =
+            "tree-row" +
+            (isBlob ? " clickable" : " clickable") +
+            (hasChildren ? " expanded" : "");
+
+          for (let i = 0; i < depth; i++) {
+            const indent = document.createElement("span");
+            indent.className = "tree-indent";
+            row.appendChild(indent);
+          }
+
+          const iconSpan = document.createElement("span");
+          iconSpan.className = "tree-icon";
+          iconSpan.style.color = iconColor;
+          iconSpan.innerHTML = iconChar;
+          row.appendChild(iconSpan);
+
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "tree-name " + nameClass;
+          nameSpan.textContent = displayName;
+          row.appendChild(nameSpan);
+
+          if (isBlob && node.blobContent) {
+            const tag = document.createElement("span");
+            tag.className = "tree-type-tag tag-" + node.blobContent.type;
+            tag.textContent = node.blobContent.type;
+            row.appendChild(tag);
+          }
+
+          const shaSpan = document.createElement("span");
+          shaSpan.className = "tree-sha";
+          shaSpan.textContent = node.sha.slice(0, 8);
+          row.appendChild(shaSpan);
+
+          parentEl.appendChild(row);
+
+          // Children container
+          let childrenEl = null;
+          if (hasChildren) {
+            childrenEl = document.createElement("div");
+            childrenEl.className = "tree-children";
+            parentEl.appendChild(childrenEl);
+            buildTreeDOM(
+              node.children,
+              depth + 1,
+              path,
+              childrenEl,
+              scope,
+              lastScope,
+            );
+          }
+
+          // Click handler
+          if (isBlob) {
+            row.addEventListener("click", () => {
+              if (selectedRowEl) selectedRowEl.classList.remove("selected");
+              row.classList.add("selected");
+              selectedRowEl = row;
+              showBlob(node, path);
+            });
+          } else if (hasChildren) {
+            row.addEventListener("click", () => {
+              const isExpanded = row.classList.contains("expanded");
+              if (isExpanded) {
+                row.classList.remove("expanded");
+                row.classList.add("collapsed");
+                childrenEl.classList.add("hidden");
+              } else {
+                row.classList.remove("collapsed");
+                row.classList.add("expanded");
+                childrenEl.classList.remove("hidden");
+              }
+            });
+          }
+        });
+      }
+
+      function showBlob(node, pathParts) {
+        const bc = node.blobContent;
+        if (!bc) return;
+
+        const fullPath = pathParts.join("/");
+        let html = `<div class="blob-path">${escHtml(fullPath)}</div>`;
+
+        if (bc.type === "string") {
+          html += `<div class="blob-content">
+      <div class="val-type vt-string">string value</div>
+      <div style="margin-top:12px; font-size:15px; color:#e6edf3;">${escHtml(bc.value)}</div>
+      <div style="margin-top:16px; font-size:11px; color:#484f58;">blob sha: ${node.sha}</div>
+    </div>`;
+        } else if (bc.type === "set") {
+          html += `<div class="blob-content">
+      <div class="val-type vt-set">set member</div>
+      <div style="margin-top:12px; font-size:15px; color:#e6edf3;">${escHtml(bc.value)}</div>
+      <div style="margin-top:16px; font-size:11px; color:#484f58;">member key: ${sha(bc.value).slice(0, 8)}</div>
+      <div style="font-size:11px; color:#484f58;">blob sha: ${node.sha}</div>
+    </div>`;
+        } else if (bc.type === "list") {
+          html += `<div class="blob-content">
+      <div class="val-type vt-list">list entry</div>
+      <div style="margin-top:8px; font-size:11px; color:#8b949e;">entry-id: ${bc.id}</div>
+      <div style="margin-top:8px; font-size:15px; color:#e6edf3;">${escHtml(bc.value)}</div>
+      <div style="margin-top:16px; font-size:11px; color:#484f58;">blob sha: ${node.sha}</div>
+    </div>`;
+        }
+
+        blobView.innerHTML = html;
+      }
+
+      function escHtml(s) {
+        return s
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }
+
+      // ── Init ──
+      renderCommits();
+      // Auto-select first commit
+      const firstCommitEl = colCommits.querySelector(".commit-wrapper .obj");
+      if (firstCommitEl) selectCommit(firstCommitEl, commits[0]);
+    </script>
+  </body>
+</html>
