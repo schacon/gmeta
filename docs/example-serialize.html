@@ -180,6 +180,18 @@
       .tree-row.selected {
         background: #1a2a3f;
       }
+      .tree-row.role-target {
+        background: #1a1a2e;
+      }
+      .tree-row.role-target.clickable:hover {
+        background: #22223a;
+      }
+      .tree-row.role-key {
+        background: #1a2a1a;
+      }
+      .tree-row.role-key.clickable:hover {
+        background: #223a22;
+      }
       .tree-row.collapsed .tree-icon {
         transform: rotate(0deg);
       }
@@ -836,6 +848,36 @@
         treeView.appendChild(container);
       }
 
+      // Determine the role of a node: "target" (addressing/structural)
+      // or "key" (user-defined key segments)
+      function getNodeRole(scope, pathParts, nodeName, isBlob) {
+        // pathParts includes current node already
+        const depth = pathParts.length; // 1-based depth within scope
+        const isReserved = nodeName.startsWith("__");
+
+        if (isReserved) return null; // structural markers get no role
+        if (isBlob) return null; // leaf values get no role tint
+
+        if (scope === "project") {
+          // project itself is target (depth 1), rest is key
+          return depth <= 1 ? "target" : "key";
+        }
+        if (scope === "commit" || scope === "branch") {
+          // scope-name / fanout / target-value = target (depths 1-3)
+          // everything after = key
+          return depth <= 3 ? "target" : "key";
+        }
+        if (scope === "path") {
+          // Everything up to and including __target__ is target.
+          // Since __target__ itself is reserved (returns null above),
+          // we check: is __target__ in path yet?
+          const targetIdx = pathParts.indexOf("__target__");
+          if (targetIdx < 0) return "target"; // before __target__
+          return "key"; // after __target__
+        }
+        return null;
+      }
+
       function buildTreeDOM(
         children,
         depth,
@@ -844,7 +886,7 @@
         currentScope,
         lastScope,
       ) {
-        children.forEach((node) => {
+        children.forEach((node, nodeIdx) => {
           const scope = node.scope || currentScope;
           const isBlob = node.type === "blob";
           const isReserved = node.name.startsWith("__");
@@ -852,6 +894,10 @@
           const path = [...pathParts, displayName];
           const hasChildren =
             !isBlob && node.children && node.children.length > 0;
+
+          // Determine role within the scope path
+          const scopePath = path.slice(1); // strip root scope name for depth calc
+          const role = getNodeRole(scope, path, node.name, isBlob);
 
           // Scope separator
           if (scope && scope !== lastScope.val) {
@@ -887,11 +933,12 @@
             : "#58a6ff";
 
           // Row element
+          const roleClass = role ? " role-" + role : "";
           const row = document.createElement("div");
           row.className =
-            "tree-row" +
-            (isBlob ? " clickable" : " clickable") +
-            (hasChildren ? " expanded" : "");
+            "tree-row clickable" +
+            (hasChildren ? " expanded" : "") +
+            roleClass;
 
           for (let i = 0; i < depth; i++) {
             const indent = document.createElement("span");
@@ -946,7 +993,7 @@
               if (selectedRowEl) selectedRowEl.classList.remove("selected");
               row.classList.add("selected");
               selectedRowEl = row;
-              showBlob(node, path);
+              showBlob(node, path, nodeIdx, children.length);
             });
           } else if (hasChildren) {
             row.addEventListener("click", () => {
@@ -965,12 +1012,88 @@
         });
       }
 
-      function showBlob(node, pathParts) {
+      // Extract target and key from the tree path
+      function parseTargetAndKey(pathParts) {
+        const p = [...pathParts];
+        const targetType = p[0] || "";
+        let targetValue = "";
+        let rawSegments = [];
+
+        // Structural markers — not part of the key
+        const structural = new Set([
+          "__value",
+          "__set",
+          "__list",
+          "__target__",
+          "__tombstones",
+        ]);
+
+        if (targetType === "project") {
+          rawSegments = p.slice(1);
+        } else if (targetType === "commit") {
+          targetValue = p[2] || "";
+          rawSegments = p.slice(3);
+        } else if (targetType === "path") {
+          const tIdx = p.indexOf("__target__");
+          if (tIdx >= 0) {
+            targetValue = p.slice(1, tIdx).join("/");
+            rawSegments = p.slice(tIdx + 1);
+          }
+        } else if (targetType === "branch") {
+          targetValue = p[2] || "";
+          rawSegments = p.slice(3);
+        }
+
+        // Strip structural markers
+        const filtered = rawSegments.filter((s) => !structural.has(s));
+
+        // The last segment is the blob filename (entry-id for lists,
+        // member-hash for sets, __value for strings — already stripped).
+        // For list/set blobs the last remaining segment is the entry name,
+        // not a key part. We detect this: if the original path contained
+        // __list or __set, drop the last filtered segment.
+        const hasListOrSet =
+          rawSegments.includes("__list") || rawSegments.includes("__set");
+        const keyParts = hasListOrSet ? filtered.slice(0, -1) : filtered;
+
+        return {
+          targetType,
+          targetValue,
+          key: keyParts.join(":"),
+        };
+      }
+
+      function showBlob(node, pathParts, siblingIdx, siblingCount) {
         const bc = node.blobContent;
         if (!bc) return;
 
         const fullPath = pathParts.join("/");
+        const { targetType, targetValue, key } =
+          parseTargetAndKey(pathParts);
+
         let html = `<div class="blob-path">${escHtml(fullPath)}</div>`;
+
+        // Target + key info
+        const isCollection = bc.type === "set" || bc.type === "list";
+        const entrySuffix =
+          isCollection && siblingCount != null
+            ? ` <span style="color:#484f58;">[${siblingIdx + 1} of ${siblingCount}]</span>`
+            : "";
+
+        html += `<div style="margin-bottom:12px; font-size:12px; line-height:1.8;">`;
+        html += `<div><span style="color:#8b949e;">target:</span> <span style="color:#58a6ff;">${escHtml(targetType)}</span>`;
+        if (targetValue) {
+          const display =
+            targetValue.length > 24
+              ? targetValue.slice(0, 22) + "..."
+              : targetValue;
+          html += ` <span style="color:#c9d1d9;">${escHtml(display)}</span>`;
+        }
+        html += `</div>`;
+        if (key) {
+          html += `<div><span style="color:#8b949e;">key:</span> <span style="color:#e6edf3;">${escHtml(key)}</span>${entrySuffix}</div>`;
+        }
+        html += `</div>`;
 
         if (bc.type === "string") {
           html += `<div class="blob-content">
