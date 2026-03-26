@@ -1,4 +1,6 @@
+pub mod auto_prune;
 pub mod bench;
+pub mod config;
 pub mod get;
 pub mod import;
 pub mod list;

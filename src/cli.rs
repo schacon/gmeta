@@ -170,6 +170,23 @@ pub enum Commands {
         commits: usize,
     },
 
+    /// Get or set project configuration (meta:* keys)
+    Config {
+        /// List all config values
+        #[arg(long)]
+        list: bool,
+
+        /// Remove a config key
+        #[arg(long)]
+        unset: bool,
+
+        /// Config key (e.g. meta:prune:since)
+        key: Option<String>,
+
+        /// Config value (omit to read)
+        value: Option<String>,
+    },
+
     /// Remove the gmeta database and all meta refs
     Teardown,
 }

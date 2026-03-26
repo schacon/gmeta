@@ -2,6 +2,8 @@
 
 This document describes how to serialize metadata into Git primatives that can be transferred via normal Git remote protocols.
 
+[Interactive demo of the serialization format](../example-serialize.html)
+
 ## Commit model
 
 Serialization writes a Git commit whose tree contains the current shareable metadata state.

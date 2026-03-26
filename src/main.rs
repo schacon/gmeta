@@ -72,6 +72,13 @@ fn main() -> Result<()> {
 
         Commands::HistoryWalker { commits } => commands::bench::history_walker::run(commits),
 
+        Commands::Config {
+            list,
+            unset,
+            key,
+            value,
+        } => commands::config::run(list, unset, key.as_deref(), value.as_deref()),
+
         Commands::Teardown => commands::teardown::run(),
     }
 }

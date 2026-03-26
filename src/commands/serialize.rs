@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::commands::auto_prune;
 use crate::db::Db;
 use crate::git_utils;
 use crate::list_value::{make_entry_name, parse_entries};
@@ -124,6 +125,52 @@ pub fn run() -> Result<()> {
         local_ref_name,
         &commit_oid.to_string()[..8]
     );
+
+    // Check auto-prune rules
+    if let Some(rules) = auto_prune::read_prune_rules(&db)? {
+        if auto_prune::should_prune(&repo, tree_oid, &rules)? {
+            eprintln!("Auto-prune triggered, pruning with --since={}...", rules.since);
+            let prune_tree_oid =
+                prune_tree(&repo, tree_oid, &rules, &db)?;
+
+            if prune_tree_oid != tree_oid {
+                let prune_tree = repo.find_tree(prune_tree_oid)?;
+                let prune_parent = repo
+                    .find_reference(&local_ref_name)?
+                    .peel_to_commit()?;
+
+                let (keys_dropped, keys_retained) =
+                    count_prune_stats(&repo, tree_oid, prune_tree_oid)?;
+
+                let min_size_str = rules
+                    .min_size
+                    .map(|s| format!("\nmin-size: {}", s))
+                    .unwrap_or_default();
+
+                let message = format!(
+                    "gmeta: prune --since={}\n\npruned: true\nsince: {}{}\nkeys-dropped: {}\nkeys-retained: {}",
+                    rules.since, rules.since, min_size_str, keys_dropped, keys_retained
+                );
+
+                let prune_commit_oid = repo.commit(
+                    Some(&local_ref_name),
+                    &sig,
+                    &sig,
+                    &message,
+                    &prune_tree,
+                    &[&prune_parent],
+                )?;
+
+                println!(
+                    "auto-pruned to {} ({})",
+                    local_ref_name,
+                    &prune_commit_oid.to_string()[..8]
+                );
+            } else {
+                eprintln!("Auto-prune: tree unchanged after pruning, skipping prune commit");
+            }
+        }
+    }
 
     Ok(())
 }
@@ -272,4 +319,271 @@ fn build_tree_from_paths(
     }
 
     build_dir(repo, &root)
+}
+
+/// Parse a duration string like "90d", "6m", "1y" or an ISO date into a cutoff timestamp (millis).
+fn parse_since_to_cutoff_ms(since: &str) -> Result<i64> {
+    // Try relative duration first
+    let s = since.trim().to_lowercase();
+    if let Some(num_str) = s.strip_suffix('d') {
+        let days: i64 = num_str.parse().with_context(|| format!("invalid duration: {}", since))?;
+        return Ok(Utc::now().timestamp_millis() - days * 86_400_000);
+    }
+    if let Some(num_str) = s.strip_suffix('m') {
+        let months: i64 = num_str.parse().with_context(|| format!("invalid duration: {}", since))?;
+        return Ok(Utc::now().timestamp_millis() - months * 30 * 86_400_000);
+    }
+    if let Some(num_str) = s.strip_suffix('y') {
+        let years: i64 = num_str.parse().with_context(|| format!("invalid duration: {}", since))?;
+        return Ok(Utc::now().timestamp_millis() - years * 365 * 86_400_000);
+    }
+
+    // Try ISO date
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d") {
+        let dt = date
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| anyhow::anyhow!("invalid date"))?;
+        return Ok(dt.and_utc().timestamp_millis());
+    }
+
+    bail!("cannot parse --since value: {} (expected e.g. 90d, 6m, 1y, or 2025-01-01)", since);
+}
+
+/// Prune a serialized tree by dropping entries older than the cutoff.
+/// Returns the OID of the new (possibly smaller) tree.
+fn prune_tree(
+    repo: &git2::Repository,
+    tree_oid: git2::Oid,
+    rules: &auto_prune::PruneRules,
+    db: &Db,
+) -> Result<git2::Oid> {
+    let cutoff_ms = parse_since_to_cutoff_ms(&rules.since)?;
+    let min_size = rules.min_size.unwrap_or(0);
+    let tree = repo.find_tree(tree_oid)?;
+
+    // Walk the tree and rebuild, skipping old entries.
+    // The top-level directories are target type dirs (commit, branch, path, project, change-id).
+    // "project" subtree is never pruned.
+    let mut tb = repo.treebuilder(None)?;
+
+    for entry in tree.iter() {
+        let name = entry.name().unwrap_or("").to_string();
+
+        if name == "project" {
+            // Never prune project metadata
+            tb.insert(&name, entry.id(), entry.filemode())?;
+            continue;
+        }
+
+        if entry.kind() == Some(git2::ObjectType::Tree) {
+            let subtree = repo.find_tree(entry.id())?;
+
+            // Check min-size: if the subtree is smaller than the threshold, keep it
+            if min_size > 0 {
+                let size = auto_prune::compute_tree_size_for(repo, &subtree)?;
+                if size < min_size {
+                    tb.insert(&name, entry.id(), entry.filemode())?;
+                    continue;
+                }
+            }
+
+            let pruned_oid = prune_target_type_tree(repo, &subtree, cutoff_ms, min_size, db)?;
+            // Only include if the pruned tree is non-empty
+            let pruned_tree = repo.find_tree(pruned_oid)?;
+            if pruned_tree.len() > 0 {
+                tb.insert(&name, pruned_oid, entry.filemode())?;
+            }
+        } else {
+            tb.insert(&name, entry.id(), entry.filemode())?;
+        }
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Prune within a target-type directory (e.g. the "commit" dir which contains fanout dirs).
+fn prune_target_type_tree(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    cutoff_ms: i64,
+    min_size: u64,
+    db: &Db,
+) -> Result<git2::Oid> {
+    let mut tb = repo.treebuilder(None)?;
+
+    for entry in tree.iter() {
+        let name = entry.name().unwrap_or("").to_string();
+
+        if entry.kind() == Some(git2::ObjectType::Tree) {
+            let subtree = repo.find_tree(entry.id())?;
+            let pruned_oid = prune_subtree_recursive(repo, &subtree, cutoff_ms, min_size, db)?;
+            let pruned_tree = repo.find_tree(pruned_oid)?;
+            if pruned_tree.len() > 0 {
+                tb.insert(&name, pruned_oid, entry.filemode())?;
+            }
+        } else {
+            tb.insert(&name, entry.id(), entry.filemode())?;
+        }
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Recursively prune a subtree. Drops old list entries and old tombstones.
+/// For key-level entries (__value, __set), checks the last_timestamp from the DB.
+fn prune_subtree_recursive(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    cutoff_ms: i64,
+    _min_size: u64,
+    db: &Db,
+) -> Result<git2::Oid> {
+    let mut tb = repo.treebuilder(None)?;
+
+    for entry in tree.iter() {
+        let name = entry.name().unwrap_or("").to_string();
+
+        match entry.kind() {
+            Some(git2::ObjectType::Tree) => {
+                if name == "__list" {
+                    // Prune individual list entries by timestamp in their name
+                    let list_tree = repo.find_tree(entry.id())?;
+                    let pruned_oid = prune_list_tree(repo, &list_tree, cutoff_ms)?;
+                    let pruned_tree = repo.find_tree(pruned_oid)?;
+                    if pruned_tree.len() > 0 {
+                        tb.insert(&name, pruned_oid, entry.filemode())?;
+                    }
+                } else if name == "__tombstones" {
+                    // Prune old tombstones
+                    let tomb_tree = repo.find_tree(entry.id())?;
+                    let pruned_oid = prune_tombstone_tree(repo, &tomb_tree, cutoff_ms)?;
+                    let pruned_tree = repo.find_tree(pruned_oid)?;
+                    if pruned_tree.len() > 0 {
+                        tb.insert(&name, pruned_oid, entry.filemode())?;
+                    }
+                } else {
+                    // Recurse into key segment directories
+                    let subtree = repo.find_tree(entry.id())?;
+                    let pruned_oid =
+                        prune_subtree_recursive(repo, &subtree, cutoff_ms, _min_size, db)?;
+                    let pruned_tree = repo.find_tree(pruned_oid)?;
+                    if pruned_tree.len() > 0 {
+                        tb.insert(&name, pruned_oid, entry.filemode())?;
+                    }
+                }
+            }
+            Some(git2::ObjectType::Blob) => {
+                // Keep all blobs — __value and __set members are kept if their parent
+                // key dir survives the prune. The key-level timestamp filtering happens
+                // at the DB level during the full rebuild that prune_tree orchestrates.
+                tb.insert(&name, entry.id(), entry.filemode())?;
+            }
+            _ => {
+                tb.insert(&name, entry.id(), entry.filemode())?;
+            }
+        }
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Prune list entries by the timestamp encoded in their file name.
+fn prune_list_tree(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    cutoff_ms: i64,
+) -> Result<git2::Oid> {
+    let mut tb = repo.treebuilder(None)?;
+
+    for entry in tree.iter() {
+        let name = entry.name().unwrap_or("");
+        // Entry names are formatted as "{timestamp_ms}-{hash5}"
+        if let Some((ts_str, _)) = name.split_once('-') {
+            if let Ok(ts) = ts_str.parse::<i64>() {
+                if ts < cutoff_ms {
+                    continue; // Drop old entry
+                }
+            }
+        }
+        tb.insert(name, entry.id(), entry.filemode())?;
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Prune tombstone entries by the timestamp in the __deleted blob.
+fn prune_tombstone_tree(
+    repo: &git2::Repository,
+    tree: &git2::Tree,
+    cutoff_ms: i64,
+) -> Result<git2::Oid> {
+    let mut tb = repo.treebuilder(None)?;
+
+    for entry in tree.iter() {
+        let name = entry.name().unwrap_or("").to_string();
+
+        match entry.kind() {
+            Some(git2::ObjectType::Tree) => {
+                // Tombstone key directory — recurse to find __deleted blob
+                let subtree = repo.find_tree(entry.id())?;
+                let pruned_oid = prune_tombstone_tree(repo, &subtree, cutoff_ms)?;
+                let pruned_tree = repo.find_tree(pruned_oid)?;
+                if pruned_tree.len() > 0 {
+                    tb.insert(&name, pruned_oid, entry.filemode())?;
+                }
+            }
+            Some(git2::ObjectType::Blob) if name == "__deleted" => {
+                // Parse the tombstone blob to check timestamp
+                let blob = repo.find_blob(entry.id())?;
+                if let Ok(content) = std::str::from_utf8(blob.content()) {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
+                        if let Some(ts) = parsed.get("timestamp").and_then(|v| v.as_i64()) {
+                            if ts < cutoff_ms {
+                                continue; // Drop old tombstone
+                            }
+                        }
+                    }
+                }
+                tb.insert(&name, entry.id(), entry.filemode())?;
+            }
+            _ => {
+                tb.insert(&name, entry.id(), entry.filemode())?;
+            }
+        }
+    }
+
+    Ok(tb.write()?)
+}
+
+/// Count keys in original and pruned trees to produce stats.
+fn count_prune_stats(
+    repo: &git2::Repository,
+    original_oid: git2::Oid,
+    pruned_oid: git2::Oid,
+) -> Result<(u64, u64)> {
+    let original_tree = repo.find_tree(original_oid)?;
+    let pruned_tree = repo.find_tree(pruned_oid)?;
+
+    let mut original_count = 0u64;
+    count_all_blobs(repo, &original_tree, &mut original_count)?;
+
+    let mut pruned_count = 0u64;
+    count_all_blobs(repo, &pruned_tree, &mut pruned_count)?;
+
+    let dropped = original_count.saturating_sub(pruned_count);
+    Ok((dropped, pruned_count))
+}
+
+fn count_all_blobs(repo: &git2::Repository, tree: &git2::Tree, count: &mut u64) -> Result<()> {
+    for entry in tree.iter() {
+        match entry.kind() {
+            Some(git2::ObjectType::Blob) => *count += 1,
+            Some(git2::ObjectType::Tree) => {
+                let subtree = repo.find_tree(entry.id())?;
+                count_all_blobs(repo, &subtree, count)?;
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }

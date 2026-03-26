@@ -46,6 +46,7 @@
         </header>
         <article class="doc-content">
           <p>This document describes how to serialize metadata into Git primatives that can be transferred via normal Git remote protocols.</p>
+<p><a href="../example-serialize.html">Interactive demo of the serialization format</a></p>
 <h2 id="commit-model">Commit model</h2>
 <p>Serialization writes a Git commit whose tree contains the current shareable metadata state.</p>
 <ul><li>tree pointer</li><li>author identity</li><li>author date / commit date</li><li>ancestry for incremental materialization and merging</li></ul>

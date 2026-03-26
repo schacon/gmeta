@@ -8,7 +8,8 @@
       "Bash(but:*)",
       "Bash(python3:*)",
       "Bash(grep -r transcript /Users/schacon/projects/gmeta --exclude-dir=target --exclude-dir=.git --exclude=*.lock)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }
