@@ -46,11 +46,13 @@ fn main() -> Result<()> {
 
         Commands::SetRm { target, key, value } => commands::set::run_rm(&target, &key, &value),
 
-        Commands::Serialize => commands::serialize::run(),
+        Commands::Serialize { verbose } => commands::serialize::run(verbose),
 
-        Commands::Materialize { remote, dry_run } => {
-            commands::materialize::run(remote.as_deref(), dry_run)
-        }
+        Commands::Materialize {
+            remote,
+            dry_run,
+            verbose,
+        } => commands::materialize::run(remote.as_deref(), dry_run, verbose),
 
         Commands::Import {
             format,

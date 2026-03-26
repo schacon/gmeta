@@ -108,7 +108,11 @@ pub enum Commands {
     },
 
     /// Serialize metadata to Git ref
-    Serialize,
+    Serialize {
+        /// Show detailed information about serialization decisions
+        #[arg(short = 'v', long)]
+        verbose: bool,
+    },
 
     /// Materialize remote metadata into local SQLite
     Materialize {
@@ -118,6 +122,10 @@ pub enum Commands {
         /// Show what would be changed without updating SQLite or refs
         #[arg(long = "dry-run")]
         dry_run: bool,
+
+        /// Show detailed information about merge decisions and tree parsing
+        #[arg(short = 'v', long)]
+        verbose: bool,
     },
 
     /// Import metadata from another format

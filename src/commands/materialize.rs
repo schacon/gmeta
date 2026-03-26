@@ -109,13 +109,25 @@ enum MergeState {
     Tombstone(TombstoneEntry),
 }
 
-pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
+pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     let repo = git_utils::discover_repo()?;
     let db_path = git_utils::db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     let ns = git_utils::get_namespace(&repo)?;
     let local_ref_name = git_utils::local_ref(&repo)?;
+
+    if verbose {
+        eprintln!("[verbose] namespace: {}", ns);
+        eprintln!("[verbose] local ref: {}", local_ref_name);
+        eprintln!(
+            "[verbose] searching for remote refs matching: {}",
+            match remote {
+                Some(r) => format!("refs/{}/{}", ns, r),
+                None => format!("refs/{}/*/", ns),
+            }
+        );
+    }
 
     // Find remote refs to materialize
     let remote_refs = find_remote_refs(&repo, &ns, remote)?;
@@ -125,13 +137,52 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
         return Ok(());
     }
 
+    if verbose {
+        eprintln!("[verbose] found {} remote ref(s):", remote_refs.len());
+        for (ref_name, oid) in &remote_refs {
+            eprintln!("  {} -> {}", ref_name, &oid.to_string()[..8]);
+        }
+    }
+
     let email = git_utils::get_email(&repo)?;
     let now = Utc::now().timestamp_millis();
 
     for (ref_name, remote_oid) in &remote_refs {
+        if verbose {
+            eprintln!("\n[verbose] === processing {} ===", ref_name);
+        }
+
         let remote_commit = repo.find_commit(*remote_oid)?;
         let remote_tree = remote_commit.tree()?;
         let remote_entries = parse_tree(&repo, &remote_tree, "")?;
+
+        if verbose {
+            eprintln!(
+                "[verbose] remote tree: {} values, {} tombstones, {} set tombstones",
+                remote_entries.values.len(),
+                remote_entries.tombstones.len(),
+                remote_entries.set_tombstones.len()
+            );
+            for ((tt, tv, k), val) in &remote_entries.values {
+                let target = format_target_for_display(tt, tv);
+                let val_desc = match val {
+                    TreeValue::String(s) => {
+                        if s.len() > 50 {
+                            format!("string ({} bytes)", s.len())
+                        } else {
+                            format!("string = {}", s)
+                        }
+                    }
+                    TreeValue::List(l) => format!("list ({} entries)", l.len()),
+                    TreeValue::Set(s) => format!("set ({} members)", s.len()),
+                };
+                eprintln!("  {} {} -> {}", target, k, val_desc);
+            }
+            for ((tt, tv, k), tomb) in &remote_entries.tombstones {
+                let target = format_target_for_display(tt, tv);
+                eprintln!("  {} {} -> tombstone [ts={}, by={}]", target, k, tomb.timestamp, tomb.email);
+            }
+        }
 
         // Get local commit (if any)
         let local_commit = repo
@@ -139,10 +190,22 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             .ok()
             .and_then(|r| r.peel_to_commit().ok());
 
+        if verbose {
+            match &local_commit {
+                Some(c) => eprintln!("[verbose] local commit: {}", &c.id().to_string()[..8]),
+                None => eprintln!("[verbose] no local commit"),
+            }
+        }
+
         // Check if we can fast-forward: local is None, or local is an
         // ancestor of remote (no local-only commits to preserve).
         let can_fast_forward = match &local_commit {
-            None => true,
+            None => {
+                if verbose {
+                    eprintln!("[verbose] no local commit -> fast-forward");
+                }
+                true
+            }
             Some(local_c) => {
                 if local_c.id() == *remote_oid {
                     // Already up to date
@@ -154,8 +217,29 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                     continue;
                 }
                 match repo.merge_base(local_c.id(), *remote_oid) {
-                    Ok(base_oid) => base_oid == local_c.id(),
-                    Err(_) => false,
+                    Ok(base_oid) => {
+                        let is_ff = base_oid == local_c.id();
+                        if verbose {
+                            eprintln!(
+                                "[verbose] merge base: {} (local={}, remote={})",
+                                &base_oid.to_string()[..8],
+                                &local_c.id().to_string()[..8],
+                                &remote_oid.to_string()[..8]
+                            );
+                            if is_ff {
+                                eprintln!("[verbose] local is ancestor of remote -> fast-forward");
+                            } else {
+                                eprintln!("[verbose] diverged histories -> merge required");
+                            }
+                        }
+                        is_ff
+                    }
+                    Err(_) => {
+                        if verbose {
+                            eprintln!("[verbose] no merge base found -> merge required (no common ancestor)");
+                        }
+                        false
+                    }
                 }
             }
         };
@@ -166,6 +250,35 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             } else {
                 ParsedTree::default()
             };
+
+            if verbose {
+                eprintln!(
+                    "[verbose] local tree: {} values, {} tombstones",
+                    local_entries.values.len(),
+                    local_entries.tombstones.len()
+                );
+
+                // Show what keys are being added/removed/changed
+                let mut added = 0usize;
+                let mut removed = 0usize;
+                let mut changed = 0usize;
+                for key in remote_entries.values.keys() {
+                    match local_entries.values.get(key) {
+                        None => added += 1,
+                        Some(local_val) if local_val != remote_entries.values.get(key).unwrap() => changed += 1,
+                        _ => {}
+                    }
+                }
+                for key in local_entries.values.keys() {
+                    if !remote_entries.values.contains_key(key) {
+                        removed += 1;
+                    }
+                }
+                eprintln!(
+                    "[verbose] fast-forward delta: {} added, {} changed, {} removed",
+                    added, changed, removed
+                );
+            }
 
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
@@ -205,6 +318,13 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             for key in local_entries.values.keys() {
                 if !remote_entries.values.contains_key(key) {
                     let (target_type, target_value, key_name) = key;
+                    if verbose {
+                        eprintln!(
+                            "[verbose] applying implicit delete for {} {}",
+                            format_target_for_display(target_type, target_value),
+                            key_name
+                        );
+                    }
                     db.apply_tombstone(target_type, target_value, key_name, &email, now)?;
                 }
             }
@@ -223,9 +343,25 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             let local_c = local_commit.as_ref().unwrap();
             let local_entries = parse_tree(&repo, &local_c.tree()?, "")?;
 
+            if verbose {
+                eprintln!(
+                    "[verbose] local tree: {} values, {} tombstones, {} set tombstones",
+                    local_entries.values.len(),
+                    local_entries.tombstones.len(),
+                    local_entries.set_tombstones.len()
+                );
+            }
+
             // Get commit timestamps for conflict resolution
             let local_timestamp = local_c.time().seconds();
             let remote_timestamp = remote_commit.time().seconds();
+
+            if verbose {
+                eprintln!(
+                    "[verbose] commit timestamps: local={}, remote={}",
+                    local_timestamp, remote_timestamp
+                );
+            }
 
             let merge_base_oid = repo.merge_base(local_c.id(), *remote_oid).ok();
             let mut legacy_base_values: Option<BTreeMap<Key, TreeValue>> = None;
@@ -239,6 +375,17 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             ) = if let Some(base_oid) = merge_base_oid {
                 let base_commit = repo.find_commit(base_oid)?;
                 let base_entries = parse_tree(&repo, &base_commit.tree()?, "")?;
+
+                if verbose {
+                    eprintln!(
+                        "[verbose] merge base {} tree: {} values, {} tombstones",
+                        &base_oid.to_string()[..8],
+                        base_entries.values.len(),
+                        base_entries.tombstones.len()
+                    );
+                    eprintln!("[verbose] performing three-way merge...");
+                }
+
                 legacy_base_values = Some(base_entries.values.clone());
 
                 let (merged_values, conflict_decisions) = three_way_merge(
@@ -248,6 +395,55 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                     local_timestamp,
                     remote_timestamp,
                 )?;
+
+                if verbose {
+                    let all_keys: BTreeSet<&Key> = base_entries.values.keys()
+                        .chain(local_entries.values.keys())
+                        .chain(remote_entries.values.keys())
+                        .collect();
+                    let mut unchanged = 0usize;
+                    let mut local_only_changed = 0usize;
+                    let mut remote_only_changed = 0usize;
+                    let mut new_local = 0usize;
+                    let mut new_remote = 0usize;
+                    let mut new_both = 0usize;
+                    let mut removed = 0usize;
+                    let mut conflicted = 0usize;
+                    for key in &all_keys {
+                        let in_base = base_entries.values.get(*key);
+                        let in_local = local_entries.values.get(*key);
+                        let in_remote = remote_entries.values.get(*key);
+                        match (in_base, in_local, in_remote) {
+                            (Some(b), Some(l), Some(r)) => {
+                                match (l != b, r != b) {
+                                    (false, false) => unchanged += 1,
+                                    (true, false) => local_only_changed += 1,
+                                    (false, true) => remote_only_changed += 1,
+                                    (true, true) => conflicted += 1,
+                                }
+                            }
+                            (Some(_), None, None) => removed += 1,
+                            (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
+                                // remove/modify
+                                conflicted += 1;
+                            }
+                            (None, Some(_), None) => new_local += 1,
+                            (None, None, Some(_)) => new_remote += 1,
+                            (None, Some(_), Some(_)) => new_both += 1,
+                            _ => {}
+                        }
+                    }
+                    eprintln!("[verbose] merge breakdown:");
+                    eprintln!("  unchanged:     {}", unchanged);
+                    eprintln!("  local changed: {}", local_only_changed);
+                    eprintln!("  remote changed:{}", remote_only_changed);
+                    eprintln!("  new (local):   {}", new_local);
+                    eprintln!("  new (remote):  {}", new_remote);
+                    eprintln!("  new (both):    {}", new_both);
+                    eprintln!("  removed:       {}", removed);
+                    eprintln!("  conflicts:     {}", conflicted);
+                }
+
                 let merged_tombstones = merge_tombstones(
                     &base_entries.tombstones,
                     &local_entries.tombstones,
@@ -259,6 +455,17 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                     &remote_entries.set_tombstones,
                     &merged_values,
                 );
+
+                if verbose {
+                    eprintln!(
+                        "[verbose] merged result: {} values, {} tombstones, {} set tombstones, {} conflicts",
+                        merged_values.len(),
+                        merged_tombstones.len(),
+                        merged_set_tombstones.len(),
+                        conflict_decisions.len()
+                    );
+                }
+
                 (
                     merged_values,
                     merged_tombstones,
@@ -267,6 +474,10 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                     "three-way",
                 )
             } else {
+                if verbose {
+                    eprintln!("[verbose] no common ancestor, performing two-way merge (local wins)...");
+                }
+
                 let (merged_values, merged_tombstones, conflict_decisions) =
                     two_way_merge_no_common_ancestor(
                         &local_entries.values,
@@ -279,6 +490,17 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                     &remote_entries.set_tombstones,
                     &merged_values,
                 );
+
+                if verbose {
+                    eprintln!(
+                        "[verbose] merged result: {} values, {} tombstones, {} set tombstones, {} conflicts",
+                        merged_values.len(),
+                        merged_tombstones.len(),
+                        merged_set_tombstones.len(),
+                        conflict_decisions.len()
+                    );
+                }
+
                 (
                     merged_values,
                     merged_tombstones,
@@ -287,6 +509,18 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                     "two-way-no-common-ancestor",
                 )
             };
+
+            if verbose && !conflict_decisions.is_empty() {
+                eprintln!("[verbose] conflict resolutions:");
+                for cd in &conflict_decisions {
+                    eprintln!(
+                        "  {} reason={} resolution={}",
+                        format_key_for_display(&cd.key),
+                        cd.reason.as_str(),
+                        cd.resolution.as_str()
+                    );
+                }
+            }
 
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
@@ -331,6 +565,9 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
             }
 
             // Update SQLite
+            if verbose {
+                eprintln!("[verbose] updating SQLite database...");
+            }
             update_db_from_tree(
                 &repo,
                 &db,
@@ -346,23 +583,43 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                 for key in base_values.keys() {
                     if !merged_values.contains_key(key) && !merged_tombstones.contains_key(key) {
                         let (target_type, target_value, key_name) = key;
+                        if verbose {
+                            eprintln!(
+                                "[verbose] applying legacy delete for {} {}",
+                                format_target_for_display(target_type, target_value),
+                                key_name
+                            );
+                        }
                         db.apply_tombstone(target_type, target_value, key_name, &email, now)?;
                     }
                 }
             }
 
             // Build the merged tree and write a merge commit
+            if verbose {
+                eprintln!("[verbose] building merged tree...");
+            }
             let merged_tree_oid = build_merged_tree(
                 &repo,
                 &merged_values,
                 &merged_tombstones,
                 &merged_set_tombstones,
             )?;
+
+            if verbose {
+                let merged_tree_obj = repo.find_tree(merged_tree_oid)?;
+                eprintln!(
+                    "[verbose] merged tree: {} ({} top-level entries)",
+                    merged_tree_oid,
+                    merged_tree_obj.len()
+                );
+            }
+
             let merged_tree = repo.find_tree(merged_tree_oid)?;
             let name = git_utils::get_name(&repo)?;
             let sig = git2::Signature::now(&name, &email)?;
 
-            repo.commit(
+            let merge_commit_oid = repo.commit(
                 Some(&local_ref_name),
                 &sig,
                 &sig,
@@ -370,6 +627,15 @@ pub fn run(remote: Option<&str>, dry_run: bool) -> Result<()> {
                 &merged_tree,
                 &[local_c, &remote_commit],
             )?;
+
+            if verbose {
+                eprintln!(
+                    "[verbose] wrote merge commit {} (parents: {}, {})",
+                    &merge_commit_oid.to_string()[..8],
+                    &local_c.id().to_string()[..8],
+                    &remote_oid.to_string()[..8]
+                );
+            }
 
             println!("materialized {}", ref_name);
         }

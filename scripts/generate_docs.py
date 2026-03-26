@@ -29,6 +29,7 @@ PAGE_ORDER = [
     "implementation/standard-keys.md",
     "implementation/cli.md",
     "implementation/output.md",
+    "implementation/pruning.md",
     "implementation/workflow.md",
 ]
 
@@ -49,6 +50,7 @@ PAGE_GROUPS = {
         "implementation/storage.md",
         "implementation/cli.md",
         "implementation/output.md",
+        "implementation/pruning.md",
     ],
     "Other Considerations": [
         "implementation/standard-keys.md",
@@ -593,7 +595,13 @@ def generate_docs() -> None:
     template = TEMPLATE_PATH.read_text()
 
     if DOCS_DIR.exists():
-        shutil.rmtree(DOCS_DIR)
+        for child in DOCS_DIR.iterdir():
+            if child.name == "other":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     (ASSETS_DIR / "style.css").write_text(STYLE_CSS.strip() + "\n")
 
