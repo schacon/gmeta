@@ -195,6 +195,17 @@ pub enum Commands {
         value: Option<String>,
     },
 
+    /// Interactively configure auto-prune rules
+    #[command(name = "config:prune")]
+    ConfigPrune,
+
+    /// Prune old metadata from the database using configured rules
+    Prune {
+        /// Show what would be pruned without deleting anything
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+
     /// Remove the gmeta database and all meta refs
     Teardown,
 }

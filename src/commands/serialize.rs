@@ -1,8 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use chrono::Utc;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::commands::auto_prune;
+use crate::commands::auto_prune::{self, parse_since_to_cutoff_ms};
 use crate::db::Db;
 use crate::git_utils;
 use crate::list_value::{make_entry_name, parse_entries};
@@ -500,34 +500,6 @@ fn build_tree_from_paths(
     }
 
     build_dir(repo, &root)
-}
-
-/// Parse a duration string like "90d", "6m", "1y" or an ISO date into a cutoff timestamp (millis).
-fn parse_since_to_cutoff_ms(since: &str) -> Result<i64> {
-    // Try relative duration first
-    let s = since.trim().to_lowercase();
-    if let Some(num_str) = s.strip_suffix('d') {
-        let days: i64 = num_str.parse().with_context(|| format!("invalid duration: {}", since))?;
-        return Ok(Utc::now().timestamp_millis() - days * 86_400_000);
-    }
-    if let Some(num_str) = s.strip_suffix('m') {
-        let months: i64 = num_str.parse().with_context(|| format!("invalid duration: {}", since))?;
-        return Ok(Utc::now().timestamp_millis() - months * 30 * 86_400_000);
-    }
-    if let Some(num_str) = s.strip_suffix('y') {
-        let years: i64 = num_str.parse().with_context(|| format!("invalid duration: {}", since))?;
-        return Ok(Utc::now().timestamp_millis() - years * 365 * 86_400_000);
-    }
-
-    // Try ISO date
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d") {
-        let dt = date
-            .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| anyhow::anyhow!("invalid date"))?;
-        return Ok(dt.and_utc().timestamp_millis());
-    }
-
-    bail!("cannot parse --since value: {} (expected e.g. 90d, 6m, 1y, or 2025-01-01)", since);
 }
 
 /// Prune a serialized tree by dropping entries older than the cutoff.

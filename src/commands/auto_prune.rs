@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use chrono::Utc;
 
 use crate::db::Db;
 
@@ -149,6 +150,41 @@ fn compute_tree_size_recursive(
         }
     }
     Ok(())
+}
+
+/// Parse a duration string like "90d", "6m", "1y" or an ISO date into a cutoff timestamp (millis).
+pub fn parse_since_to_cutoff_ms(since: &str) -> Result<i64> {
+    let s = since.trim().to_lowercase();
+    if let Some(num_str) = s.strip_suffix('d') {
+        let days: i64 = num_str
+            .parse()
+            .with_context(|| format!("invalid duration: {}", since))?;
+        return Ok(Utc::now().timestamp_millis() - days * 86_400_000);
+    }
+    if let Some(num_str) = s.strip_suffix('m') {
+        let months: i64 = num_str
+            .parse()
+            .with_context(|| format!("invalid duration: {}", since))?;
+        return Ok(Utc::now().timestamp_millis() - months * 30 * 86_400_000);
+    }
+    if let Some(num_str) = s.strip_suffix('y') {
+        let years: i64 = num_str
+            .parse()
+            .with_context(|| format!("invalid duration: {}", since))?;
+        return Ok(Utc::now().timestamp_millis() - years * 365 * 86_400_000);
+    }
+
+    if let Ok(date) = chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d") {
+        let dt = date
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| anyhow::anyhow!("invalid date"))?;
+        return Ok(dt.and_utc().timestamp_millis());
+    }
+
+    bail!(
+        "cannot parse since value: {} (expected e.g. 90d, 6m, 1y, or 2025-01-01)",
+        since
+    );
 }
 
 /// Parse a human-friendly size string (e.g. "512k", "10m", "1g") into bytes.

@@ -1,11 +1,13 @@
 pub mod auto_prune;
 pub mod bench;
 pub mod config;
+pub mod config_prune;
 pub mod get;
 pub mod import;
 pub mod list;
 pub mod log;
 pub mod materialize;
+pub mod prune;
 pub mod rm;
 pub mod serialize;
 pub mod set;

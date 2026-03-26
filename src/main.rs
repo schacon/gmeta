@@ -81,6 +81,10 @@ fn main() -> Result<()> {
             value,
         } => commands::config::run(list, unset, key.as_deref(), value.as_deref()),
 
+        Commands::ConfigPrune => commands::config_prune::run(),
+
+        Commands::Prune { dry_run } => commands::prune::run(dry_run),
+
         Commands::Teardown => commands::teardown::run(),
     }
 }
