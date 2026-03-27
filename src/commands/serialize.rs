@@ -927,7 +927,7 @@ fn merge_dir_into_tree(
 
 /// Prune a serialized tree by dropping entries older than the cutoff.
 /// Returns the OID of the new (possibly smaller) tree.
-fn prune_tree(
+pub fn prune_tree(
     repo: &git2::Repository,
     tree_oid: git2::Oid,
     rules: &auto_prune::PruneRules,
@@ -1182,7 +1182,7 @@ fn prune_tombstone_tree(
 }
 
 /// Count keys in original and pruned trees to produce stats.
-fn count_prune_stats(
+pub fn count_prune_stats(
     repo: &git2::Repository,
     original_oid: git2::Oid,
     pruned_oid: git2::Oid,

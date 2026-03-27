@@ -8,6 +8,7 @@ pub mod inspect;
 pub mod list;
 pub mod log;
 pub mod materialize;
+pub mod local_prune;
 pub mod prune;
 pub mod rm;
 pub mod serialize;

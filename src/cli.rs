@@ -235,8 +235,16 @@ pub enum Commands {
     #[command(name = "config:prune")]
     ConfigPrune,
 
-    /// Prune old metadata from the database using configured rules
+    /// Prune the serialized git tree, dropping old entries
     Prune {
+        /// Show what would be pruned without committing
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+
+    /// Prune old metadata from the local SQLite database
+    #[command(name = "local-prune")]
+    LocalPrune {
         /// Show what would be pruned without deleting anything
         #[arg(long = "dry-run")]
         dry_run: bool,

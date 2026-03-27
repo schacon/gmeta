@@ -97,7 +97,11 @@ fn main() -> Result<()> {
 
         Commands::ConfigPrune => commands::config_prune::run(),
 
-        Commands::Prune { dry_run, skip_date } => commands::prune::run(dry_run, skip_date),
+        Commands::Prune { dry_run } => commands::prune::run(dry_run),
+
+        Commands::LocalPrune { dry_run, skip_date } => {
+            commands::local_prune::run(dry_run, skip_date)
+        }
 
         Commands::Teardown => commands::teardown::run(),
 
