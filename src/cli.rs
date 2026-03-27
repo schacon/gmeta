@@ -156,6 +156,13 @@ pub enum Commands {
         since: Option<String>,
     },
 
+    /// Show commit details and associated metadata
+    Show {
+        /// Commit SHA or ref to show
+        #[arg(value_name = "COMMIT")]
+        commit: String,
+    },
+
     /// Show metadata statistics
     Stats,
 

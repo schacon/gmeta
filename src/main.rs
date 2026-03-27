@@ -66,6 +66,8 @@ fn main() -> Result<()> {
             since,
         } => commands::import::run(&format, dry_run, since.as_deref()),
 
+        Commands::Show { commit } => commands::show::run(&commit),
+
         Commands::Stats => commands::stats::run(),
 
         Commands::Log {

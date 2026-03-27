@@ -11,6 +11,7 @@ pub mod prune;
 pub mod rm;
 pub mod serialize;
 pub mod set;
+pub mod show;
 pub mod stats;
 pub mod teardown;
 pub mod watch;
