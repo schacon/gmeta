@@ -5,6 +5,7 @@
 //! - `gmeta inspect <target-type> <term>`: fuzzy-match keys/targets on term
 
 use anyhow::Result;
+use chrono::{Duration, Utc};
 use std::collections::BTreeMap;
 
 use crate::db::Db;
@@ -19,10 +20,14 @@ const YELLOW: &str = "\x1b[33m";
 const GREEN: &str = "\x1b[32m";
 const CYAN: &str = "\x1b[36m";
 
-pub fn run(target_type: Option<&str>, term: Option<&str>) -> Result<()> {
+pub fn run(target_type: Option<&str>, term: Option<&str>, timeline: bool) -> Result<()> {
     let repo = git_utils::discover_repo()?;
     let db_path = git_utils::db_path(&repo)?;
     let db = Db::open(&db_path)?;
+
+    if timeline {
+        return run_timeline(&db);
+    }
 
     match target_type {
         None => run_overview(&db),
@@ -131,6 +136,69 @@ fn run_list(db: &Db, target_type: &str, term: Option<&str>) -> Result<()> {
             println!("  {BOLD}{key}{RESET}  {DIM}{preview}{RESET}");
         }
     }
+
+    Ok(())
+}
+
+/// Show a weekly histogram of metadata entries over the last 20 weeks.
+fn run_timeline(db: &Db) -> Result<()> {
+    let all = db.get_all_metadata()?;
+
+    if all.is_empty() {
+        println!("no metadata stored");
+        return Ok(());
+    }
+
+    let now = Utc::now();
+    let weeks = 20usize;
+    let week_duration = Duration::weeks(1);
+    let start = now - Duration::weeks(weeks as i64);
+    let start_ms = start.timestamp_millis();
+
+    // Bucket entries by week (0 = oldest week, weeks-1 = current week)
+    let mut buckets = vec![0u64; weeks];
+    let mut older = 0u64;
+
+    for (_tt, _tv, _key, _value, _vtype, ts, _is_ref) in &all {
+        if *ts < start_ms {
+            older += 1;
+            continue;
+        }
+        let offset_ms = ts - start_ms;
+        let week_ms = week_duration.num_milliseconds();
+        let bucket = (offset_ms / week_ms) as usize;
+        if bucket < weeks {
+            buckets[bucket] += 1;
+        }
+    }
+
+    let max_count = *buckets.iter().max().unwrap_or(&1).max(&1);
+    let bar_width = 30usize;
+
+    println!("{BOLD}Metadata entries per week (last {} weeks){RESET}", weeks);
+    println!();
+
+    for (i, count) in buckets.iter().enumerate() {
+        let week_start = start + Duration::weeks(i as i64);
+        let label = week_start.format("%b %d").to_string();
+        let filled = ((*count as f64 / max_count as f64) * bar_width as f64).round() as usize;
+        let bar: String = "█".repeat(filled);
+        let pad: String = " ".repeat(bar_width - filled);
+        if *count > 0 {
+            println!("  {DIM}{label}{RESET}  {GREEN}{bar}{pad}{RESET}  {count}");
+        } else {
+            println!("  {DIM}{label}{RESET}  {pad}  {DIM}·{RESET}");
+        }
+    }
+
+    if older > 0 {
+        println!();
+        println!("{DIM}  + {} entries older than {} weeks{RESET}", older, weeks);
+    }
+
+    let total: u64 = buckets.iter().sum::<u64>() + older;
+    println!();
+    println!("  {BOLD}{}{RESET} total entries", total);
 
     Ok(())
 }

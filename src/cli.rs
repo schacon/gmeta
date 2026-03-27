@@ -170,6 +170,10 @@ pub enum Commands {
 
         /// Fuzzy search term to filter keys/values
         term: Option<String>,
+
+        /// Show a weekly timeline graph of entries
+        #[arg(long)]
+        timeline: bool,
     },
 
     /// Show metadata statistics
