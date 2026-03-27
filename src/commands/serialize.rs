@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -16,6 +16,161 @@ use crate::types::{
 struct TombstoneBlob<'a> {
     timestamp: i64,
     email: &'a str,
+}
+
+// ── Filter rules ─────────────────────────────────────────────────────────────
+
+const META_LOCAL_PREFIX: &str = "meta:local:";
+/// The "main" destination name used for the primary ref.
+const MAIN_DEST: &str = "main";
+
+#[derive(Debug, Clone)]
+enum FilterAction {
+    Exclude,
+    Route(Vec<String>), // destination names
+}
+
+#[derive(Debug, Clone)]
+struct FilterRule {
+    action: FilterAction,
+    pattern: Vec<PatternSegment>,
+}
+
+#[derive(Debug, Clone)]
+enum PatternSegment {
+    Literal(String),
+    Star,     // matches one segment
+    GlobStar, // matches zero or more segments
+}
+
+fn parse_filter_rules(db: &Db) -> Result<Vec<FilterRule>> {
+    let mut rules = Vec::new();
+
+    // meta:local:filter rules first (higher priority)
+    if let Some((value, value_type, _)) = db.get("project", "", "meta:local:filter")? {
+        if value_type == "set" {
+            let members: Vec<String> = serde_json::from_str(&value)?;
+            for member in members {
+                rules.push(parse_rule(&member)?);
+            }
+        }
+    }
+
+    // Then meta:filter rules (shared/corporate)
+    if let Some((value, value_type, _)) = db.get("project", "", "meta:filter")? {
+        if value_type == "set" {
+            let members: Vec<String> = serde_json::from_str(&value)?;
+            for member in members {
+                rules.push(parse_rule(&member)?);
+            }
+        }
+    }
+
+    Ok(rules)
+}
+
+fn parse_rule(s: &str) -> Result<FilterRule> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.len() < 2 {
+        bail!("invalid filter rule (need at least action and pattern): '{}'", s);
+    }
+
+    let action = match parts[0] {
+        "exclude" => FilterAction::Exclude,
+        "route" => {
+            if parts.len() < 3 {
+                bail!("route rule requires a destination: '{}'", s);
+            }
+            let destinations: Vec<String> = parts[2]
+                .split(',')
+                .map(|d| d.trim().to_string())
+                .filter(|d| !d.is_empty())
+                .collect();
+            FilterAction::Route(destinations)
+        }
+        other => bail!("unknown filter action '{}' in rule '{}'", other, s),
+    };
+
+    let pattern = parse_pattern(parts[1]);
+    Ok(FilterRule { action, pattern })
+}
+
+fn parse_pattern(s: &str) -> Vec<PatternSegment> {
+    s.split(':')
+        .map(|seg| match seg {
+            "**" => PatternSegment::GlobStar,
+            "*" => PatternSegment::Star,
+            _ => PatternSegment::Literal(seg.to_string()),
+        })
+        .collect()
+}
+
+fn pattern_matches(pattern: &[PatternSegment], key_segments: &[&str]) -> bool {
+    match (pattern.first(), key_segments.first()) {
+        (None, None) => true,
+        (None, Some(_)) => false,
+        (Some(PatternSegment::GlobStar), _) => {
+            if pattern.len() == 1 {
+                // trailing ** matches everything remaining
+                return true;
+            }
+            // Try matching ** as zero segments, one segment, two segments, etc.
+            for skip in 0..=key_segments.len() {
+                if pattern_matches(&pattern[1..], &key_segments[skip..]) {
+                    return true;
+                }
+            }
+            false
+        }
+        (Some(_), None) => false,
+        (Some(PatternSegment::Star), Some(_)) => {
+            pattern_matches(&pattern[1..], &key_segments[1..])
+        }
+        (Some(PatternSegment::Literal(lit)), Some(seg)) => {
+            lit == seg && pattern_matches(&pattern[1..], &key_segments[1..])
+        }
+    }
+}
+
+/// Determine the destination(s) for a key based on filter rules.
+/// Returns None if the key should be excluded, or Some(destinations).
+/// An empty destinations vec means "main" (default).
+fn classify_key(key: &str, rules: &[FilterRule]) -> Option<Vec<String>> {
+    // Hard rule: meta:local: keys are never serialized
+    if key.starts_with(META_LOCAL_PREFIX) {
+        return None;
+    }
+
+    let segments: Vec<&str> = key.split(':').collect();
+    let mut matched_routes: Vec<String> = Vec::new();
+    let mut excluded = false;
+
+    for rule in rules {
+        if pattern_matches(&rule.pattern, &segments) {
+            match &rule.action {
+                FilterAction::Exclude => {
+                    excluded = true;
+                }
+                FilterAction::Route(dests) => {
+                    for d in dests {
+                        if !matched_routes.contains(d) {
+                            matched_routes.push(d.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if excluded {
+        return None;
+    }
+
+    if matched_routes.is_empty() {
+        Some(vec![MAIN_DEST.to_string()])
+    } else {
+        Some(matched_routes)
+    }
 }
 
 pub fn run(verbose: bool) -> Result<()> {

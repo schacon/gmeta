@@ -45,7 +45,13 @@ pub fn get_namespace(repo: &Repository) -> Result<String> {
 /// Get the local ref name for serialization.
 pub fn local_ref(repo: &Repository) -> Result<String> {
     let ns = get_namespace(repo)?;
-    Ok(format!("refs/{}/local", ns))
+    Ok(format!("refs/{}/local/main", ns))
+}
+
+/// Get the ref name for a named destination (e.g. "private" -> "refs/meta/local/private").
+pub fn destination_ref(repo: &Repository, destination: &str) -> Result<String> {
+    let ns = get_namespace(repo)?;
+    Ok(format!("refs/{}/local/{}", ns, destination))
 }
 
 /// Get the ref pattern for remote metadata.

@@ -19,9 +19,9 @@ Examples:
 
 The `meta:local:` prefix is a hard rule enforced by the serializer. No filter configuration is needed to make it work. Keys in this namespace are silently skipped during serialize and are never written into any git tree.
 
-### Filter rules via `meta:local:filter`
+### Filter rules
 
-Users can define filter rules that control serialization behavior. Filter rules are stored as set members on the **project** target under the key `meta:local:filter`.
+Users can define filter rules that control serialization behavior. Filter rules are stored as set members on the **project** target under either `meta:filter` or `meta:local:filter`. The `meta:filter` rules are shared (corporate rules), the local ones are not (personal rules).
 
 Each set member is a rule string with the format:
 
@@ -70,23 +70,27 @@ For example, `route myteam:** private` serializes matching keys to `refs/meta/lo
 
 Each destination ref is a separate commit/tree that contains only the keys routed to it, using the same tree structure as the primary ref. Each can be pushed independently (e.g. to a personal remote or a different refspec).
 
-If a `route` rule matches, the key is **excluded** from the primary `refs/meta/local` tree and **included** only in its destination ref.
+If a `route` rule matches, the key is **excluded** from the primary `refs/meta/local/main` tree and **included** only in its destination ref.
 
 If the namespace config is set (e.g. `meta.namespace = foo`), a destination `private` becomes `refs/foo/local/private`.
 
 Multiple route rules can target different destinations. Keys from all rules sharing the same destination are collected into a single ref.
 
+#### Multiple Routes
+
+The `<destination>` can be a comma delimited list of destinations and the matching key values will be written to all of them.
+
 ### Rule evaluation
 
 Rules are evaluated in order of specificity:
 
-1. The `meta:local:*` hard rule always wins. `meta:local:` keys are never serialized regardless of any filter rules.
-2. Filter rules from `meta:local:filter` are evaluated. If multiple rules match the same key, the **first matching rule** (by set member sort order) applies.
+1. `meta:local:` keys are never serialized regardless of any filter rules.
+2. Filter rules are evaluated.
+   - Filters in `meta:local:filter` are evaluated first, then `meta:filter` rules.
+   - If multiple rules match the same key:
+     - any `exclude` match applies and key value is not serialized anywhere
+     - otherwise, _all_ `route` rules apply
 3. Keys that match no rule are serialized to the primary ref as usual.
-
-### The filter set itself
-
-The key `meta:local:filter` starts with `meta:local:`, so it is **never serialized**. Filter rules are always local-only. This means each collaborator maintains their own filter rules independently.
 
 ## Serialize algorithm changes
 
@@ -108,14 +112,8 @@ The new flow becomes:
    - If key matches a `route` rule -> add to the tree builder for that rule's destination
    - Otherwise -> add to the primary tree builder
 5. Apply the same skip/route logic to tombstones
-6. Commit the primary tree to `refs/meta/local`
+6. Commit the primary tree to `refs/meta/local/main`
 7. For each destination that has entries, commit its tree to `refs/meta/local/<destination>`
-
-### Incremental serialization
-
-The dirty-target tracking for incremental serialization applies to the primary tree and all destination trees. A change to `meta:local:filter` marks the project target dirty, which triggers a full re-evaluation of project-target keys.
-
-If filter rules change such that keys move between refs, the next full serialize will correct all trees. Incremental serialize will handle this correctly as long as the project target is marked dirty when `meta:local:filter` changes (which it will be, since it is itself a key on the project target).
 
 ## CLI surface
 
@@ -123,22 +121,15 @@ No new commands are needed. Filter rules are managed with the existing `set` com
 
 ```sh
 # Add a filter rule
-gmeta set -t project meta:local:filter --set-add "exclude draft:**"
-gmeta set -t project meta:local:filter --set-add "route myteam:** private"
-gmeta set -t project meta:local:filter --set-add "route acme:** vendor"
+gmeta set:add project meta:filter "exclude draft:**"
+gmeta set:add project meta:local:filter "route myteam:** private"
+gmeta set:add project meta:local:filter "route acme:** vendor"
 
 # View current filter rules
-gmeta get -t project meta:local:filter
+gmeta get project meta:local:filter
 
 # Remove a filter rule
-gmeta set -t project meta:local:filter --set-rm "exclude draft:**"
-```
-
-Local-only keys are set and read like any other key:
-
-```sh
-gmeta set -t commit:abc123 meta:local:scratch "my working notes"
-gmeta get -t commit:abc123 meta:local:scratch
+gmeta set:rm project meta:filter "exclude draft:**"
 ```
 
 ## Examples
@@ -146,24 +137,24 @@ gmeta get -t commit:abc123 meta:local:scratch
 ### Keep draft notes local
 
 ```sh
-gmeta set -t project meta:local:filter --set-add "exclude draft:**"
-gmeta set -t commit:abc123 draft:summary "WIP: still thinking about this"
+gmeta set:add project meta:local:filter "exclude draft:**"
+gmeta add commit:abc123 draft:summary "WIP: still thinking about this"
 gmeta serialize   # draft:summary is not in the git tree
 ```
 
 ### Route personal annotations to a separate ref
 
 ```sh
-gmeta set -t project meta:local:filter --set-add "route myname:** mine"
-gmeta set -t commit:abc123 myname:review-note "looks good but check error handling"
-gmeta serialize   # review-note goes to refs/meta/local/mine, not refs/meta/local
+gmeta set:add project meta:local:filter "route myname:** mine"
+gmeta set commit:abc123 myname:review-note "looks good but check error handling"
+gmeta serialize   # review-note goes to refs/meta/local/mine, not refs/meta/local/main
 ```
 
 ### Route different namespaces to different refs
 
 ```sh
-gmeta set -t project meta:local:filter --set-add "route myname:** mine"
-gmeta set -t project meta:local:filter --set-add "route acme:** vendor"
+gmeta set:add project meta:local:filter "route myname:** mine"
+gmeta set:add project meta:local:filter "route acme:** vendor"
 gmeta serialize   # myname:* keys go to refs/meta/local/mine
                   # acme:* keys go to refs/meta/local/vendor
 ```
@@ -171,7 +162,7 @@ gmeta serialize   # myname:* keys go to refs/meta/local/mine
 ### Always-local scratch space
 
 ```sh
-gmeta set -t commit:abc123 meta:local:cursor-pos "line 42"
+gmeta set commit:abc123 meta:local:cursor-pos "line 42"
 gmeta serialize   # meta:local:cursor-pos is never serialized, no filter needed
 ```
 
