@@ -141,6 +141,7 @@ struct WatchState {
     last_transcript_activity: Option<Instant>,
     active_session_id: Option<String>,
     agent_idle: bool,
+    prompts_attached_up_to: HashMap<String, usize>, // session_id -> index into session_lines
     // Git tracking
     known_commits: BTreeSet<String>,
     branch_for_commit: BTreeMap<String, String>, // commit_id -> branch_name
@@ -160,6 +161,7 @@ impl WatchState {
             last_transcript_activity: None,
             active_session_id: None,
             agent_idle: true,
+            prompts_attached_up_to: HashMap::new(),
             known_commits: BTreeSet::new(),
             branch_for_commit: BTreeMap::new(),
             branch_first_seen: HashMap::new(),
@@ -498,12 +500,86 @@ impl WatchState {
                             "  {}[meta]{} change-id:{}… branch:id = {}",
                             CYAN, RESET, short_cid, branch_id
                         );
+
+                        // Attach new user prompts to the change-id
+                        let prompts = self.extract_new_user_prompts();
+                        if !prompts.is_empty() {
+                            let prompt_count = prompts.len();
+                            for prompt in prompts {
+                                db.list_push_with_repo(
+                                    Some(&repo),
+                                    "change-id",
+                                    cid,
+                                    "agent:prompts",
+                                    &prompt,
+                                    &email,
+                                    ts,
+                                )?;
+                            }
+                            eprintln!(
+                                "  {}[meta]{} change-id:{}… agent:prompts += {} prompt(s)",
+                                CYAN, RESET, short_cid, prompt_count
+                            );
+                        }
                     }
                 }
             }
         }
 
         Ok(())
+    }
+
+    /// Extract user prompt texts from session lines that haven't been attached yet.
+    fn extract_new_user_prompts(&mut self) -> Vec<String> {
+        let session_id = match &self.active_session_id {
+            Some(id) => id.clone(),
+            None => return Vec::new(),
+        };
+
+        let lines = match self.session_lines.get(&session_id) {
+            Some(l) => l,
+            None => return Vec::new(),
+        };
+
+        let start = self
+            .prompts_attached_up_to
+            .get(&session_id)
+            .copied()
+            .unwrap_or(0);
+
+        let mut prompts = Vec::new();
+        for line in lines.iter().skip(start) {
+            let parsed: serde_json::Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if parsed["type"].as_str() != Some("user") {
+                continue;
+            }
+            if parsed["isMeta"].as_bool().unwrap_or(false) {
+                continue;
+            }
+
+            if let Some(content) = parsed["message"]["content"].as_array() {
+                for block in content {
+                    if block["type"].as_str() == Some("text") {
+                        if let Some(text) = block["text"].as_str() {
+                            let text = text.trim();
+                            if !text.is_empty() {
+                                prompts.push(text.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Mark all current lines as processed
+        self.prompts_attached_up_to
+            .insert(session_id, lines.len());
+
+        prompts
     }
 
     fn attach_transcript(&mut self) -> Result<()> {
