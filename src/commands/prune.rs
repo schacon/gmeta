@@ -98,10 +98,28 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
         |row| row.get(0),
     )?;
 
+    // Count what will survive
+    let metadata_remaining: u64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM metadata
+         WHERE target_type = 'project' OR last_timestamp >= ?1",
+        params![cutoff_ms],
+        |row| row.get(0),
+    )?;
+
+    let list_values_remaining: u64 = db.conn.query_row(
+        "SELECT COUNT(*) FROM list_values
+         WHERE timestamp >= ?1
+            OR metadata_id IN (
+                SELECT rowid FROM metadata WHERE target_type = 'project'
+            )",
+        params![cutoff_ms],
+        |row| row.get(0),
+    )?;
+
     let total = metadata_count + list_values_count + tombstone_count + set_tombstone_count + log_count;
 
-    println!("  {} metadata keys to prune", metadata_count);
-    println!("  {} list entries to prune", list_values_count);
+    println!("  {} metadata keys to prune ({} remaining)", metadata_count, metadata_remaining);
+    println!("  {} list entries to prune ({} remaining)", list_values_count, list_values_remaining);
     println!("  {} tombstones to prune", tombstone_count);
     println!("  {} set tombstones to prune", set_tombstone_count);
     println!("  {} log entries to prune", log_count);
