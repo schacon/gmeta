@@ -130,6 +130,52 @@ pub fn list_meta_remotes(repo: &Repository) -> Result<Vec<(String, String)>> {
     Ok(remotes)
 }
 
+/// Hydrate tip tree blobs for a blobless-fetched ref.
+/// This fetches all blob objects referenced by the tip tree so libgit2 can read them.
+pub fn hydrate_tip_blobs(repo: &Repository, remote_name: &str, ref_name: &str) -> Result<()> {
+    let blob_list = run_git(repo, &["ls-tree", "-r", "--object-only", ref_name]);
+
+    if let Ok(blobs) = blob_list {
+        if !blobs.trim().is_empty() {
+            let workdir = repo
+                .workdir()
+                .or_else(|| Some(repo.path()))
+                .context("cannot determine repository directory")?;
+
+            let mut child = Command::new("git")
+                .args([
+                    "-c",
+                    "fetch.negotiationAlgorithm=noop",
+                    "fetch",
+                    remote_name,
+                    "--no-tags",
+                    "--no-write-fetch-head",
+                    "--recurse-submodules=no",
+                    "--filter=blob:none",
+                    "--stdin",
+                ])
+                .current_dir(workdir)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()?;
+
+            if let Some(mut stdin) = child.stdin.take() {
+                use std::io::Write;
+                stdin.write_all(blobs.as_bytes())?;
+            }
+
+            let output = child.wait_with_output()?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("Warning: blob hydration failed: {}", stderr.trim());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /// Resolve a meta remote by name, or pick the first one if no name given.
 pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<String> {
     let meta_remotes = list_meta_remotes(repo)?;

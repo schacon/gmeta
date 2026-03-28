@@ -115,11 +115,7 @@ fn run_list(db: &Db, target_type: &str, term: Option<&str>) -> Result<()> {
         }
         first = false;
 
-        let short_target = if target_value.len() > 12 {
-            &target_value[..12]
-        } else {
-            target_value
-        };
+        let short_target = *target_value;
         let display_target = if target_type == "project" {
             "project".to_string()
         } else {

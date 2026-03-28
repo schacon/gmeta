@@ -607,6 +607,12 @@ impl WatchState {
         let transcript_content = lines.join("\n");
         let ts = Utc::now().timestamp_millis();
 
+        let first_seen = *self
+            .branch_first_seen
+            .entry(branch_name.clone())
+            .or_insert(ts);
+        let branch_id = format!("{}@{}", branch_name, first_seen);
+
         let repo = git_utils::discover_repo()?;
         let db_path = git_utils::db_path(&repo)?;
         let db = Db::open(&db_path)?;
@@ -615,7 +621,7 @@ impl WatchState {
         db.list_push_with_repo(
             Some(&repo),
             "branch",
-            &branch_name,
+            &branch_id,
             "agent:transcripts",
             &transcript_content,
             &email,
@@ -626,7 +632,7 @@ impl WatchState {
             "  {}{}[meta]{} Stored {} transcript lines → branch:{} agent:transcripts",
             BOLD, GREEN, RESET,
             lines.len(),
-            branch_name
+            branch_id
         );
 
         // Clear stored lines — they've been persisted

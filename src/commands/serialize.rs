@@ -173,6 +173,29 @@ pub fn classify_key(key: &str, rules: &[FilterRule]) -> Option<Vec<String>> {
     }
 }
 
+const MAX_COMMIT_CHANGES: usize = 1000;
+
+fn build_commit_message(changes: &[(char, String, String)]) -> String {
+    if changes.len() > MAX_COMMIT_CHANGES {
+        format!(
+            "gmeta: serialize ({} changes)\n\nchanges-omitted: true\ncount: {}",
+            changes.len(),
+            changes.len()
+        )
+    } else {
+        let mut msg = format!("gmeta: serialize ({} changes)\n", changes.len());
+        for (op, target, key) in changes {
+            msg.push('\n');
+            msg.push(*op);
+            msg.push('\t');
+            msg.push_str(target);
+            msg.push('\t');
+            msg.push_str(key);
+        }
+        msg
+    }
+}
+
 pub fn run(verbose: bool) -> Result<()> {
     let repo = git_utils::discover_repo()?;
     let db_path = git_utils::db_path(&repo)?;
@@ -213,7 +236,8 @@ pub fn run(verbose: bool) -> Result<()> {
     // Build new tree entries.
     // In incremental mode, compute which targets are dirty so we can reuse
     // unchanged subtrees from the existing git tree.
-    let (metadata_entries, tombstone_entries, set_tombstone_entries, list_tombstone_entries, dirty_target_bases) =
+    // changes: Vec<(op_char, target_label, key)> for commit message
+    let (metadata_entries, tombstone_entries, set_tombstone_entries, list_tombstone_entries, dirty_target_bases, changes) =
         if let Some(since) = last_materialized {
             let modified = db.get_modified_since(since)?;
             if verbose {
@@ -226,6 +250,26 @@ pub fn run(verbose: bool) -> Result<()> {
                 eprintln!("Nothing changed since last serialize");
                 return Ok(());
             }
+
+            // Build change list for commit message
+            let changes: Vec<(char, String, String)> = modified
+                .iter()
+                .map(|(target_type, target_value, key, op, _val, _vtype)| {
+                    let op_char = match op.as_str() {
+                        "rm" => 'D',
+                        "set" => {
+                            if existing_tree.is_some() { 'M' } else { 'A' }
+                        }
+                        _ => 'M',
+                    };
+                    let target_label = if target_type == "project" {
+                        "project".to_string()
+                    } else {
+                        format!("{}:{}", target_type, target_value)
+                    };
+                    (op_char, target_label, key.clone())
+                })
+                .collect();
 
             // Compute dirty target base paths from modified entries
             let mut dirty_bases: BTreeSet<String> = BTreeSet::new();
@@ -265,17 +309,35 @@ pub fn run(verbose: bool) -> Result<()> {
                 } else {
                     None
                 },
+                changes,
             )
         } else {
             if verbose {
                 eprintln!("[verbose] full serialization mode (no previous materialize)");
             }
+
+            let metadata = db.get_all_metadata()?;
+
+            // Full serialize: all entries are adds
+            let changes: Vec<(char, String, String)> = metadata
+                .iter()
+                .map(|(target_type, target_value, key, _value, _value_type, _ts, _is_git_ref)| {
+                    let target_label = if target_type == "project" {
+                        "project".to_string()
+                    } else {
+                        format!("{}:{}", target_type, target_value)
+                    };
+                    ('A', target_label, key.clone())
+                })
+                .collect();
+
             (
-                db.get_all_metadata()?,
+                metadata,
                 db.get_all_tombstones()?,
                 db.get_all_set_tombstones()?,
                 db.get_all_list_tombstones()?,
                 None,
+                changes,
             )
         };
 
@@ -474,7 +536,8 @@ pub fn run(verbose: bool) -> Result<()> {
         }
 
         let parents: Vec<&git2::Commit> = parent.iter().collect();
-        let commit_oid = repo.commit(Some(&ref_name), &sig, &sig, "", &tree, &parents)?;
+        let commit_message = build_commit_message(&changes);
+        let commit_oid = repo.commit(Some(&ref_name), &sig, &sig, &commit_message, &tree, &parents)?;
 
         println!(
             "serialized to {} ({})",

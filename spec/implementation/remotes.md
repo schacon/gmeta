@@ -66,6 +66,35 @@ A `gmeta pull` should simply do the first part of the complex push process. Fetc
 
 We may want to keep our last serialized commit locally, but if we go to write another one and the last one was ours and unpushed, rewrite it. Always keep and push the minimum number of new commits necessary.
 
+### Serialize Commit Messages
+
+Serialization commits encode a diffstat of the changes they introduce. This allows fast key-list compilation from commit history without fetching any blob data — critical for blobless clones where the tree and commit objects are cheap but blob fetches are expensive. Walking the commit messages to reconstruct which keys exist is orders of magnitude faster than materializing trees.
+
+There are two commit message formats:
+
+**Normal** (up to 1000 changes):
+
+```
+gmeta: serialize (3 changes)
+
+A	commit:abc123...	agent:model
+M	commit:abc123...	agent:cost
+D	project	meta:old-key
+```
+
+Each change line is: `A`/`M`/`D` (add/modify/delete), a tab, the target, a tab, the key.
+
+**Large** (over 1000 changes):
+
+```
+gmeta: serialize (5432 changes)
+
+changes-omitted: true
+count: 5432
+```
+
+When the change count exceeds 1000, the individual lines are omitted to keep commit objects small. Consumers should fall back to tree diffing for these commits.
+
 ## Removing a remote meta source
 
 A user may want to get rid of a meta source they are no longer using.

@@ -88,15 +88,72 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
                     &["fetch", &remote_name, &fetch_refspec],
                 )?;
 
+                // Hydrate tip tree blobs so libgit2 can read them
+                let short_ref = format!("{}/remotes/main", ns);
+                git_utils::hydrate_tip_blobs(&repo, &remote_name, &short_ref)?;
+
                 // Materialize the remote data (merge into local DB)
                 materialize::run(None, false, verbose)?;
 
                 // Re-serialize with merged data
                 eprintln!("Re-serializing after merge...");
                 serialize::run(verbose)?;
+
+                // Rewrite local ref as a single commit on top of the remote tip.
+                // This avoids merge commits in the pushed history — the spec
+                // requires that push always produces a single fast-forward commit.
+                rebase_local_on_remote(&repo, &local_ref, &remote_tracking_ref, verbose)?;
             }
         }
     }
 
     bail!("push failed after {} attempts", MAX_RETRIES);
+}
+
+/// Rewrite the local ref as a single non-merge commit whose parent is the
+/// remote tip and whose tree is the current local ref's tree. This ensures
+/// the pushed history is always a clean fast-forward with no merge commits.
+fn rebase_local_on_remote(
+    repo: &git2::Repository,
+    local_ref: &str,
+    remote_ref: &str,
+    verbose: bool,
+) -> anyhow::Result<()> {
+    let local_commit = repo
+        .find_reference(local_ref)?
+        .peel_to_commit()?;
+    let remote_commit = repo
+        .find_reference(remote_ref)?
+        .peel_to_commit()?;
+
+    // If the local commit is already a single-parent child of remote, nothing to do
+    if local_commit.parent_count() == 1
+        && local_commit.parent_id(0)? == remote_commit.id()
+    {
+        return Ok(());
+    }
+
+    let tree = local_commit.tree()?;
+    let message = local_commit.message().unwrap_or("");
+    let sig = local_commit.author();
+
+    let new_oid = repo.commit(
+        Some(local_ref),
+        &sig,
+        &sig,
+        message,
+        &tree,
+        &[&remote_commit],
+    )?;
+
+    if verbose {
+        eprintln!(
+            "[verbose] rebased local ref onto remote tip: {} -> {} (parent: {})",
+            &local_commit.id().to_string()[..8],
+            &new_oid.to_string()[..8],
+            &remote_commit.id().to_string()[..8],
+        );
+    }
+
+    Ok(())
 }

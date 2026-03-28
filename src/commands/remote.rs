@@ -2,9 +2,24 @@ use anyhow::{bail, Result};
 
 use crate::git_utils;
 
+/// Expand shorthand "owner/repo" to a full GitHub SSH URL.
+fn expand_url(url: &str) -> String {
+    // Already a full URL or path — leave it alone
+    if url.contains(':') || url.starts_with('/') || url.starts_with('.') {
+        return url.to_string();
+    }
+    // "owner/repo" shorthand (exactly one slash, no other path separators)
+    if url.matches('/').count() == 1 {
+        let url = url.strip_suffix(".git").unwrap_or(url);
+        return format!("git@github.com:{}.git", url);
+    }
+    url.to_string()
+}
+
 pub fn run_add(url: &str, name: &str) -> Result<()> {
     let repo = git_utils::discover_repo()?;
     let ns = git_utils::get_namespace(&repo)?;
+    let url = expand_url(url);
 
     // Check if this remote name already exists
     let existing = repo.remotes()?;
@@ -18,7 +33,7 @@ pub fn run_add(url: &str, name: &str) -> Result<()> {
     let mut config = repo.config()?;
     let prefix = format!("remote.{}", name);
 
-    config.set_str(&format!("{}.url", prefix), url)?;
+    config.set_str(&format!("{}.url", prefix), &url)?;
     config.set_str(
         &format!("{}.fetch", prefix),
         &format!("+refs/{ns}/main:refs/{ns}/remotes/main"),
@@ -39,49 +54,9 @@ pub fn run_add(url: &str, name: &str) -> Result<()> {
         Ok(_) => {
             println!(" done.");
 
-            // Hydrate tip tree blobs so we can read the metadata
+            // Hydrate tip tree blobs so libgit2 can read the metadata
             let remote_ref = format!("{ns}/remotes/main");
-            let blob_list =
-                git_utils::run_git(&repo, &["ls-tree", "-r", "--object-only", &remote_ref]);
-
-            if let Ok(blobs) = blob_list {
-                if !blobs.trim().is_empty() {
-                    // Pipe blob OIDs into fetch to hydrate them
-                    let workdir = repo
-                        .workdir()
-                        .or_else(|| Some(repo.path()))
-                        .expect("cannot determine repository directory");
-
-                    let mut child = std::process::Command::new("git")
-                        .args([
-                            "-c",
-                            "fetch.negotiationAlgorithm=noop",
-                            "fetch",
-                            name,
-                            "--no-tags",
-                            "--no-write-fetch-head",
-                            "--recurse-submodules=no",
-                            "--filter=blob:none",
-                            "--stdin",
-                        ])
-                        .current_dir(workdir)
-                        .stdin(std::process::Stdio::piped())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()?;
-
-                    if let Some(mut stdin) = child.stdin.take() {
-                        use std::io::Write;
-                        stdin.write_all(blobs.as_bytes())?;
-                    }
-
-                    let output = child.wait_with_output()?;
-                    if !output.status.success() {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        eprintln!("Warning: blob hydration failed: {}", stderr.trim());
-                    }
-                }
-            }
+            git_utils::hydrate_tip_blobs(&repo, name, &remote_ref)?;
         }
         Err(e) => {
             eprintln!(
