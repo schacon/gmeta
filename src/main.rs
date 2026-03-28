@@ -53,7 +53,9 @@ fn main() -> Result<()> {
         Commands::SetRm { target, key, value } => commands::set::run_rm(&target, &key, &value),
 
         Commands::Remote(args) => match args.action {
-            RemoteAction::Add { url, name } => commands::remote::run_add(&url, &name),
+            RemoteAction::Add { url, name, namespace } => {
+                commands::remote::run_add(&url, &name, namespace.as_deref())
+            }
             RemoteAction::Remove { name } => commands::remote::run_remove(&name),
             RemoteAction::List => commands::remote::run_list(),
         },

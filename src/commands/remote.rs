@@ -16,9 +16,48 @@ fn expand_url(url: &str) -> String {
     url.to_string()
 }
 
-pub fn run_add(url: &str, name: &str) -> Result<()> {
+/// Scan ls-remote output for meta refs under a given namespace.
+/// Returns (has_match, other_namespaces) where other_namespaces are
+/// namespace prefixes that contain a "main" ref (e.g. "altmeta" from "refs/altmeta/main").
+fn check_remote_refs(repo: &git2::Repository, url: &str, ns: &str) -> Result<(bool, Vec<String>)> {
+    let output = git_utils::run_git(repo, &["ls-remote", url])?;
+
+    let expected_ref = format!("refs/{}/main", ns);
+    let mut has_match = false;
+    let mut other_namespaces = Vec::new();
+
+    for line in output.lines() {
+        // ls-remote format: "<sha>\t<refname>"
+        let refname = match line.split('\t').nth(1) {
+            Some(r) => r.trim(),
+            None => continue,
+        };
+
+        if refname == expected_ref {
+            has_match = true;
+        } else if let Some(rest) = refname.strip_prefix("refs/") {
+            // Look for refs/*/main patterns that could be meta namespaces
+            if let Some(candidate_ns) = rest.strip_suffix("/main") {
+                // Skip standard git namespaces
+                if !matches!(
+                    candidate_ns,
+                    "heads" | "tags" | "remotes" | "notes" | "stash"
+                ) && !candidate_ns.contains('/')
+                {
+                    other_namespaces.push(candidate_ns.to_string());
+                }
+            }
+        }
+    }
+
+    Ok((has_match, other_namespaces))
+}
+
+pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Result<()> {
     let repo = git_utils::discover_repo()?;
-    let ns = git_utils::get_namespace(&repo)?;
+    let ns = namespace_override
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| git_utils::get_namespace(&repo).unwrap_or_else(|_| "meta".to_string()));
     let url = expand_url(url);
 
     // Check if this remote name already exists
@@ -26,6 +65,53 @@ pub fn run_add(url: &str, name: &str) -> Result<()> {
     for existing_name in existing.iter().flatten() {
         if existing_name == name {
             bail!("remote '{}' already exists", name);
+        }
+    }
+
+    // Check the remote for meta refs before configuring
+    eprintln!("Checking {}...", url);
+    match check_remote_refs(&repo, &url, &ns) {
+        Ok((has_match, other_namespaces)) => {
+            if !has_match {
+                if other_namespaces.is_empty() {
+                    bail!(
+                        "no metadata refs found on {}\n\n\
+                         The remote does not have refs/{}/main or any other recognizable metadata refs.\n\
+                         If this is a new remote that will receive metadata via push, use:\n  \
+                         gmeta remote add {} --name {} --namespace {}",
+                        url, ns, url, name, ns,
+                    );
+                } else {
+                    let found_refs = other_namespaces
+                        .iter()
+                        .map(|alt| format!("  refs/{}/main", alt))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    let suggestions = other_namespaces
+                        .iter()
+                        .map(|alt| {
+                            format!(
+                                "  gmeta remote add {} --namespace={}",
+                                url, alt
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    bail!(
+                        "no metadata refs found under refs/{}/main on {}\n\n\
+                         However, metadata refs were found under other namespaces:\n{}\n\n\
+                         To use one of these, re-run with --namespace:\n{}",
+                        ns,
+                        url,
+                        found_refs,
+                        suggestions,
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Warning: could not inspect remote refs: {}", e);
+            eprintln!("Proceeding with setup anyway...");
         }
     }
 
@@ -41,6 +127,11 @@ pub fn run_add(url: &str, name: &str) -> Result<()> {
     config.set_bool(&format!("{}.meta", prefix), true)?;
     config.set_bool(&format!("{}.promisor", prefix), true)?;
     config.set_str(&format!("{}.partialclonefilter", prefix), "blob:none")?;
+
+    // If a non-default namespace was specified, store it so other commands can find it
+    if namespace_override.is_some() {
+        config.set_str(&format!("{}.metanamespace", prefix), &ns)?;
+    }
 
     println!("Added meta remote '{}' -> {}", name, url);
 
@@ -60,7 +151,7 @@ pub fn run_add(url: &str, name: &str) -> Result<()> {
         }
         Err(e) => {
             eprintln!(
-                "\nWarning: initial fetch failed (remote may not have metadata yet): {}",
+                "\nWarning: initial fetch failed: {}",
                 e
             );
             eprintln!("You can fetch later with: git fetch {name}");
@@ -89,6 +180,7 @@ pub fn run_remove(name: &str) -> Result<()> {
     let _ = config.remove_multivar(&format!("remote.{}.meta", name), ".*");
     let _ = config.remove_multivar(&format!("remote.{}.promisor", name), ".*");
     let _ = config.remove_multivar(&format!("remote.{}.partialclonefilter", name), ".*");
+    let _ = config.remove_multivar(&format!("remote.{}.metanamespace", name), ".*");
 
     // Delete refs under refs/{ns}/remotes/
     let ref_prefix = format!("refs/{}/remotes/", ns);

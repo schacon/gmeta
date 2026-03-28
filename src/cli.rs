@@ -347,6 +347,10 @@ pub enum RemoteAction {
         /// Remote name (default: meta)
         #[arg(long, default_value = "meta")]
         name: String,
+
+        /// Metadata namespace to use (default: from git config or "meta")
+        #[arg(long)]
+        namespace: Option<String>,
     },
 
     /// Remove a metadata remote source
