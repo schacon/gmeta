@@ -9,6 +9,7 @@ pub mod list;
 pub mod log;
 pub mod materialize;
 pub mod local_prune;
+pub mod promisor;
 pub mod prune;
 pub mod pull;
 pub mod push;

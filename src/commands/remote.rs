@@ -1,5 +1,7 @@
 use anyhow::{bail, Result};
 
+use crate::commands::{materialize, pull, serialize};
+use crate::db::Db;
 use crate::git_utils;
 
 /// Expand shorthand "owner/repo" to a full GitHub SSH URL.
@@ -137,23 +139,64 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 
     // Initial blobless fetch
     let fetch_refspec = format!("refs/{ns}/main:refs/{ns}/remotes/main");
-    eprintln!("Fetching metadata...");
-    match git_utils::run_git_visible(
+    eprint!("Fetching metadata (blobless)...");
+    match git_utils::run_git(
         &repo,
         &["fetch", "--filter=blob:none", name, &fetch_refspec],
     ) {
         Ok(_) => {
-            // Hydrate tip tree blobs so libgit2 can read the metadata
-            eprintln!("Hydrating blobs...");
+            eprintln!(" done.");
+
+            // Verify the tracking ref was created
             let remote_ref = format!("{ns}/remotes/main");
-            git_utils::hydrate_tip_blobs(&repo, name, &remote_ref, true)?;
+            let tracking_ref_name = format!("refs/{}", remote_ref);
+            match repo.find_reference(&tracking_ref_name) {
+                Ok(r) => {
+                    let tip = r.peel_to_commit()?;
+                    eprintln!("  tracking ref: {} -> {}", tracking_ref_name, &tip.id().to_string()[..12]);
+                }
+                Err(e) => {
+                    eprintln!("  warning: tracking ref {} not found after fetch: {}", tracking_ref_name, e);
+                    eprintln!("You can try again with: gmeta pull");
+                    return Ok(());
+                }
+            }
+
+            // Hydrate tip tree blobs so libgit2 can read the metadata
+            eprint!("Hydrating tip blobs...");
+            let blob_count = git_utils::hydrate_tip_blobs_counted(&repo, name, &remote_ref)?;
+            eprintln!(" {} blobs fetched.", blob_count);
+
+            // Materialize remote metadata into local SQLite
+            eprint!("Serializing local metadata...");
+            serialize::run(false)?;
+            eprintln!(" done.");
+
+            eprint!("Materializing remote metadata...");
+            materialize::run(None, false, false)?;
+            eprintln!(" done.");
+
+            // Index historical keys as promisor entries
+            let tracking_ref_name = format!("refs/{}/remotes/main", ns);
+            if let Ok(r) = repo.find_reference(&tracking_ref_name) {
+                if let Ok(tip) = r.peel_to_commit() {
+                    let db_path = git_utils::db_path(&repo)?;
+                    let db = Db::open(&db_path)?;
+                    let count = pull::insert_promisor_entries_pub(
+                        &repo, &db, tip.id(), None, false,
+                    )?;
+                    if count > 0 {
+                        eprintln!("Indexed {} keys from history (available on demand).", count);
+                    }
+                }
+            }
         }
         Err(e) => {
             eprintln!(
-                "Warning: initial fetch failed: {}",
+                "\nWarning: initial fetch failed: {}",
                 e
             );
-            eprintln!("You can fetch later with: git fetch {name}");
+            eprintln!("You can fetch later with: gmeta pull");
         }
     }
 

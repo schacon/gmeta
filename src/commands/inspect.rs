@@ -20,10 +20,14 @@ const YELLOW: &str = "\x1b[33m";
 const GREEN: &str = "\x1b[32m";
 const CYAN: &str = "\x1b[36m";
 
-pub fn run(target_type: Option<&str>, term: Option<&str>, timeline: bool) -> Result<()> {
+pub fn run(target_type: Option<&str>, term: Option<&str>, timeline: bool, promisor: bool) -> Result<()> {
     let repo = git_utils::discover_repo()?;
     let db_path = git_utils::db_path(&repo)?;
     let db = Db::open(&db_path)?;
+
+    if promisor {
+        return run_promisor_list(&db, target_type);
+    }
 
     if timeline {
         return run_timeline(&db);
@@ -38,8 +42,10 @@ pub fn run(target_type: Option<&str>, term: Option<&str>, timeline: bool) -> Res
 /// Show key counts per target type.
 fn run_overview(db: &Db) -> Result<()> {
     let keys = db.get_all_keys()?;
+    let promised = db.count_promised_keys()?;
+    let promised_map: BTreeMap<String, u64> = promised.into_iter().collect();
 
-    if keys.is_empty() {
+    if keys.is_empty() && promised_map.is_empty() {
         println!("no metadata stored");
         return Ok(());
     }
@@ -52,18 +58,103 @@ fn run_overview(db: &Db) -> Result<()> {
         entry.1.insert(target_value.clone(), ());
     }
 
-    for (target_type, (key_count, targets)) in &type_stats {
-        let target_count = targets.len();
-        let targets_label = if target_count == 1 && target_type == "project" {
+    // Collect all target types (materialized + promised-only)
+    let mut all_types: Vec<String> = type_stats.keys().cloned().collect();
+    for tt in promised_map.keys() {
+        if !type_stats.contains_key(tt) {
+            all_types.push(tt.clone());
+        }
+    }
+    all_types.sort();
+
+    for target_type in &all_types {
+        let (hydrated_count, targets) = type_stats
+            .get(target_type)
+            .map(|(k, t)| (*k, t.len()))
+            .unwrap_or((0, 0));
+        let promised_count = promised_map.get(target_type).copied().unwrap_or(0);
+        let total = hydrated_count + promised_count;
+        let targets_label = if targets <= 1 && target_type == "project" {
             String::new()
+        } else if targets > 0 {
+            format!(" across {} targets", targets)
         } else {
-            format!(" across {} targets", target_count)
+            String::new()
+        };
+        let breakdown = if promised_count > 0 {
+            format!(
+                " {DIM}({} hydrated, {} pending){RESET}",
+                hydrated_count, promised_count
+            )
+        } else {
+            String::new()
         };
         println!(
-            "{YELLOW}{}{RESET}  {} keys{}",
-            target_type, key_count, targets_label
+            "{YELLOW}{}{RESET}  {} keys{}{}",
+            target_type, total, targets_label, breakdown
         );
     }
+
+    Ok(())
+}
+
+/// List promisor (not-yet-fetched) keys, optionally filtered by target type.
+fn run_promisor_list(db: &Db, target_type: Option<&str>) -> Result<()> {
+    let all = db.get_promised_keys()?;
+
+    let entries: Vec<&(String, String, String)> = match target_type {
+        Some(tt) => all.iter().filter(|(t, _, _)| t == tt).collect(),
+        None => all.iter().collect(),
+    };
+
+    if entries.is_empty() {
+        println!("no promisor keys");
+        return Ok(());
+    }
+
+    // Group by target_type, then target_value
+    let mut by_type: BTreeMap<&str, BTreeMap<&str, Vec<&str>>> = BTreeMap::new();
+    for (tt, tv, key) in &entries {
+        by_type
+            .entry(tt)
+            .or_default()
+            .entry(tv)
+            .or_default()
+            .push(key);
+    }
+
+    let mut first_type = true;
+    for (tt, targets) in &by_type {
+        if !first_type {
+            println!();
+        }
+        first_type = false;
+
+        let mut first_target = true;
+        for (tv, keys) in targets {
+            if !first_target {
+                println!();
+            }
+            first_target = false;
+
+            let display_target = if *tt == "project" {
+                "project".to_string()
+            } else {
+                format!("{CYAN}{tt}{RESET}:{GREEN}{tv}{RESET}")
+            };
+            println!("{}", display_target);
+
+            for key in keys {
+                println!("  {DIM}{key}{RESET}");
+            }
+        }
+    }
+
+    println!(
+        "\n{} promisor key{} total",
+        entries.len(),
+        if entries.len() == 1 { "" } else { "s" }
+    );
 
     Ok(())
 }

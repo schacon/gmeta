@@ -175,6 +175,10 @@ pub enum Commands {
         /// Show a weekly timeline graph of entries
         #[arg(long)]
         timeline: bool,
+
+        /// List only promisor (not-yet-fetched) keys
+        #[arg(long)]
+        promisor: bool,
     },
 
     /// Show metadata statistics
@@ -267,6 +271,10 @@ pub enum Commands {
         #[arg(short = 'v', long)]
         verbose: bool,
     },
+
+    /// Walk remote history and index keys as promisor entries
+    #[command(display_order = 37)]
+    Promisor,
 
     /// Watch agent transcripts and auto-attach to commits
     #[command(display_order = 33)]

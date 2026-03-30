@@ -90,34 +90,22 @@ pub fn is_list_entry_name(name: &str) -> bool {
 /// Run a git CLI command in the repository's working directory.
 /// Returns stdout on success, or an error with stderr on failure.
 pub fn run_git(repo: &Repository, args: &[&str]) -> Result<String> {
-    run_git_inner(repo, args, false)
+    run_git_inner(repo, args)
 }
 
-/// Like run_git, but inherits stderr so the user sees git's progress output.
-pub fn run_git_visible(repo: &Repository, args: &[&str]) -> Result<String> {
-    run_git_inner(repo, args, true)
-}
-
-fn run_git_inner(repo: &Repository, args: &[&str], inherit_stderr: bool) -> Result<String> {
+fn run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
     let workdir = repo
         .workdir()
         .or_else(|| Some(repo.path()))
         .context("cannot determine repository directory")?;
 
-    let mut cmd = Command::new("git");
-    cmd.args(args).current_dir(workdir);
-
-    if inherit_stderr {
-        cmd.stderr(std::process::Stdio::inherit());
-    }
-
-    let output = cmd.output().context("failed to run git command")?;
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(workdir)
+        .output()
+        .context("failed to run git command")?;
 
     if !output.status.success() {
-        if inherit_stderr {
-            // stderr was already shown to user
-            bail!("git {} failed", args.first().unwrap_or(&""));
-        }
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("git {} failed: {}", args.first().unwrap_or(&""), stderr.trim());
     }
@@ -148,27 +136,30 @@ pub fn list_meta_remotes(repo: &Repository) -> Result<Vec<(String, String)>> {
 
 /// Hydrate tip tree blobs for a blobless-fetched ref.
 /// This fetches all blob objects referenced by the tip tree so libgit2 can read them.
-/// When `visible` is true, git's stderr (progress) is shown to the user.
 pub fn hydrate_tip_blobs(
     repo: &Repository,
     remote_name: &str,
     ref_name: &str,
-    visible: bool,
 ) -> Result<()> {
+    hydrate_tip_blobs_counted(repo, remote_name, ref_name)?;
+    Ok(())
+}
+
+/// Like hydrate_tip_blobs but returns the number of blobs fetched.
+pub fn hydrate_tip_blobs_counted(
+    repo: &Repository,
+    remote_name: &str,
+    ref_name: &str,
+) -> Result<usize> {
     let blob_list = run_git(repo, &["ls-tree", "-r", "--object-only", ref_name]);
 
-    if let Ok(blobs) = blob_list {
-        if !blobs.trim().is_empty() {
+    match blob_list {
+        Ok(blobs) if !blobs.trim().is_empty() => {
+            let count = blobs.lines().count();
             let workdir = repo
                 .workdir()
                 .or_else(|| Some(repo.path()))
                 .context("cannot determine repository directory")?;
-
-            let stderr_cfg = if visible {
-                std::process::Stdio::inherit()
-            } else {
-                std::process::Stdio::piped()
-            };
 
             let mut child = Command::new("git")
                 .args([
@@ -185,7 +176,7 @@ pub fn hydrate_tip_blobs(
                 .current_dir(workdir)
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::null())
-                .stderr(stderr_cfg)
+                .stderr(std::process::Stdio::piped())
                 .spawn()?;
 
             if let Some(mut stdin) = child.stdin.take() {
@@ -195,17 +186,17 @@ pub fn hydrate_tip_blobs(
 
             let output = child.wait_with_output()?;
             if !output.status.success() {
-                if visible {
-                    eprintln!("Warning: blob hydration failed");
-                } else {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("Warning: blob hydration failed: {}", stderr.trim());
-                }
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                bail!("blob hydration failed: {}", stderr.trim());
             }
+
+            Ok(count)
+        }
+        Ok(_) => Ok(0),
+        Err(e) => {
+            bail!("ls-tree failed for {}: {}", ref_name, e);
         }
     }
-
-    Ok(())
 }
 
 /// Look up a blob OID in a git tree by following a slash-separated path.

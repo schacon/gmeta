@@ -1541,7 +1541,42 @@ impl Db {
     /// Get all unique (target_type, target_value, key) triples.
     pub fn get_all_keys(&self) -> Result<Vec<(String, String, String)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT target_type, target_value, key FROM metadata ORDER BY target_type, target_value, key",
+            "SELECT target_type, target_value, key FROM metadata WHERE is_promised = 0 ORDER BY target_type, target_value, key",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Count promised (not-yet-hydrated) keys, grouped by target_type.
+    pub fn count_promised_keys(&self) -> Result<Vec<(String, u64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT target_type, COUNT(*) FROM metadata WHERE is_promised = 1 GROUP BY target_type ORDER BY target_type",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Get all promised (not-yet-hydrated) keys.
+    /// Returns (target_type, target_value, key).
+    pub fn get_promised_keys(&self) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT target_type, target_value, key FROM metadata WHERE is_promised = 1 ORDER BY target_type, target_value, key",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((

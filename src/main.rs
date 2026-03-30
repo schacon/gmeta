@@ -73,6 +73,8 @@ fn main() -> Result<()> {
         }
         Commands::Pull { remote, verbose } => commands::pull::run(remote.as_deref(), verbose),
 
+        Commands::Promisor => commands::promisor::run(),
+
         Commands::Serialize { verbose } => commands::serialize::run(verbose),
 
         Commands::Materialize {
@@ -93,7 +95,8 @@ fn main() -> Result<()> {
             target_type,
             term,
             timeline,
-        } => commands::inspect::run(target_type.as_deref(), term.as_deref(), timeline),
+            promisor,
+        } => commands::inspect::run(target_type.as_deref(), term.as_deref(), timeline, promisor),
 
         Commands::Stats => commands::stats::run(),
 

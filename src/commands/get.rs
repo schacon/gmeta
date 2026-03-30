@@ -67,7 +67,12 @@ pub fn run(
         .collect();
 
     if !promised.is_empty() {
-        let hydrated = hydrate_promised_entries(&repo, &db, &promised)?;
+        let hydrated = hydrate_promised_entries(
+            &repo,
+            &db,
+            target.type_str(),
+            &promised,
+        )?;
         if hydrated > 0 {
             // Re-query to get the now-resolved values
             entries = db.get_all_with_target_prefix(
@@ -109,10 +114,11 @@ pub fn run(
 }
 
 /// Hydrate promised entries by looking up their blob OIDs in the tip tree
-/// and fetching the blobs from the remote. Returns the number hydrated.
+/// and fetching any that aren't already local. Returns the number hydrated.
 fn hydrate_promised_entries(
     repo: &Repository,
     db: &Db,
+    target_type: &str,
     entries: &[(String, String)], // (target_value, key)
 ) -> Result<usize> {
     let ns = git_utils::get_namespace(repo)?;
@@ -120,37 +126,21 @@ fn hydrate_promised_entries(
 
     let tip_commit = match repo.find_reference(&tracking_ref) {
         Ok(r) => r.peel_to_commit()?,
-        Err(_) => return Ok(0), // no remote tracking ref, can't hydrate
+        Err(_) => return Ok(0),
     };
     let tip_tree = tip_commit.tree()?;
 
-    // For each promised entry, find its blob OID in the tip tree
-    let mut to_fetch: Vec<(usize, git2::Oid, String)> = Vec::new(); // (index, oid, tree_path)
+    // For each promised entry, find its blob OID(s) in the tip tree
+    struct PendingEntry {
+        idx: usize,
+        oids: Vec<git2::Oid>,
+        value_type: String, // "string", "list", or "set"
+    }
+
+    let mut pending: Vec<PendingEntry> = Vec::new();
     let mut not_found: Vec<usize> = Vec::new();
 
-    // We need to reconstruct Target objects to build tree paths.
-    // The target_type comes from the DB query context, but we only have target_value here.
-    // We need to also pass target_type. For now, we get it from the DB row.
-    // Actually, all entries in a single get call share the same target_type from the query.
-    // But we don't have that here. Let me work around this by trying to parse from DB.
-
-    // We'll look up each entry's target_type from the DB
     for (idx, (target_value, key)) in entries.iter().enumerate() {
-        // Query the metadata table directly for the target_type
-        let target_type: Option<String> = db
-            .conn
-            .query_row(
-                "SELECT target_type FROM metadata WHERE target_value = ?1 AND key = ?2 AND is_promised = 1",
-                rusqlite::params![target_value, key],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let target_type = match target_type {
-            Some(t) => t,
-            None => continue,
-        };
-
         let target_str = if target_type == "project" {
             "project".to_string()
         } else {
@@ -161,81 +151,155 @@ fn hydrate_promised_entries(
             Err(_) => continue,
         };
 
-        // Try string value first (__value blob)
-        let tree_path = match types::build_tree_path(&parsed_target, key) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        match git_utils::find_blob_oid_in_tree(repo, &tip_tree, &tree_path)? {
-            Some(oid) => to_fetch.push((idx, oid, tree_path)),
-            None => {
-                // Key doesn't exist in tip tree — it was deleted in a later commit
-                not_found.push(idx);
+        // Try __value (string) first
+        if let Ok(path) = types::build_tree_path(&parsed_target, key) {
+            if let Some(oid) = git_utils::find_blob_oid_in_tree(repo, &tip_tree, &path)? {
+                pending.push(PendingEntry {
+                    idx,
+                    oids: vec![oid],
+                    value_type: "string".to_string(),
+                });
+                continue;
             }
         }
+
+        // Try __list directory
+        if let Ok(path) = types::build_list_tree_dir_path(&parsed_target, key) {
+            if let Some(dir_oid) = git_utils::find_blob_oid_in_tree(repo, &tip_tree, &path)? {
+                // dir_oid is a tree — collect all blob entries in it
+                if let Ok(list_tree) = repo.find_tree(dir_oid) {
+                    let mut oids = Vec::new();
+                    for entry in list_tree.iter() {
+                        let name = entry.name().unwrap_or("");
+                        if name == types::TOMBSTONE_ROOT || name.starts_with("__") {
+                            continue;
+                        }
+                        if entry.kind() == Some(git2::ObjectType::Blob) {
+                            oids.push(entry.id());
+                        }
+                    }
+                    if !oids.is_empty() {
+                        pending.push(PendingEntry {
+                            idx,
+                            oids,
+                            value_type: "list".to_string(),
+                        });
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Try __set directory
+        if let Ok(key_path) = types::build_key_tree_path(&parsed_target, key) {
+            let set_path = format!("{}/{}", key_path, types::SET_VALUE_DIR);
+            if let Some(dir_oid) = git_utils::find_blob_oid_in_tree(repo, &tip_tree, &set_path)? {
+                if let Ok(set_tree) = repo.find_tree(dir_oid) {
+                    let mut oids = Vec::new();
+                    for entry in set_tree.iter() {
+                        let name = entry.name().unwrap_or("");
+                        if name == types::TOMBSTONE_ROOT || name.starts_with("__") {
+                            continue;
+                        }
+                        if entry.kind() == Some(git2::ObjectType::Blob) {
+                            oids.push(entry.id());
+                        }
+                    }
+                    if !oids.is_empty() {
+                        pending.push(PendingEntry {
+                            idx,
+                            oids,
+                            value_type: "set".to_string(),
+                        });
+                        continue;
+                    }
+                }
+            }
+        }
+
+        not_found.push(idx);
     }
 
     // Clean up entries that no longer exist in the tip
     for idx in &not_found {
         let (target_value, key) = &entries[*idx];
-        // Look up target_type again
-        let target_type: Option<String> = db
-            .conn
-            .query_row(
-                "SELECT target_type FROM metadata WHERE target_value = ?1 AND key = ?2 AND is_promised = 1",
-                rusqlite::params![target_value, key],
-                |row| row.get(0),
-            )
-            .ok();
-        if let Some(tt) = target_type {
-            db.delete_promised(&tt, target_value, key)?;
-        }
+        db.delete_promised(target_type, target_value, key)?;
     }
 
-    if to_fetch.is_empty() {
+    if pending.is_empty() {
         return Ok(0);
     }
 
-    // Fetch all needed blobs in one call
-    let oids: Vec<git2::Oid> = to_fetch.iter().map(|(_, oid, _)| *oid).collect();
-    let remote_name = git_utils::resolve_meta_remote(repo, None)?;
+    // Collect all OIDs, try to read locally first, fetch missing ones
+    let all_oids: Vec<git2::Oid> = pending.iter().flat_map(|p| p.oids.iter().copied()).collect();
+    let mut missing: Vec<git2::Oid> = Vec::new();
+    for oid in &all_oids {
+        if repo.find_blob(*oid).is_err() {
+            missing.push(*oid);
+        }
+    }
 
-    eprintln!("Fetching {} value{} from remote...", oids.len(), if oids.len() == 1 { "" } else { "s" });
-    git_utils::fetch_blob_oids(repo, &remote_name, &oids)?;
+    if !missing.is_empty() {
+        let remote_name = git_utils::resolve_meta_remote(repo, None)?;
+        eprintln!(
+            "Fetching {} blob{} from remote...",
+            missing.len(),
+            if missing.len() == 1 { "" } else { "s" }
+        );
+        git_utils::fetch_blob_oids(repo, &remote_name, &missing)?;
+    }
 
-    // Now read each blob and update the DB
+    // Now read blobs and update DB
     let mut hydrated = 0;
-    for (idx, oid, _tree_path) in &to_fetch {
-        let (target_value, key) = &entries[*idx];
+    for entry in &pending {
+        let (target_value, key) = &entries[entry.idx];
 
-        let blob = match repo.find_blob(*oid) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let content = match std::str::from_utf8(blob.content()) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        // Look up target_type
-        let target_type: Option<String> = db
-            .conn
-            .query_row(
-                "SELECT target_type FROM metadata WHERE target_value = ?1 AND key = ?2 AND is_promised = 1",
-                rusqlite::params![target_value, key],
-                |row| row.get(0),
-            )
-            .ok();
-        let target_type = match target_type {
-            Some(t) => t,
-            None => continue,
-        };
-
-        // Store as JSON-encoded string value
-        let json_value = serde_json::to_string(content)?;
-        db.resolve_promised(&target_type, target_value, key, &json_value, "string", false)?;
-        hydrated += 1;
+        match entry.value_type.as_str() {
+            "string" => {
+                let oid = entry.oids[0];
+                let blob = match repo.find_blob(oid) {
+                    Ok(b) => b,
+                    Err(_) => continue,
+                };
+                let content = match std::str::from_utf8(blob.content()) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let json_value = serde_json::to_string(content)?;
+                db.resolve_promised(target_type, target_value, key, &json_value, "string", false)?;
+                hydrated += 1;
+            }
+            "list" => {
+                // Read all list entry blobs, build JSON array
+                let mut list_entries = Vec::new();
+                for oid in &entry.oids {
+                    if let Ok(blob) = repo.find_blob(*oid) {
+                        if let Ok(s) = std::str::from_utf8(blob.content()) {
+                            list_entries.push(s.to_string());
+                        }
+                    }
+                }
+                let json_value = serde_json::to_string(&list_entries)?;
+                db.resolve_promised(target_type, target_value, key, &json_value, "list", false)?;
+                hydrated += 1;
+            }
+            "set" => {
+                // Read all set member blobs, build JSON array
+                let mut set_members = Vec::new();
+                for oid in &entry.oids {
+                    if let Ok(blob) = repo.find_blob(*oid) {
+                        if let Ok(s) = std::str::from_utf8(blob.content()) {
+                            set_members.push(s.to_string());
+                        }
+                    }
+                }
+                set_members.sort();
+                let json_value = serde_json::to_string(&set_members)?;
+                db.resolve_promised(target_type, target_value, key, &json_value, "set", false)?;
+                hydrated += 1;
+            }
+            _ => {}
+        }
     }
 
     Ok(hydrated)

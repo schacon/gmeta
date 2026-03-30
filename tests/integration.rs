@@ -2025,10 +2025,10 @@ fn test_pull_simple() {
     gmeta(dir.path())
         .args(["pull"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("Pulled metadata from meta"));
+        .success();
 
     // The bare repo had project/testing = "hello" — check it materialized
+    // (may have been materialized during remote add or pull)
     gmeta(dir.path())
         .args(["get", "project", "testing"])
         .assert()
@@ -2159,13 +2159,9 @@ fn test_pull_inserts_promisor_entries() {
     let bare_dir = setup_bare_with_history();
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    // Add remote and pull
+    // Add remote — this now fetches, hydrates, materializes, and indexes promisor entries
     gmeta(dir.path())
         .args(["remote", "add", bare_path])
-        .assert()
-        .success();
-    gmeta(dir.path())
-        .args(["pull"])
         .assert()
         .success()
         .stderr(predicate::str::contains("Indexed 1 keys from history"));
