@@ -5,8 +5,8 @@ use crate::db::Db;
 use crate::git_utils;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::discover_gix_repo()?;
+    let db_path = git_utils::gix_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     let rows = db.stats_by_target_type_and_key()?;
