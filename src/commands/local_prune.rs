@@ -116,10 +116,17 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
         |row| row.get(0),
     )?;
 
-    let total = metadata_count + list_values_count + tombstone_count + set_tombstone_count + log_count;
+    let total =
+        metadata_count + list_values_count + tombstone_count + set_tombstone_count + log_count;
 
-    println!("  {} metadata keys to prune ({} remaining)", metadata_count, metadata_remaining);
-    println!("  {} list entries to prune ({} remaining)", list_values_count, list_values_remaining);
+    println!(
+        "  {} metadata keys to prune ({} remaining)",
+        metadata_count, metadata_remaining
+    );
+    println!(
+        "  {} list entries to prune ({} remaining)",
+        list_values_count, list_values_remaining
+    );
     println!("  {} tombstones to prune", tombstone_count);
     println!("  {} set tombstones to prune", set_tombstone_count);
     println!("  {} log entries to prune", log_count);
@@ -132,7 +139,10 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
 
     if dry_run {
         println!();
-        println!("Would prune {} total rows. Run without --dry-run to apply.", total);
+        println!(
+            "Would prune {} total rows. Run without --dry-run to apply.",
+            total
+        );
         return Ok(());
     }
 

@@ -48,7 +48,15 @@ fn run_set(repo: &git2::Repository, db: &Db, key: &str, value: &str) -> Result<(
     let timestamp = Utc::now().timestamp_millis();
     let stored_value = serde_json::to_string(value)?;
 
-    db.set("project", "", key, &stored_value, "string", &email, timestamp)?;
+    db.set(
+        "project",
+        "",
+        key,
+        &stored_value,
+        "string",
+        &email,
+        timestamp,
+    )?;
     Ok(())
 }
 

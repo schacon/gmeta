@@ -127,10 +127,12 @@ pub fn run() -> Result<()> {
     }
 
     eprintln!();
-    println!("Walked {} commits ({} parsed, {} without change lists)",
+    println!(
+        "Walked {} commits ({} parsed, {} without change lists)",
         commits_walked, commits_parsed, commits_unparseable,
     );
-    println!("Inserted {} promisor keys ({} already existed, {} deletes skipped)",
+    println!(
+        "Inserted {} promisor keys ({} already existed, {} deletes skipped)",
         inserted, skipped_existing, skipped_deletes,
     );
 

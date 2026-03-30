@@ -94,7 +94,7 @@ fn sample_change_count(rng: &mut u64) -> usize {
     let u = (raw >> 11) as f64 / (1u64 << 53) as f64;
     // Concave power curve
     let count = (200.0 * u.powf(2.5)).ceil() as usize;
-    count.max(1).min(200)
+    count.clamp(1, 200)
 }
 
 // ── Tree helpers (mirrors fanout_bench / serialize.rs) ───────────────────────

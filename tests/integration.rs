@@ -491,10 +491,9 @@ fn test_serialize_list_values() {
         if full_path.starts_with(&format!(
             "branch/{}/sc-branch-1-deadbeef/agent/chat/__list/",
             fanout
-        )) {
-            if entry.kind() == Some(git2::ObjectType::Blob) {
-                list_entries.push(full_path);
-            }
+        )) && entry.kind() == Some(git2::ObjectType::Blob)
+        {
+            list_entries.push(full_path);
         }
         git2::TreeWalkResult::Ok
     })
@@ -1783,7 +1782,10 @@ fn test_remote_add_shorthand_url_expansion() {
     let repo = git2::Repository::open(dir.path()).unwrap();
     let config = repo.config().unwrap();
     let url = config.get_string("remote.meta.url").unwrap();
-    assert_eq!(url, "git@github.com:nonexistent-user-xyz/nonexistent-repo-xyz.git");
+    assert_eq!(
+        url,
+        "git@github.com:nonexistent-user-xyz/nonexistent-repo-xyz.git"
+    );
 }
 
 #[test]
@@ -1832,10 +1834,7 @@ fn test_push_simple() {
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    gmeta(dir.path())
-        .args(["pull"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["pull"]).assert().success();
 
     // Set local metadata
     let target = commit_target(&sha);
@@ -1875,10 +1874,7 @@ fn test_push_up_to_date() {
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    gmeta(dir.path())
-        .args(["pull"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["pull"]).assert().success();
 
     let target = commit_target(&sha);
     gmeta(dir.path())
@@ -1887,10 +1883,7 @@ fn test_push_up_to_date() {
         .success();
 
     // First push
-    gmeta(dir.path())
-        .args(["push"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["push"]).assert().success();
 
     // Second push — nothing changed
     gmeta(dir.path())
@@ -1910,10 +1903,7 @@ fn test_push_commit_message_format() {
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    gmeta(dir.path())
-        .args(["pull"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["pull"]).assert().success();
 
     let target = commit_target(&sha);
     gmeta(dir.path())
@@ -1924,10 +1914,7 @@ fn test_push_commit_message_format() {
         .args(["set", &target, "agent:cost", "0.05"])
         .assert()
         .success();
-    gmeta(dir.path())
-        .args(["push"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["push"]).assert().success();
 
     // Check the commit message on the bare repo
     let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
@@ -2022,10 +2009,7 @@ fn test_pull_simple() {
         .assert()
         .success();
 
-    gmeta(dir.path())
-        .args(["pull"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["pull"]).assert().success();
 
     // The bare repo had project/testing = "hello" — check it materialized
     // (may have been materialized during remote add or pull)
@@ -2266,10 +2250,7 @@ fn test_promisor_hydration_from_tip_tree() {
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    gmeta(dir.path())
-        .args(["pull"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["pull"]).assert().success();
 
     // Both keys should be available — old_key was in the tip tree so
     // materialize handled it directly (not as a promisor entry)
@@ -2297,16 +2278,10 @@ fn test_promisor_entry_not_serialized() {
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    gmeta(dir.path())
-        .args(["pull"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["pull"]).assert().success();
 
     // Serialize — should not include promised entries in the commit
-    gmeta(dir.path())
-        .args(["serialize"])
-        .assert()
-        .success();
+    gmeta(dir.path()).args(["serialize"]).assert().success();
 
     // Verify the local ref tree doesn't contain old_key (it was promised, not materialized)
     let repo = git2::Repository::open(dir.path()).unwrap();

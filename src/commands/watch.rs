@@ -23,7 +23,10 @@ const RESET: &str = "\x1b[0m";
 
 pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
     let repo = git_utils::discover_repo()?;
-    let workdir = repo.workdir().context("bare repo not supported")?.to_path_buf();
+    let workdir = repo
+        .workdir()
+        .context("bare repo not supported")?
+        .to_path_buf();
     let workdir = workdir.canonicalize()?;
 
     let transcripts_dir = resolve_transcripts_dir(agent, &workdir)?;
@@ -31,12 +34,17 @@ pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
 
     eprintln!(
         "{}{}[watch]{} Watching {} transcripts: {}",
-        BOLD, CYAN, RESET, agent,
+        BOLD,
+        CYAN,
+        RESET,
+        agent,
         transcripts_dir.display()
     );
     eprintln!(
         "{}{}[watch]{} Watching git refs: {}",
-        BOLD, CYAN, RESET,
+        BOLD,
+        CYAN,
+        RESET,
         git_dir.join("refs").display()
     );
     eprintln!(
@@ -145,7 +153,7 @@ struct WatchState {
     // Git tracking
     known_commits: BTreeSet<String>,
     branch_for_commit: BTreeMap<String, String>, // commit_id -> branch_name
-    branch_first_seen: HashMap<String, i64>,    // branch_name -> first-seen epoch ms
+    branch_first_seen: HashMap<String, i64>,     // branch_name -> first-seen epoch ms
     last_committed_branch: Option<String>,
     git_dirty: bool,
     last_git_event: Option<Instant>,
@@ -186,7 +194,8 @@ impl WatchState {
         if !self.file_positions.is_empty() {
             eprintln!(
                 "  {}[init]{} Tracking {} existing transcript files",
-                DIM, RESET,
+                DIM,
+                RESET,
                 self.file_positions.len()
             );
         }
@@ -287,10 +296,7 @@ impl WatchState {
                 if !is_meta {
                     for text in extract_content_texts(&parsed["message"]["content"]) {
                         let preview = truncate(&text, 100).replace('\n', " ");
-                        eprintln!(
-                            "  {}{}[user]{} {}",
-                            BOLD, MAGENTA, RESET, preview
-                        );
+                        eprintln!("  {}{}[user]{} {}", BOLD, MAGENTA, RESET, preview);
                     }
                 }
             }
@@ -373,7 +379,8 @@ impl WatchState {
             // Non-JSON output, just refresh status
             eprintln!(
                 "  {}[commit]{} {}",
-                GREEN, RESET,
+                GREEN,
+                RESET,
                 truncate(stdout.trim(), 120)
             );
             self.refresh_gitbutler_status()?;
@@ -475,15 +482,7 @@ impl WatchState {
                             .or_insert(ts);
                         let branch_id = format!("{}@{}", branch_name, first_seen);
                         let value = serde_json::to_string(&branch_id)?;
-                        db.set(
-                            "change-id",
-                            cid,
-                            "branch:id",
-                            &value,
-                            "string",
-                            &email,
-                            ts,
-                        )?;
+                        db.set("change-id", cid, "branch:id", &value, "string", &email, ts)?;
 
                         let short_cid = &cid[..16.min(cid.len())];
                         eprintln!(
@@ -557,8 +556,7 @@ impl WatchState {
         }
 
         // Mark all current lines as processed
-        self.prompts_attached_up_to
-            .insert(session_id, lines.len());
+        self.prompts_attached_up_to.insert(session_id, lines.len());
 
         prompts
     }
@@ -611,7 +609,9 @@ impl WatchState {
 
         eprintln!(
             "  {}{}[meta]{} Stored {} transcript lines → branch:{} agent:transcripts",
-            BOLD, GREEN, RESET,
+            BOLD,
+            GREEN,
+            RESET,
             lines.len(),
             branch_id
         );

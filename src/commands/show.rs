@@ -30,25 +30,19 @@ pub fn run(commit_ref: &str) -> Result<()> {
     let sha = commit.id().to_string();
 
     // ── Header ──────────────────────────────────────────────────────────────
-    println!(
-        "{YELLOW}Commit:{RESET}     {CYAN}{sha}{RESET}"
-    );
+    println!("{YELLOW}Commit:{RESET}     {CYAN}{sha}{RESET}");
 
     // Try to get change-id from GitButler
     let change_id = get_change_id(&repo, &sha);
     if let Some(ref cid) = change_id {
-        println!(
-            "{YELLOW}Change-ID:{RESET}  {CYAN}{cid}{RESET}"
-        );
+        println!("{YELLOW}Change-ID:{RESET}  {CYAN}{cid}{RESET}");
     }
 
     // Author
     let author = commit.author();
     let author_name = author.name().unwrap_or("unknown");
     let author_email = author.email().unwrap_or("");
-    println!(
-        "{YELLOW}Author:{RESET}     {GREEN}{author_name} <{author_email}>{RESET}"
-    );
+    println!("{YELLOW}Author:{RESET}     {GREEN}{author_name} <{author_email}>{RESET}");
 
     // Date with relative time
     let epoch = commit.time().seconds();
@@ -78,11 +72,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
     let parent_tree = parent.as_ref().and_then(|p| p.tree().ok());
     let commit_tree = commit.tree()?;
 
-    let diff = repo.diff_tree_to_tree(
-        parent_tree.as_ref(),
-        Some(&commit_tree),
-        None,
-    )?;
+    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)?;
 
     let deltas: Vec<_> = diff.deltas().collect();
     if !deltas.is_empty() {
@@ -139,9 +129,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
         println!();
         println!("{CYAN}Metadata:{RESET}");
         for (source, key, value) in &meta_entries {
-            println!(
-                "  {BLUE}{source}{RESET}  {BOLD}{key}{RESET}  {DIM}{value}{RESET}"
-            );
+            println!("  {BLUE}{source}{RESET}  {BOLD}{key}{RESET}  {DIM}{value}{RESET}");
         }
     }
 

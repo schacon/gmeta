@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
+
 mod cli;
 mod commands;
 mod db;
@@ -46,25 +48,39 @@ fn main() -> Result<()> {
 
         Commands::ListPop { target, key, value } => commands::list::run_pop(&target, &key, &value),
 
-        Commands::ListRm {
+        Commands::ListRm { target, key, index } => commands::list::run_rm(&target, &key, index),
+
+        Commands::SetAdd {
+            json,
+            timestamp,
             target,
             key,
-            index,
-        } => commands::list::run_rm(&target, &key, index),
+            value,
+        } => commands::set::run_add(&target, &key, &value, json, timestamp),
 
-        Commands::SetAdd { json, timestamp, target, key, value } => commands::set::run_add(&target, &key, &value, json, timestamp),
-
-        Commands::SetRm { json, timestamp, target, key, value } => commands::set::run_rm(&target, &key, &value, json, timestamp),
+        Commands::SetRm {
+            json,
+            timestamp,
+            target,
+            key,
+            value,
+        } => commands::set::run_rm(&target, &key, &value, json, timestamp),
 
         Commands::Remote(args) => match args.action {
-            RemoteAction::Add { url, name, namespace } => {
-                commands::remote::run_add(&url, &name, namespace.as_deref())
-            }
+            RemoteAction::Add {
+                url,
+                name,
+                namespace,
+            } => commands::remote::run_add(&url, &name, namespace.as_deref()),
             RemoteAction::Remove { name } => commands::remote::run_remove(&name),
             RemoteAction::List => commands::remote::run_list(),
         },
 
-        Commands::Push { remote, verbose, readme } => {
+        Commands::Push {
+            remote,
+            verbose,
+            readme,
+        } => {
             if readme {
                 commands::push::run_readme(remote.as_deref(), verbose)
             } else {

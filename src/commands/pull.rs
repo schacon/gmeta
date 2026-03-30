@@ -55,7 +55,11 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         }
         (Some(old), Some(new)) => {
             let count = count_commits_between(&repo, old, new);
-            eprintln!("Fetched {} new commit{}.", count, if count == 1 { "" } else { "s" });
+            eprintln!(
+                "Fetched {} new commit{}.",
+                count,
+                if count == 1 { "" } else { "s" }
+            );
         }
         (None, Some(_)) => {
             eprintln!("Fetched initial metadata history.");
@@ -82,7 +86,10 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         let walk_from = if needs_materialize { None } else { old_tip };
         let promisor_count = insert_promisor_entries(&repo, &db, new, walk_from, verbose)?;
         if promisor_count > 0 {
-            eprintln!("Indexed {} keys from history (available on demand).", promisor_count);
+            eprintln!(
+                "Indexed {} keys from history (available on demand).",
+                promisor_count
+            );
         }
     }
 
@@ -309,7 +316,9 @@ fn parse_tree_path(path: &str) -> Option<(String, String, String)> {
         }
         "path" => {
             // path/{encoded_segments}/__target__/{key_segments}/__value
-            let target_pos = parts.iter().position(|&p| p == types::PATH_TARGET_SEPARATOR)?;
+            let target_pos = parts
+                .iter()
+                .position(|&p| p == types::PATH_TARGET_SEPARATOR)?;
             let marker_pos = parts.iter().position(|&p| p == value_type_marker)?;
             if marker_pos <= target_pos + 1 {
                 return None;
@@ -362,9 +371,23 @@ mod tests {
                    D\tbranch:main\treview:status";
         let changes = parse_commit_changes(msg).unwrap();
         assert_eq!(changes.len(), 3);
-        assert_eq!(changes[0], ('A', "commit".into(), "abc123".into(), "agent:model".into()));
-        assert_eq!(changes[1], ('M', "project".into(), String::new(), "meta:prune:since".into()));
-        assert_eq!(changes[2], ('D', "branch".into(), "main".into(), "review:status".into()));
+        assert_eq!(
+            changes[0],
+            ('A', "commit".into(), "abc123".into(), "agent:model".into())
+        );
+        assert_eq!(
+            changes[1],
+            (
+                'M',
+                "project".into(),
+                String::new(),
+                "meta:prune:since".into()
+            )
+        );
+        assert_eq!(
+            changes[2],
+            ('D', "branch".into(), "main".into(), "review:status".into())
+        );
     }
 
     #[test]

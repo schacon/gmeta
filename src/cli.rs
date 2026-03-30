@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "gmeta",
     about = "Structured metadata for Git data",
-    disable_help_subcommand = true,
+    disable_help_subcommand = true
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -14,7 +14,6 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     // ── Read / Write (display_order 1x) ─────────────────────────────────────
-
     /// Set a metadata value
     #[command(display_order = 10)]
     Set {
@@ -154,7 +153,6 @@ pub enum Commands {
     },
 
     // ── Inspect (display_order 2x) ──────────────────────────────────────────
-
     /// Show commit details and associated metadata
     #[command(display_order = 20)]
     Show {
@@ -202,7 +200,6 @@ pub enum Commands {
     },
 
     // ── Sync (display_order 3x) ─────────────────────────────────────────────
-
     /// Serialize metadata to Git ref
     #[command(display_order = 30)]
     Serialize {
@@ -289,7 +286,6 @@ pub enum Commands {
     },
 
     // ── Maintenance (display_order 4x) ──────────────────────────────────────
-
     /// Get or set project configuration (meta:* keys)
     #[command(display_order = 40)]
     Config {
@@ -337,7 +333,6 @@ pub enum Commands {
     Teardown,
 
     // ── Benchmarks (hidden) ─────────────────────────────────────────────────
-
     /// Benchmark read performance across all stored keys
     #[command(hide = true)]
     Bench,

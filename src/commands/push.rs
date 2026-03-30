@@ -228,12 +228,8 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
                 );
 
                 // Fetch latest remote data
-                let fetch_refspec =
-                    format!("{}:refs/{}/remotes/main", remote_refspec, ns);
-                git_utils::run_git(
-                    &repo,
-                    &["fetch", &remote_name, &fetch_refspec],
-                )?;
+                let fetch_refspec = format!("{}:refs/{}/remotes/main", remote_refspec, ns);
+                git_utils::run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
 
                 // Hydrate tip tree blobs so libgit2 can read them
                 let short_ref = format!("{}/remotes/main", ns);
@@ -266,17 +262,11 @@ fn rebase_local_on_remote(
     remote_ref: &str,
     verbose: bool,
 ) -> anyhow::Result<()> {
-    let local_commit = repo
-        .find_reference(local_ref)?
-        .peel_to_commit()?;
-    let remote_commit = repo
-        .find_reference(remote_ref)?
-        .peel_to_commit()?;
+    let local_commit = repo.find_reference(local_ref)?.peel_to_commit()?;
+    let remote_commit = repo.find_reference(remote_ref)?.peel_to_commit()?;
 
     // If the local commit is already a single-parent child of remote, nothing to do
-    if local_commit.parent_count() == 1
-        && local_commit.parent_id(0)? == remote_commit.id()
-    {
+    if local_commit.parent_count() == 1 && local_commit.parent_id(0)? == remote_commit.id() {
         return Ok(());
     }
 
@@ -286,14 +276,7 @@ fn rebase_local_on_remote(
 
     // Use None for the ref update here — we'll force-update the ref ourselves,
     // because repo.commit(Some(ref)) requires the current tip to be the first parent.
-    let new_oid = repo.commit(
-        None,
-        &sig,
-        &sig,
-        message,
-        &tree,
-        &[&remote_commit],
-    )?;
+    let new_oid = repo.commit(None, &sig, &sig, message, &tree, &[&remote_commit])?;
     repo.reference(local_ref, new_oid, true, "gmeta: rebase for push")?;
 
     if verbose {

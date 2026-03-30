@@ -26,11 +26,15 @@ pub fn read_prune_rules(db: &Db) -> Result<Option<PruneRules>> {
         .transpose()?;
 
     let max_size = read_config_string(db, "meta:prune:max-size")?
-        .map(|s| parse_size(&s).with_context(|| format!("invalid meta:prune:max-size value: {}", s)))
+        .map(|s| {
+            parse_size(&s).with_context(|| format!("invalid meta:prune:max-size value: {}", s))
+        })
         .transpose()?;
 
     let min_size = read_config_string(db, "meta:prune:min-size")?
-        .map(|s| parse_size(&s).with_context(|| format!("invalid meta:prune:min-size value: {}", s)))
+        .map(|s| {
+            parse_size(&s).with_context(|| format!("invalid meta:prune:min-size value: {}", s))
+        })
         .transpose()?;
 
     // Need at least one trigger
@@ -97,16 +101,10 @@ fn count_keys(repo: &git2::Repository, tree: &git2::Tree) -> Result<u64> {
     Ok(count)
 }
 
-fn count_keys_recursive(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
-    count: &mut u64,
-) -> Result<()> {
+fn count_keys_recursive(repo: &git2::Repository, tree: &git2::Tree, count: &mut u64) -> Result<()> {
     for entry in tree.iter() {
         let name = entry.name().unwrap_or("");
-        if name == "__value" {
-            *count += 1;
-        } else if name == "__list" || name == "__set" {
+        if name == "__value" || name == "__list" || name == "__set" {
             *count += 1;
         } else if name == "__tombstones" {
             // Don't count tombstones as keys

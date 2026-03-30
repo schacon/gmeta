@@ -107,7 +107,11 @@ fn run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("git {} failed: {}", args.first().unwrap_or(&""), stderr.trim());
+        bail!(
+            "git {} failed: {}",
+            args.first().unwrap_or(&""),
+            stderr.trim()
+        );
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -136,11 +140,7 @@ pub fn list_meta_remotes(repo: &Repository) -> Result<Vec<(String, String)>> {
 
 /// Hydrate tip tree blobs for a blobless-fetched ref.
 /// This fetches all blob objects referenced by the tip tree so libgit2 can read them.
-pub fn hydrate_tip_blobs(
-    repo: &Repository,
-    remote_name: &str,
-    ref_name: &str,
-) -> Result<()> {
+pub fn hydrate_tip_blobs(repo: &Repository, remote_name: &str, ref_name: &str) -> Result<()> {
     hydrate_tip_blobs_counted(repo, remote_name, ref_name)?;
     Ok(())
 }
@@ -234,11 +234,7 @@ pub fn find_blob_oid_in_tree(
 
 /// Fetch specific blob OIDs from a remote. Similar to hydrate_tip_blobs but
 /// takes an explicit list of OIDs instead of discovering them via ls-tree.
-pub fn fetch_blob_oids(
-    repo: &Repository,
-    remote_name: &str,
-    oids: &[git2::Oid],
-) -> Result<()> {
+pub fn fetch_blob_oids(repo: &Repository, remote_name: &str, oids: &[git2::Oid]) -> Result<()> {
     if oids.is_empty() {
         return Ok(());
     }

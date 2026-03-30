@@ -20,7 +20,12 @@ const YELLOW: &str = "\x1b[33m";
 const GREEN: &str = "\x1b[32m";
 const CYAN: &str = "\x1b[36m";
 
-pub fn run(target_type: Option<&str>, term: Option<&str>, timeline: bool, promisor: bool) -> Result<()> {
+pub fn run(
+    target_type: Option<&str>,
+    term: Option<&str>,
+    timeline: bool,
+    promisor: bool,
+) -> Result<()> {
     let repo = git_utils::discover_repo()?;
     let db_path = git_utils::db_path(&repo)?;
     let db = Db::open(&db_path)?;
@@ -262,7 +267,10 @@ fn run_timeline(db: &Db) -> Result<()> {
     let max_count = *buckets.iter().max().unwrap_or(&1).max(&1);
     let bar_width = 30usize;
 
-    println!("{BOLD}Metadata entries per week (last {} weeks){RESET}", weeks);
+    println!(
+        "{BOLD}Metadata entries per week (last {} weeks){RESET}",
+        weeks
+    );
     println!();
 
     for (i, count) in buckets.iter().enumerate() {
@@ -280,7 +288,10 @@ fn run_timeline(db: &Db) -> Result<()> {
 
     if older > 0 {
         println!();
-        println!("{DIM}  + {} entries older than {} weeks{RESET}", older, weeks);
+        println!(
+            "{DIM}  + {} entries older than {} weeks{RESET}",
+            older, weeks
+        );
     }
 
     let total: u64 = buckets.iter().sum::<u64>() + older;
@@ -291,7 +302,12 @@ fn run_timeline(db: &Db) -> Result<()> {
 }
 
 /// Format a value for one-line display, fitting within available width.
-fn format_value_oneline(value: &str, value_type: &str, term_width: usize, key_len: usize) -> String {
+fn format_value_oneline(
+    value: &str,
+    value_type: &str,
+    term_width: usize,
+    key_len: usize,
+) -> String {
     // 2 spaces indent + key + 2 spaces gap = overhead
     let overhead = 2 + key_len + 2;
     let available = if term_width > overhead + 5 {

@@ -130,7 +130,7 @@ fn resolve_start(repo: &Repository, start_ref: Option<&str>) -> Result<Oid> {
 ///   - JSON arrays   → "[list: N items]"
 ///   - JSON objects  → "{object: N keys}"
 ///   - strings       → first line, truncated to 50 chars; " ..." appended
-///                     if there are more lines
+///     if there are more lines
 fn format_value_preview(value: &str) -> String {
     // Try JSON parse for arrays/objects
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(value) {

@@ -578,18 +578,20 @@ impl Db {
         self.conn.execute(
             "UPDATE metadata SET value = ?4, value_type = ?5, is_git_ref = ?6, is_promised = 0
              WHERE target_type = ?1 AND target_value = ?2 AND key = ?3 AND is_promised = 1",
-            params![target_type, target_value, key, value, value_type, git_ref_val],
+            params![
+                target_type,
+                target_value,
+                key,
+                value,
+                value_type,
+                git_ref_val
+            ],
         )?;
         Ok(())
     }
 
     /// Delete a promised entry (e.g. if the key no longer exists in the tip tree).
-    pub fn delete_promised(
-        &self,
-        target_type: &str,
-        target_value: &str,
-        key: &str,
-    ) -> Result<()> {
+    pub fn delete_promised(&self, target_type: &str, target_value: &str, key: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM metadata WHERE target_type = ?1 AND target_value = ?2 AND key = ?3 AND is_promised = 1",
             params![target_type, target_value, key],
@@ -1717,7 +1719,7 @@ fn encode_list_entries_by_metadata_id(
     metadata_id: i64,
 ) -> Result<String> {
     let entries = load_list_entries_by_metadata_id(conn, repo, metadata_id)?;
-    Ok(encode_entries(&entries)?)
+    encode_entries(&entries)
 }
 
 fn load_set_values_by_metadata_id_tx(

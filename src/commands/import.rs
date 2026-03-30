@@ -62,14 +62,8 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
         } else {
             eprintln!("Scanning commits for Entire-Checkpoint trailers...");
         }
-        imported_count += import_checkpoints_from_commits(
-            &repo,
-            cp_tree,
-            &db,
-            &email,
-            dry_run,
-            since_epoch,
-        )?;
+        imported_count +=
+            import_checkpoints_from_commits(&repo, cp_tree, &db, &email, dry_run, since_epoch)?;
     }
 
     // Step 2: Import trails
@@ -415,7 +409,7 @@ fn import_session(
                 None => continue,
             };
 
-            if let Some(content) = entry_to_blob(repo, &task_tree, "checkpoint.json")? {
+            if let Some(content) = entry_to_blob(repo, task_tree, "checkpoint.json")? {
                 let key = format!(
                     "{}:tasks:{}:checkpoint",
                     key_prefix,
@@ -567,7 +561,7 @@ fn import_trails(
                 None => continue,
             };
 
-            let meta_content = match entry_to_blob(repo, &item_tree, "metadata.json")? {
+            let meta_content = match entry_to_blob(repo, item_tree, "metadata.json")? {
                 Some(c) => c,
                 None => {
                     eprintln!("  Skipping trail {} (no metadata.json)", trail_id);
@@ -654,7 +648,7 @@ fn import_trails(
                 }
             }
 
-            if let Some(content) = entry_to_blob(repo, &item_tree, "checkpoints.json")? {
+            if let Some(content) = entry_to_blob(repo, item_tree, "checkpoints.json")? {
                 let arr: Vec<Value> = serde_json::from_str(&content).unwrap_or_default();
                 if !arr.is_empty() {
                     let mut entries = Vec::new();
@@ -681,7 +675,7 @@ fn import_trails(
                 }
             }
 
-            if let Some(content) = entry_to_blob(repo, &item_tree, "discussion.json")? {
+            if let Some(content) = entry_to_blob(repo, item_tree, "discussion.json")? {
                 let disc: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
                 if disc != Value::Null {
                     count += set_value(
@@ -1050,8 +1044,8 @@ struct GitAiNote {
 fn parse_git_ai_note(text: &str) -> Result<GitAiNote> {
     // Split on the `---` separator between blame and JSON.
     // Notes with no blame section start with `---\n` directly.
-    let (blame_raw, json_raw) = if text.starts_with("---\n") {
-        ("", &text[4..])
+    let (blame_raw, json_raw) = if let Some(rest) = text.strip_prefix("---\n") {
+        ("", rest)
     } else {
         let sep = "\n---\n";
         match text.find(sep) {

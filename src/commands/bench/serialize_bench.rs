@@ -176,7 +176,14 @@ fn do_serialize(repo: &git2::Repository, db: &Db, ref_name: &str) -> Result<()> 
         .and_then(|r| r.peel_to_commit().ok());
     let parents: Vec<&git2::Commit> = parent.iter().collect();
 
-    repo.commit(Some(ref_name), &sig, &sig, "bench serialize", &tree, &parents)?;
+    repo.commit(
+        Some(ref_name),
+        &sig,
+        &sig,
+        "bench serialize",
+        &tree,
+        &parents,
+    )?;
 
     let now = chrono::Utc::now().timestamp_millis();
     db.set_last_materialized(now)?;
@@ -378,10 +385,7 @@ pub fn run(rounds: usize) -> Result<()> {
 
     // ── Summary ──────────────────────────────────────────────────────────────
     println!("\n{}── Summary ──{}", BOLD, RESET);
-    println!(
-        "  total keys:       {}{}{}",
-        CYAN, total_keys, RESET
-    );
+    println!("  total keys:       {}{}{}", CYAN, total_keys, RESET);
     println!(
         "  wall time:        {}{}{}",
         GREEN,
@@ -427,10 +431,7 @@ pub fn run(rounds: usize) -> Result<()> {
         let first_per_key = first.serialize_secs / first.keys_inserted as f64;
         let last_per_key = last.serialize_secs / last.keys_inserted as f64;
         let slowdown = last.serialize_secs / first.serialize_secs;
-        println!(
-            "\n  {}serialize scaling:{}",
-            BOLD, RESET
-        );
+        println!("\n  {}serialize scaling:{}", BOLD, RESET);
         println!(
             "    round 1:  {} ({} keys, {}/key)",
             fmt_ms(first.serialize_secs),
@@ -452,10 +453,7 @@ pub fn run(rounds: usize) -> Result<()> {
         } else {
             GREEN
         };
-        println!(
-            "    slowdown: {}{:.1}x{}",
-            color, slowdown, RESET
-        );
+        println!("    slowdown: {}{:.1}x{}", color, slowdown, RESET);
     }
 
     // ── Git ODB stats ────────────────────────────────────────────────────────
@@ -464,27 +462,12 @@ pub fn run(rounds: usize) -> Result<()> {
     let odb = count_odb_stats(&repo_path)?;
     let total_objects = odb.loose_blobs + odb.loose_trees + odb.loose_commits + odb.loose_other;
 
-    println!(
-        "  loose objects:    {}{}{}",
-        CYAN, total_objects, RESET
-    );
-    println!(
-        "    blobs:          {}{}{}",
-        BLUE, odb.loose_blobs, RESET
-    );
-    println!(
-        "    trees:          {}{}{}",
-        BLUE, odb.loose_trees, RESET
-    );
-    println!(
-        "    commits:        {}{}{}",
-        BLUE, odb.loose_commits, RESET
-    );
+    println!("  loose objects:    {}{}{}", CYAN, total_objects, RESET);
+    println!("    blobs:          {}{}{}", BLUE, odb.loose_blobs, RESET);
+    println!("    trees:          {}{}{}", BLUE, odb.loose_trees, RESET);
+    println!("    commits:        {}{}{}", BLUE, odb.loose_commits, RESET);
     if odb.loose_other > 0 {
-        println!(
-            "    other:          {}{}{}",
-            DIM, odb.loose_other, RESET
-        );
+        println!("    other:          {}{}{}", DIM, odb.loose_other, RESET);
     }
     println!(
         "  total ODB size:   {}{}{}",
@@ -496,19 +479,13 @@ pub fn run(rounds: usize) -> Result<()> {
     // Ratio of trees to blobs
     if odb.loose_blobs > 0 {
         let ratio = odb.loose_trees as f64 / odb.loose_blobs as f64;
-        println!(
-            "  tree/blob ratio:  {}{:.2}{}",
-            DIM, ratio, RESET
-        );
+        println!("  tree/blob ratio:  {}{:.2}{}", DIM, ratio, RESET);
     }
 
     // Bytes per key
     if total_keys > 0 {
         let bytes_per_key = odb.loose_total_bytes as f64 / total_keys as f64;
-        println!(
-            "  ODB bytes/key:    {}{:.0} B{}",
-            DIM, bytes_per_key, RESET
-        );
+        println!("  ODB bytes/key:    {}{:.0} B{}", DIM, bytes_per_key, RESET);
     }
 
     // Clean up

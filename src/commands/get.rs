@@ -33,16 +33,10 @@ pub fn run(
     // If no exact match, try prefix expansion for non-commit types
     // (commits are already resolved by git, but change-ids/branches may be partial)
     if entries.is_empty() && target.target_type != TargetType::Path {
-        let matches =
-            db.find_target_values_by_prefix(target.type_str(), target.value_str(), 2)?;
+        let matches = db.find_target_values_by_prefix(target.type_str(), target.value_str(), 2)?;
         if matches.len() == 1 {
             let expanded = &matches[0];
-            entries = db.get_all_with_target_prefix(
-                target.type_str(),
-                expanded,
-                false,
-                key,
-            )?;
+            entries = db.get_all_with_target_prefix(target.type_str(), expanded, false, key)?;
             if !entries.is_empty() {
                 eprintln!("expanded to {}:{}", target.type_str(), expanded);
             }
@@ -67,12 +61,7 @@ pub fn run(
         .collect();
 
     if !promised.is_empty() {
-        let hydrated = hydrate_promised_entries(
-            &repo,
-            &db,
-            target.type_str(),
-            &promised,
-        )?;
+        let hydrated = hydrate_promised_entries(&repo, &db, target.type_str(), &promised)?;
         if hydrated > 0 {
             // Re-query to get the now-resolved values
             entries = db.get_all_with_target_prefix(
@@ -88,16 +77,18 @@ pub fn run(
     let resolved: Vec<(String, String, String, String)> = entries
         .into_iter()
         .filter(|(_, _, _, _, _, is_promised)| !is_promised)
-        .map(|(entry_target_value, key, value, value_type, is_git_ref, _)| {
-            if is_git_ref {
-                let resolved_value = resolve_git_ref(&repo, &value)?;
-                // JSON-encode the resolved content to match normal string format
-                let json_value = serde_json::to_string(&resolved_value)?;
-                Ok((entry_target_value, key, json_value, value_type))
-            } else {
-                Ok((entry_target_value, key, value, value_type))
-            }
-        })
+        .map(
+            |(entry_target_value, key, value, value_type, is_git_ref, _)| {
+                if is_git_ref {
+                    let resolved_value = resolve_git_ref(&repo, &value)?;
+                    // JSON-encode the resolved content to match normal string format
+                    let json_value = serde_json::to_string(&resolved_value)?;
+                    Ok((entry_target_value, key, json_value, value_type))
+                } else {
+                    Ok((entry_target_value, key, value, value_type))
+                }
+            },
+        )
         .collect::<Result<Vec<_>>>()?;
 
     if resolved.is_empty() {
@@ -231,7 +222,10 @@ fn hydrate_promised_entries(
     }
 
     // Collect all OIDs, try to read locally first, fetch missing ones
-    let all_oids: Vec<git2::Oid> = pending.iter().flat_map(|p| p.oids.iter().copied()).collect();
+    let all_oids: Vec<git2::Oid> = pending
+        .iter()
+        .flat_map(|p| p.oids.iter().copied())
+        .collect();
     let mut missing: Vec<git2::Oid> = Vec::new();
     for oid in &all_oids {
         if repo.find_blob(*oid).is_err() {
@@ -325,7 +319,11 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
-fn print_plain(target: &Target, entries: &[(String, String, String, String)], value_only: bool) -> Result<()> {
+fn print_plain(
+    target: &Target,
+    entries: &[(String, String, String, String)],
+    value_only: bool,
+) -> Result<()> {
     if value_only {
         for (_, _, value, value_type) in entries {
             print_value_only(value, value_type)?;

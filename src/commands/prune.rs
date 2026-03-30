@@ -123,9 +123,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         .collect();
     let list_tombstones: Vec<_> = all_list_tombstones
         .into_iter()
-        .filter(|(tt, _, key, _, ts, _)| {
-            (tt == "project" || *ts >= cutoff_ms) && is_main_dest(key)
-        })
+        .filter(|(tt, _, key, _, ts, _)| (tt == "project" || *ts >= cutoff_ms) && is_main_dest(key))
         .collect();
 
     let total_pruned = pruned_meta + pruned_tombs;

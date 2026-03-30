@@ -63,7 +63,7 @@ pub fn run() -> Result<()> {
 
     let want_max_keys = Confirm::new()
         .with_prompt("Set a max-keys trigger?")
-        .default(existing.as_ref().map_or(true, |r| r.max_keys.is_some()))
+        .default(existing.as_ref().is_none_or(|r| r.max_keys.is_some()))
         .interact()?;
 
     let max_keys: Option<String> = if want_max_keys {
@@ -92,7 +92,7 @@ pub fn run() -> Result<()> {
 
     let want_max_size = Confirm::new()
         .with_prompt("Set a max-size trigger?")
-        .default(existing.as_ref().map_or(true, |r| r.max_size.is_some()))
+        .default(existing.as_ref().is_none_or(|r| r.max_size.is_some()))
         .interact()?;
 
     let max_size: Option<String> = if want_max_size {
@@ -115,7 +115,9 @@ pub fn run() -> Result<()> {
     // Need at least one trigger
     if max_keys.is_none() && max_size.is_none() {
         println!();
-        println!("Warning: at least one trigger (max-keys or max-size) is required for auto-prune.");
+        println!(
+            "Warning: at least one trigger (max-keys or max-size) is required for auto-prune."
+        );
         println!("Auto-prune will not activate without a trigger.");
         println!("Saving retention window only.");
     }
@@ -127,7 +129,7 @@ pub fn run() -> Result<()> {
 
     let want_min_size = Confirm::new()
         .with_prompt("Set a min-size exemption?")
-        .default(existing.as_ref().map_or(false, |r| r.min_size.is_some()))
+        .default(existing.as_ref().is_some_and(|r| r.min_size.is_some()))
         .interact()?;
 
     let min_size: Option<String> = if want_min_size {
@@ -178,15 +180,21 @@ pub fn run() -> Result<()> {
 
     match max_keys {
         Some(ref v) => set_config(&db, "meta:prune:max-keys", v, &email, ts)?,
-        None => { db.rm("project", "", "meta:prune:max-keys", &email, ts)?; }
+        None => {
+            db.rm("project", "", "meta:prune:max-keys", &email, ts)?;
+        }
     }
     match max_size {
         Some(ref v) => set_config(&db, "meta:prune:max-size", v, &email, ts)?,
-        None => { db.rm("project", "", "meta:prune:max-size", &email, ts)?; }
+        None => {
+            db.rm("project", "", "meta:prune:max-size", &email, ts)?;
+        }
     }
     match min_size {
         Some(ref v) => set_config(&db, "meta:prune:min-size", v, &email, ts)?,
-        None => { db.rm("project", "", "meta:prune:min-size", &email, ts)?; }
+        None => {
+            db.rm("project", "", "meta:prune:min-size", &email, ts)?;
+        }
     }
 
     println!("Auto-prune rules saved.");
@@ -200,11 +208,11 @@ fn set_config(db: &Db, key: &str, value: &str, email: &str, ts: i64) -> Result<(
 }
 
 fn format_size(bytes: u64) -> String {
-    if bytes >= 1024 * 1024 * 1024 && bytes % (1024 * 1024 * 1024) == 0 {
+    if bytes >= 1024 * 1024 * 1024 && bytes.is_multiple_of(1024 * 1024 * 1024) {
         format!("{}g", bytes / (1024 * 1024 * 1024))
-    } else if bytes >= 1024 * 1024 && bytes % (1024 * 1024) == 0 {
+    } else if bytes >= 1024 * 1024 && bytes.is_multiple_of(1024 * 1024) {
         format!("{}m", bytes / (1024 * 1024))
-    } else if bytes >= 1024 && bytes % 1024 == 0 {
+    } else if bytes >= 1024 && bytes.is_multiple_of(1024) {
         format!("{}k", bytes / 1024)
     } else {
         bytes.to_string()

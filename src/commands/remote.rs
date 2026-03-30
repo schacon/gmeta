@@ -91,12 +91,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                         .join("\n");
                     let suggestions = other_namespaces
                         .iter()
-                        .map(|alt| {
-                            format!(
-                                "  gmeta remote add {} --namespace={}",
-                                url, alt
-                            )
-                        })
+                        .map(|alt| format!("  gmeta remote add {} --namespace={}", url, alt))
                         .collect::<Vec<_>>()
                         .join("\n");
                     bail!(
@@ -153,10 +148,17 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             match repo.find_reference(&tracking_ref_name) {
                 Ok(r) => {
                     let tip = r.peel_to_commit()?;
-                    eprintln!("  tracking ref: {} -> {}", tracking_ref_name, &tip.id().to_string()[..12]);
+                    eprintln!(
+                        "  tracking ref: {} -> {}",
+                        tracking_ref_name,
+                        &tip.id().to_string()[..12]
+                    );
                 }
                 Err(e) => {
-                    eprintln!("  warning: tracking ref {} not found after fetch: {}", tracking_ref_name, e);
+                    eprintln!(
+                        "  warning: tracking ref {} not found after fetch: {}",
+                        tracking_ref_name, e
+                    );
                     eprintln!("You can try again with: gmeta pull");
                     return Ok(());
                 }
@@ -182,9 +184,8 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                 if let Ok(tip) = r.peel_to_commit() {
                     let db_path = git_utils::db_path(&repo)?;
                     let db = Db::open(&db_path)?;
-                    let count = pull::insert_promisor_entries_pub(
-                        &repo, &db, tip.id(), None, false,
-                    )?;
+                    let count =
+                        pull::insert_promisor_entries_pub(&repo, &db, tip.id(), None, false)?;
                     if count > 0 {
                         eprintln!("Indexed {} keys from history (available on demand).", count);
                     }
@@ -192,10 +193,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             }
         }
         Err(e) => {
-            eprintln!(
-                "\nWarning: initial fetch failed: {}",
-                e
-            );
+            eprintln!("\nWarning: initial fetch failed: {}", e);
             eprintln!("You can fetch later with: gmeta pull");
         }
     }

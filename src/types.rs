@@ -320,7 +320,10 @@ pub fn build_list_entry_tombstone_tree_path(
     entry_name: &str,
 ) -> Result<String> {
     let key_path = build_key_tree_path(target, key)?;
-    Ok(format!("{}/{}/{}/{}", key_path, LIST_VALUE_DIR, TOMBSTONE_ROOT, entry_name))
+    Ok(format!(
+        "{}/{}/{}/{}",
+        key_path, LIST_VALUE_DIR, TOMBSTONE_ROOT, entry_name
+    ))
 }
 
 pub fn build_set_member_tombstone_tree_path(

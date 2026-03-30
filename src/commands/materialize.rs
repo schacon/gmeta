@@ -182,7 +182,10 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
             for ((tt, tv, k), tomb) in &remote_entries.tombstones {
                 let target = format_target_for_display(tt, tv);
-                eprintln!("  {} {} -> tombstone [ts={}, by={}]", target, k, tomb.timestamp, tomb.email);
+                eprintln!(
+                    "  {} {} -> tombstone [ts={}, by={}]",
+                    target, k, tomb.timestamp, tomb.email
+                );
             }
         }
 
@@ -267,7 +270,9 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 for key in remote_entries.values.keys() {
                     match local_entries.values.get(key) {
                         None => added += 1,
-                        Some(local_val) if local_val != remote_entries.values.get(key).unwrap() => changed += 1,
+                        Some(local_val) if local_val != remote_entries.values.get(key).unwrap() => {
+                            changed += 1
+                        }
                         _ => {}
                     }
                 }
@@ -402,7 +407,9 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 )?;
 
                 if verbose {
-                    let all_keys: BTreeSet<&Key> = base_entries.values.keys()
+                    let all_keys: BTreeSet<&Key> = base_entries
+                        .values
+                        .keys()
                         .chain(local_entries.values.keys())
                         .chain(remote_entries.values.keys())
                         .collect();
@@ -419,14 +426,12 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                         let in_local = local_entries.values.get(*key);
                         let in_remote = remote_entries.values.get(*key);
                         match (in_base, in_local, in_remote) {
-                            (Some(b), Some(l), Some(r)) => {
-                                match (l != b, r != b) {
-                                    (false, false) => unchanged += 1,
-                                    (true, false) => local_only_changed += 1,
-                                    (false, true) => remote_only_changed += 1,
-                                    (true, true) => conflicted += 1,
-                                }
-                            }
+                            (Some(b), Some(l), Some(r)) => match (l != b, r != b) {
+                                (false, false) => unchanged += 1,
+                                (true, false) => local_only_changed += 1,
+                                (false, true) => remote_only_changed += 1,
+                                (true, true) => conflicted += 1,
+                            },
                             (Some(_), None, None) => removed += 1,
                             (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
                                 // remove/modify
@@ -487,7 +492,9 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 )
             } else {
                 if verbose {
-                    eprintln!("[verbose] no common ancestor, performing two-way merge (local wins)...");
+                    eprintln!(
+                        "[verbose] no common ancestor, performing two-way merge (local wins)..."
+                    );
                 }
 
                 let (merged_values, merged_tombstones, conflict_decisions) =
@@ -737,8 +744,8 @@ fn update_db_from_tree(
                     if tombstoned_names.contains(entry_name) {
                         continue;
                     }
-                    let timestamp = parse_timestamp_from_entry_name(entry_name)
-                        .unwrap_or_else(|| items.len() as i64);
+                    let timestamp =
+                        parse_timestamp_from_entry_name(entry_name).unwrap_or(items.len() as i64);
                     items.push(ListEntry {
                         value: content.clone(),
                         timestamp,
@@ -848,8 +855,8 @@ fn collect_db_changes_from_tree(
                     if tombstoned_names.contains(entry_name) {
                         continue;
                     }
-                    let timestamp = parse_timestamp_from_entry_name(entry_name)
-                        .unwrap_or_else(|| items.len() as i64);
+                    let timestamp =
+                        parse_timestamp_from_entry_name(entry_name).unwrap_or(items.len() as i64);
                     items.push(ListEntry {
                         value: content.clone(),
                         timestamp,

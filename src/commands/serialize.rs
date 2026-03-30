@@ -72,7 +72,10 @@ pub fn parse_filter_rules(db: &Db) -> Result<Vec<FilterRule>> {
 fn parse_rule(s: &str) -> Result<FilterRule> {
     let parts: Vec<&str> = s.split_whitespace().collect();
     if parts.len() < 2 {
-        bail!("invalid filter rule (need at least action and pattern): '{}'", s);
+        bail!(
+            "invalid filter rule (need at least action and pattern): '{}'",
+            s
+        );
     }
 
     let action = match parts[0] {
@@ -123,9 +126,7 @@ fn pattern_matches(pattern: &[PatternSegment], key_segments: &[&str]) -> bool {
             false
         }
         (Some(_), None) => false,
-        (Some(PatternSegment::Star), Some(_)) => {
-            pattern_matches(&pattern[1..], &key_segments[1..])
-        }
+        (Some(PatternSegment::Star), Some(_)) => pattern_matches(&pattern[1..], &key_segments[1..]),
         (Some(PatternSegment::Literal(lit)), Some(seg)) => {
             lit == seg && pattern_matches(&pattern[1..], &key_segments[1..])
         }
@@ -209,7 +210,13 @@ pub fn run(verbose: bool) -> Result<()> {
         eprintln!(
             "[verbose] last materialized: {}",
             match last_materialized {
-                Some(ts) => format!("{} ({}ms)", chrono::DateTime::from_timestamp_millis(ts).map(|d| d.to_rfc3339()).unwrap_or_else(|| "?".to_string()), ts),
+                Some(ts) => format!(
+                    "{} ({}ms)",
+                    chrono::DateTime::from_timestamp_millis(ts)
+                        .map(|d| d.to_rfc3339())
+                        .unwrap_or_else(|| "?".to_string()),
+                    ts
+                ),
                 None => "never".to_string(),
             }
         );
@@ -227,7 +234,11 @@ pub fn run(verbose: bool) -> Result<()> {
 
     if verbose {
         if let Some(ref tree) = existing_tree {
-            eprintln!("[verbose] existing tree: {} ({} top-level entries)", tree.id(), tree.len());
+            eprintln!(
+                "[verbose] existing tree: {} ({} top-level entries)",
+                tree.id(),
+                tree.len()
+            );
         } else {
             eprintln!("[verbose] no existing tree (first serialize)");
         }
@@ -237,109 +248,121 @@ pub fn run(verbose: bool) -> Result<()> {
     // In incremental mode, compute which targets are dirty so we can reuse
     // unchanged subtrees from the existing git tree.
     // changes: Vec<(op_char, target_label, key)> for commit message
-    let (metadata_entries, tombstone_entries, set_tombstone_entries, list_tombstone_entries, dirty_target_bases, changes) =
-        if let Some(since) = last_materialized {
-            let modified = db.get_modified_since(since)?;
-            if verbose {
-                eprintln!(
-                    "[verbose] incremental mode: {} entries modified since last materialize",
-                    modified.len()
-                );
-            }
-            if modified.is_empty() && existing_tree.is_some() {
-                eprintln!("Nothing changed since last serialize");
-                return Ok(());
-            }
+    let (
+        metadata_entries,
+        tombstone_entries,
+        set_tombstone_entries,
+        list_tombstone_entries,
+        dirty_target_bases,
+        changes,
+    ) = if let Some(since) = last_materialized {
+        let modified = db.get_modified_since(since)?;
+        if verbose {
+            eprintln!(
+                "[verbose] incremental mode: {} entries modified since last materialize",
+                modified.len()
+            );
+        }
+        if modified.is_empty() && existing_tree.is_some() {
+            eprintln!("Nothing changed since last serialize");
+            return Ok(());
+        }
 
-            // Build change list for commit message
-            let changes: Vec<(char, String, String)> = modified
-                .iter()
-                .map(|(target_type, target_value, key, op, _val, _vtype)| {
-                    let op_char = match op.as_str() {
-                        "rm" => 'D',
-                        "set" => {
-                            if existing_tree.is_some() { 'M' } else { 'A' }
+        // Build change list for commit message
+        let changes: Vec<(char, String, String)> = modified
+            .iter()
+            .map(|(target_type, target_value, key, op, _val, _vtype)| {
+                let op_char = match op.as_str() {
+                    "rm" => 'D',
+                    "set" => {
+                        if existing_tree.is_some() {
+                            'M'
+                        } else {
+                            'A'
                         }
-                        _ => 'M',
-                    };
-                    let target_label = if target_type == "project" {
-                        "project".to_string()
-                    } else {
-                        format!("{}:{}", target_type, target_value)
-                    };
-                    (op_char, target_label, key.clone())
-                })
-                .collect();
-
-            // Compute dirty target base paths from modified entries
-            let mut dirty_bases: BTreeSet<String> = BTreeSet::new();
-            for (target_type, target_value, _key, _op, _val, _vtype) in &modified {
-                let target = if target_type == "project" {
-                    Target::parse("project")?
-                } else {
-                    Target::parse(&format!("{}:{}", target_type, target_value))?
+                    }
+                    _ => 'M',
                 };
-                dirty_bases.insert(target.tree_base_path());
-            }
-
-            let metadata = db.get_all_metadata()?;
-            let tombstones = db.get_all_tombstones()?;
-            let set_tombstones = db.get_all_set_tombstones()?;
-            let list_tombstones = db.get_all_list_tombstones()?;
-
-            // Note: tombstone/set-tombstone targets don't need to be added to
-            // dirty_bases separately — delete operations are logged in metadata_log,
-            // so they're already captured by get_modified_since. Clean targets'
-            // tombstones are preserved via subtree reuse from the existing tree.
-
-            if verbose {
-                eprintln!("[verbose] dirty target bases: {}", dirty_bases.len());
-                for base in &dirty_bases {
-                    eprintln!("  {}", base);
-                }
-            }
-
-            (
-                metadata,
-                tombstones,
-                set_tombstones,
-                list_tombstones,
-                if existing_tree.is_some() {
-                    Some(dirty_bases)
+                let target_label = if target_type == "project" {
+                    "project".to_string()
                 } else {
-                    None
-                },
-                changes,
-            )
-        } else {
-            if verbose {
-                eprintln!("[verbose] full serialization mode (no previous materialize)");
+                    format!("{}:{}", target_type, target_value)
+                };
+                (op_char, target_label, key.clone())
+            })
+            .collect();
+
+        // Compute dirty target base paths from modified entries
+        let mut dirty_bases: BTreeSet<String> = BTreeSet::new();
+        for (target_type, target_value, _key, _op, _val, _vtype) in &modified {
+            let target = if target_type == "project" {
+                Target::parse("project")?
+            } else {
+                Target::parse(&format!("{}:{}", target_type, target_value))?
+            };
+            dirty_bases.insert(target.tree_base_path());
+        }
+
+        let metadata = db.get_all_metadata()?;
+        let tombstones = db.get_all_tombstones()?;
+        let set_tombstones = db.get_all_set_tombstones()?;
+        let list_tombstones = db.get_all_list_tombstones()?;
+
+        // Note: tombstone/set-tombstone targets don't need to be added to
+        // dirty_bases separately — delete operations are logged in metadata_log,
+        // so they're already captured by get_modified_since. Clean targets'
+        // tombstones are preserved via subtree reuse from the existing tree.
+
+        if verbose {
+            eprintln!("[verbose] dirty target bases: {}", dirty_bases.len());
+            for base in &dirty_bases {
+                eprintln!("  {}", base);
             }
+        }
 
-            let metadata = db.get_all_metadata()?;
+        (
+            metadata,
+            tombstones,
+            set_tombstones,
+            list_tombstones,
+            if existing_tree.is_some() {
+                Some(dirty_bases)
+            } else {
+                None
+            },
+            changes,
+        )
+    } else {
+        if verbose {
+            eprintln!("[verbose] full serialization mode (no previous materialize)");
+        }
 
-            // Full serialize: all entries are adds
-            let changes: Vec<(char, String, String)> = metadata
-                .iter()
-                .map(|(target_type, target_value, key, _value, _value_type, _ts, _is_git_ref)| {
+        let metadata = db.get_all_metadata()?;
+
+        // Full serialize: all entries are adds
+        let changes: Vec<(char, String, String)> = metadata
+            .iter()
+            .map(
+                |(target_type, target_value, key, _value, _value_type, _ts, _is_git_ref)| {
                     let target_label = if target_type == "project" {
                         "project".to_string()
                     } else {
                         format!("{}:{}", target_type, target_value)
                     };
                     ('A', target_label, key.clone())
-                })
-                .collect();
-
-            (
-                metadata,
-                db.get_all_tombstones()?,
-                db.get_all_set_tombstones()?,
-                db.get_all_list_tombstones()?,
-                None,
-                changes,
+                },
             )
-        };
+            .collect();
+
+        (
+            metadata,
+            db.get_all_tombstones()?,
+            db.get_all_set_tombstones()?,
+            db.get_all_list_tombstones()?,
+            None,
+            changes,
+        )
+    };
 
     if metadata_entries.is_empty() && tombstone_entries.is_empty() {
         println!("no metadata to serialize");
@@ -431,7 +454,10 @@ pub fn run(verbose: bool) -> Result<()> {
             None => {}
             Some(dests) => {
                 for dest in dests {
-                    dest_set_tombstones.entry(dest).or_default().push(entry.clone());
+                    dest_set_tombstones
+                        .entry(dest)
+                        .or_default()
+                        .push(entry.clone());
                 }
             }
         }
@@ -443,7 +469,10 @@ pub fn run(verbose: bool) -> Result<()> {
             None => {}
             Some(dests) => {
                 for dest in dests {
-                    dest_list_tombstones.entry(dest).or_default().push(entry.clone());
+                    dest_list_tombstones
+                        .entry(dest)
+                        .or_default()
+                        .push(entry.clone());
                 }
             }
         }
@@ -499,11 +528,18 @@ pub fn run(verbose: bool) -> Result<()> {
         if excluded_count > 0 {
             eprintln!("  {} keys excluded by filters", excluded_count);
         }
-        let non_main: Vec<&String> = all_dests.iter().filter(|d| d.as_str() != MAIN_DEST).collect();
+        let non_main: Vec<&String> = all_dests
+            .iter()
+            .filter(|d| d.as_str() != MAIN_DEST)
+            .collect();
         if !non_main.is_empty() {
             eprintln!(
                 "  routing to destinations: {}",
-                non_main.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(", ")
+                non_main
+                    .iter()
+                    .map(|d| d.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
         }
         if verbose {
@@ -549,7 +585,11 @@ pub fn run(verbose: bool) -> Result<()> {
 
         if verbose {
             let tree = repo.find_tree(tree_oid)?;
-            eprintln!("[verbose] built tree {} ({} top-level entries)", tree_oid, tree.len());
+            eprintln!(
+                "[verbose] built tree {} ({} top-level entries)",
+                tree_oid,
+                tree.len()
+            );
         }
 
         let tree = repo.find_tree(tree_oid)?;
@@ -561,7 +601,11 @@ pub fn run(verbose: bool) -> Result<()> {
 
         if verbose {
             if let Some(ref p) = parent {
-                eprintln!("[verbose] parent commit for {}: {}", ref_name, &p.id().to_string()[..8]);
+                eprintln!(
+                    "[verbose] parent commit for {}: {}",
+                    ref_name,
+                    &p.id().to_string()[..8]
+                );
             } else {
                 eprintln!("[verbose] no parent commit for {} (root)", ref_name);
             }
@@ -569,7 +613,14 @@ pub fn run(verbose: bool) -> Result<()> {
 
         let parents: Vec<&git2::Commit> = parent.iter().collect();
         let commit_message = build_commit_message(&changes);
-        let commit_oid = repo.commit(Some(&ref_name), &sig, &sig, &commit_message, &tree, &parents)?;
+        let commit_oid = repo.commit(
+            Some(&ref_name),
+            &sig,
+            &sig,
+            &commit_message,
+            &tree,
+            &parents,
+        )?;
 
         println!(
             "serialized to {} ({})",
@@ -584,31 +635,40 @@ pub fn run(verbose: bool) -> Result<()> {
                     eprintln!(
                         "[verbose] auto-prune rules: since={}, min_size={}",
                         prune_rules.since,
-                        prune_rules.min_size.map(|s| s.to_string()).unwrap_or_else(|| "none".to_string())
+                        prune_rules
+                            .min_size
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| "none".to_string())
                     );
                 }
-                if auto_prune::should_prune(&repo, tree_oid, &prune_rules)? {
-                    eprintln!("Auto-prune triggered, pruning with --since={}...", prune_rules.since);
+                if auto_prune::should_prune(&repo, tree_oid, prune_rules)? {
+                    eprintln!(
+                        "Auto-prune triggered, pruning with --since={}...",
+                        prune_rules.since
+                    );
 
                     if verbose {
                         let cutoff_ms = parse_since_to_cutoff_ms(&prune_rules.since)?;
                         eprintln!(
                             "[verbose] prune cutoff: {} ({}ms)",
-                            chrono::DateTime::from_timestamp_millis(cutoff_ms).map(|d| d.to_rfc3339()).unwrap_or_else(|| "?".to_string()),
+                            chrono::DateTime::from_timestamp_millis(cutoff_ms)
+                                .map(|d| d.to_rfc3339())
+                                .unwrap_or_else(|| "?".to_string()),
                             cutoff_ms
                         );
                     }
 
-                    let prune_tree_oid = prune_tree(&repo, tree_oid, &prune_rules, &db, verbose)?;
+                    let prune_tree_oid = prune_tree(&repo, tree_oid, prune_rules, &db, verbose)?;
 
                     if prune_tree_oid != tree_oid {
                         if verbose {
-                            eprintln!("[verbose] pruned tree: {} (changed from {})", prune_tree_oid, tree_oid);
+                            eprintln!(
+                                "[verbose] pruned tree: {} (changed from {})",
+                                prune_tree_oid, tree_oid
+                            );
                         }
                         let prune_tree = repo.find_tree(prune_tree_oid)?;
-                        let prune_parent = repo
-                            .find_reference(&ref_name)?
-                            .peel_to_commit()?;
+                        let prune_parent = repo.find_reference(&ref_name)?.peel_to_commit()?;
 
                         let (keys_dropped, keys_retained) =
                             count_prune_stats(&repo, tree_oid, prune_tree_oid)?;
@@ -645,7 +705,9 @@ pub fn run(verbose: bool) -> Result<()> {
                             &prune_commit_oid.to_string()[..8]
                         );
                     } else {
-                        eprintln!("Auto-prune: tree unchanged after pruning, skipping prune commit");
+                        eprintln!(
+                            "Auto-prune: tree unchanged after pruning, skipping prune commit"
+                        );
                     }
                 } else if verbose {
                     eprintln!("[verbose] auto-prune: conditions not met, skipping");
@@ -744,11 +806,7 @@ fn build_tree(
                         }
                     };
                     if verbose {
-                        eprintln!(
-                            "[verbose] tree: {} -> {} bytes",
-                            full_path,
-                            raw_value.len()
-                        );
+                        eprintln!("[verbose] tree: {} -> {} bytes", full_path, raw_value.len());
                     }
                     files.insert(full_path, raw_value.into_bytes());
                 }
@@ -831,10 +889,7 @@ fn build_tree(
 
         let full_path = build_set_member_tombstone_tree_path(&target, key, member_id)?;
         if verbose {
-            eprintln!(
-                "[verbose] tree: {} -> set tombstone ({})",
-                full_path, value
-            );
+            eprintln!("[verbose] tree: {} -> set tombstone ({})", full_path, value);
         }
         files.insert(full_path, value.as_bytes().to_vec());
     }
@@ -854,10 +909,7 @@ fn build_tree(
 
         let full_path = build_list_entry_tombstone_tree_path(&target, key, entry_name)?;
         if verbose {
-            eprintln!(
-                "[verbose] tree: {} -> list tombstone",
-                full_path
-            );
+            eprintln!("[verbose] tree: {} -> list tombstone", full_path);
         }
         let payload = serde_json::to_vec(&TombstoneBlob {
             timestamp: *timestamp,
@@ -995,9 +1047,9 @@ fn remove_subtrees(
         if let Some(entry) = tree.get_name(name) {
             if entry.kind() == Some(git2::ObjectType::Tree) {
                 let subtree = repo.find_tree(entry.id())?;
-                let new_oid = remove_subtrees(repo, &subtree, &sub_paths)?;
+                let new_oid = remove_subtrees(repo, &subtree, sub_paths)?;
                 let new_tree = repo.find_tree(new_oid)?;
-                if new_tree.len() > 0 {
+                if !new_tree.is_empty() {
                     tb.insert(name, new_oid, 0o040000)?;
                 } else {
                     let _ = tb.remove(name);
@@ -1095,10 +1147,11 @@ pub fn prune_tree(
                 }
             }
 
-            let pruned_oid = prune_target_type_tree(repo, &subtree, cutoff_ms, min_size, db, verbose, &name)?;
+            let pruned_oid =
+                prune_target_type_tree(repo, &subtree, cutoff_ms, min_size, db, verbose, &name)?;
             // Only include if the pruned tree is non-empty
             let pruned_tree = repo.find_tree(pruned_oid)?;
-            if pruned_tree.len() > 0 {
+            if !pruned_tree.is_empty() {
                 if verbose && pruned_oid != entry.id() {
                     eprintln!(
                         "[verbose] prune: {}/ reduced from {} to {} entries",
@@ -1136,9 +1189,17 @@ fn prune_target_type_tree(
 
         if entry.kind() == Some(git2::ObjectType::Tree) {
             let subtree = repo.find_tree(entry.id())?;
-            let pruned_oid = prune_subtree_recursive(repo, &subtree, cutoff_ms, min_size, db, verbose, &format!("{}/{}", parent_path, name))?;
+            let pruned_oid = prune_subtree_recursive(
+                repo,
+                &subtree,
+                cutoff_ms,
+                min_size,
+                db,
+                verbose,
+                &format!("{}/{}", parent_path, name),
+            )?;
             let pruned_tree = repo.find_tree(pruned_oid)?;
-            if pruned_tree.len() > 0 {
+            if !pruned_tree.is_empty() {
                 tb.insert(&name, pruned_oid, entry.filemode())?;
             } else if verbose {
                 eprintln!("[verbose] prune: {}/{}/ entirely pruned", parent_path, name);
@@ -1158,7 +1219,7 @@ fn prune_subtree_recursive(
     tree: &git2::Tree,
     cutoff_ms: i64,
     _min_size: u64,
-    db: &Db,
+    _db: &Db,
     verbose: bool,
     parent_path: &str,
 ) -> Result<git2::Oid> {
@@ -1183,7 +1244,7 @@ fn prune_subtree_recursive(
                             before_count
                         );
                     }
-                    if pruned_tree.len() > 0 {
+                    if !pruned_tree.is_empty() {
                         tb.insert(&name, pruned_oid, entry.filemode())?;
                     }
                 } else if name == "__tombstones" {
@@ -1200,16 +1261,23 @@ fn prune_subtree_recursive(
                             before_count
                         );
                     }
-                    if pruned_tree.len() > 0 {
+                    if !pruned_tree.is_empty() {
                         tb.insert(&name, pruned_oid, entry.filemode())?;
                     }
                 } else {
                     // Recurse into key segment directories
                     let subtree = repo.find_tree(entry.id())?;
-                    let pruned_oid =
-                        prune_subtree_recursive(repo, &subtree, cutoff_ms, _min_size, db, verbose, &format!("{}/{}", parent_path, name))?;
+                    let pruned_oid = prune_subtree_recursive(
+                        repo,
+                        &subtree,
+                        cutoff_ms,
+                        _min_size,
+                        _db,
+                        verbose,
+                        &format!("{}/{}", parent_path, name),
+                    )?;
                     let pruned_tree = repo.find_tree(pruned_oid)?;
-                    if pruned_tree.len() > 0 {
+                    if !pruned_tree.is_empty() {
                         tb.insert(&name, pruned_oid, entry.filemode())?;
                     }
                 }
@@ -1270,7 +1338,7 @@ fn prune_tombstone_tree(
                 let subtree = repo.find_tree(entry.id())?;
                 let pruned_oid = prune_tombstone_tree(repo, &subtree, cutoff_ms)?;
                 let pruned_tree = repo.find_tree(pruned_oid)?;
-                if pruned_tree.len() > 0 {
+                if !pruned_tree.is_empty() {
                     tb.insert(&name, pruned_oid, entry.filemode())?;
                 }
             }
