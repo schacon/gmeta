@@ -93,6 +93,20 @@ impl Target {
         Ok(())
     }
 
+    /// If this is a commit target with a partial SHA, expand it to 40 chars
+    /// using a gix repository.
+    pub fn gix_resolve(&mut self, repo: &gix::Repository) -> anyhow::Result<()> {
+        if self.target_type == TargetType::Commit {
+            if let Some(ref v) = self.value {
+                if v.len() < 40 {
+                    let full = crate::git_utils::gix_resolve_commit_sha(repo, v)?;
+                    self.value = Some(full);
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Build the tree base path for serialization.
     ///
     /// Scheme per target type:

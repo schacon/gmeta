@@ -9,10 +9,10 @@ pub fn run(target_str: &str, key: &str) -> Result<()> {
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let repo = git_utils::discover_repo()?;
-    target.resolve(&repo)?;
-    let db_path = git_utils::db_path(&repo)?;
-    let email = git_utils::get_email(&repo)?;
+    let repo = git_utils::discover_gix_repo()?;
+    target.gix_resolve(&repo)?;
+    let db_path = git_utils::gix_db_path(&repo)?;
+    let email = git_utils::gix_get_email(&repo)?;
     let timestamp = Utc::now().timestamp_millis();
 
     let db = Db::open(&db_path)?;
