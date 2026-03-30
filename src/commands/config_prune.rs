@@ -7,8 +7,8 @@ use crate::db::Db;
 use crate::git_utils;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::discover_gix_repo()?;
+    let db_path = git_utils::gix_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     let existing = read_prune_rules(&db)?;
@@ -173,7 +173,7 @@ pub fn run() -> Result<()> {
     }
 
     // -- write --
-    let email = git_utils::get_email(&repo)?;
+    let email = git_utils::gix_get_email(&repo)?;
     let ts = Utc::now().timestamp_millis();
 
     set_config(&db, "meta:prune:since", &since, &email, ts)?;
