@@ -213,10 +213,13 @@ fn test_partial_key_matching_commit_namespace_example() {
         .args(["get", &target, "agent"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("agent:model  claude-opus-4-6"))
-        .stdout(predicate::str::contains("agent:provider  anthropic"))
-        .stdout(predicate::str::contains("agent:prompt  Make me a sandwich"))
-        .stdout(predicate::str::contains("agent:transcript  ..."));
+        .stdout(predicate::str::contains("agent:model"))
+        .stdout(predicate::str::contains("claude-opus-4-6"))
+        .stdout(predicate::str::contains("agent:provider"))
+        .stdout(predicate::str::contains("anthropic"))
+        .stdout(predicate::str::contains("agent:prompt"))
+        .stdout(predicate::str::contains("Make me a sandwich"))
+        .stdout(predicate::str::contains("agent:transcript"));
 }
 
 #[test]
@@ -565,7 +568,7 @@ fn test_path_target() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "src/main.rs;review:status approved",
+            "src/main.rs;review:status  approved",
         ));
 }
 
@@ -594,9 +597,12 @@ fn test_path_target_tree_lookup() {
         .args(["get", "path:src", "owner"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("src/git;owner schacon"))
-        .stdout(predicate::str::contains("src/observability;owner caleb"))
-        .stdout(predicate::str::contains("src/metrics;owner kiril"))
+        .stdout(predicate::str::contains("src/git;owner"))
+        .stdout(predicate::str::contains("schacon"))
+        .stdout(predicate::str::contains("src/observability;owner"))
+        .stdout(predicate::str::contains("caleb"))
+        .stdout(predicate::str::contains("src/metrics;owner"))
+        .stdout(predicate::str::contains("kiril"))
         .stdout(predicate::str::contains("srcx/metrics;owner").not());
 }
 

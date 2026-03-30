@@ -102,7 +102,7 @@ pub fn run(
     if json_output {
         print_json(&db, &target, &resolved, with_authorship)?;
     } else {
-        print_plain(&target, &resolved)?;
+        print_plain(&target, &resolved, key.is_some() && resolved.len() == 1)?;
     }
 
     Ok(())
@@ -252,33 +252,84 @@ fn resolve_git_ref(repo: &Repository, sha: &str) -> Result<String> {
     Ok(content.to_string())
 }
 
-fn print_plain(target: &Target, entries: &[(String, String, String, String)]) -> Result<()> {
-    for (target_value, key, value, value_type) in entries {
-        let display_value = format_value(value, value_type)?;
-        if target.target_type == TargetType::Path {
-            println!("{};{} {}", target_value, key, display_value);
-        } else {
-            println!("{}  {}", key, display_value);
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max - 3).collect();
+        format!("{}...", truncated)
+    }
+}
+
+fn print_plain(target: &Target, entries: &[(String, String, String, String)], value_only: bool) -> Result<()> {
+    if value_only {
+        for (_, _, value, value_type) in entries {
+            print_value_only(value, value_type)?;
         }
+        return Ok(());
+    }
+
+    // Compute max label width for aligned output
+    let labels: Vec<String> = entries
+        .iter()
+        .map(|(tv, k, _, _)| {
+            if target.target_type == TargetType::Path {
+                format!("{};{}", tv, k)
+            } else {
+                k.clone()
+            }
+        })
+        .collect();
+    let max_width = labels.iter().map(|l| l.len()).max().unwrap_or(0);
+
+    for (label, (_, _, value, value_type)) in labels.iter().zip(entries.iter()) {
+        let display_value = format_value_compact(value, value_type)?;
+        let truncated = truncate_str(&display_value, 50);
+        println!("{:width$}  {}", label, truncated, width = max_width);
+    }
+
+    Ok(())
+}
+
+/// Single-key mode: raw string value, or one line per list/set item.
+fn print_value_only(value: &str, value_type: &str) -> Result<()> {
+    match value_type {
+        "string" => {
+            let s: String = serde_json::from_str(value)?;
+            println!("{}", s);
+        }
+        "list" => {
+            for item in list_values_from_json(value)? {
+                println!("{}", item);
+            }
+        }
+        "set" => {
+            let mut set: Vec<String> = serde_json::from_str(value)?;
+            set.sort();
+            for item in set {
+                println!("{}", item);
+            }
+        }
+        _ => println!("{}", value),
     }
     Ok(())
 }
 
-fn format_value(value: &str, value_type: &str) -> Result<String> {
+/// Multi-key mode: compact one-line representation.
+fn format_value_compact(value: &str, value_type: &str) -> Result<String> {
     match value_type {
         "string" => {
-            // value is JSON-encoded string like "\"claude-4.6\""
             let s: String = serde_json::from_str(value)?;
             Ok(s)
         }
         "list" => {
             let list = list_values_from_json(value)?;
-            Ok(format!("{:?}", list))
+            Ok(list.join(", "))
         }
         "set" => {
             let mut set: Vec<String> = serde_json::from_str(value)?;
             set.sort();
-            Ok(format!("{:?}", set))
+            Ok(set.join(", "))
         }
         _ => Ok(value.to_string()),
     }
