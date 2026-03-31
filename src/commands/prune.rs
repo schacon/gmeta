@@ -11,16 +11,15 @@ use crate::commands::auto_prune::parse_since_to_cutoff_ms;
 use crate::commands::serialize::{
     build_filtered_tree, classify_key, count_prune_stats, parse_filter_rules, MAIN_DEST,
 };
-use crate::db::Db;
+use crate::context::CommandContext;
 use crate::git_utils;
 
 pub fn run(dry_run: bool) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
 
     // Read prune rules — need at least meta:prune:since
-    let since = match db.get("project", "", "meta:prune:since")? {
+    let since = match ctx.db.get("project", "", "meta:prune:since")? {
         Some((value, _, _)) => {
             let s: String = serde_json::from_str(&value)?;
             s
@@ -40,7 +39,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         .unwrap_or_else(|| "?".to_string());
 
     // Find the current serialized tree
-    let ref_name = git_utils::git2_local_ref(&repo)?;
+    let ref_name = git_utils::git2_local_ref(repo)?;
     let Some(current_commit) = repo
         .find_reference(&ref_name)
         .ok()
@@ -54,7 +53,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     };
 
     let tree_oid = current_commit.tree()?.id();
-    let (_, current_keys) = count_prune_stats(&repo, tree_oid, tree_oid)?;
+    let (_, current_keys) = count_prune_stats(repo, tree_oid, tree_oid)?;
 
     eprintln!(
         "Pruning {} (cutoff: {} — entries older than {})",
@@ -63,7 +62,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     eprintln!("  current tree: {} keys", current_keys);
 
     // Read filter rules so we produce the same tree as serialize would
-    let filter_rules = parse_filter_rules(&db)?;
+    let filter_rules = parse_filter_rules(&ctx.db)?;
 
     let is_main_dest = |key: &str| -> bool {
         match classify_key(key, &filter_rules) {
@@ -73,10 +72,10 @@ pub fn run(dry_run: bool) -> Result<()> {
     };
 
     // Read all metadata and split into kept vs pruned by cutoff + serialize filters
-    let all_metadata = db.get_all_metadata()?;
-    let all_tombstones = db.get_all_tombstones()?;
-    let all_set_tombstones = db.get_all_set_tombstones()?;
-    let all_list_tombstones = db.get_all_list_tombstones()?;
+    let all_metadata = ctx.db.get_all_metadata()?;
+    let all_tombstones = ctx.db.get_all_tombstones()?;
+    let all_set_tombstones = ctx.db.get_all_set_tombstones()?;
+    let all_list_tombstones = ctx.db.get_all_list_tombstones()?;
 
     // Count entries that would be pruned (old + in main dest)
     let mut pruned_meta = 0u64;
@@ -131,14 +130,14 @@ pub fn run(dry_run: bool) -> Result<()> {
 
     // Build a fresh tree from the surviving entries
     let pruned_tree_oid = build_filtered_tree(
-        &repo,
+        repo,
         &metadata,
         &tombstones,
         &set_tombstones,
         &list_tombstones,
     )?;
 
-    let (keys_dropped, keys_retained) = count_prune_stats(&repo, tree_oid, pruned_tree_oid)?;
+    let (keys_dropped, keys_retained) = count_prune_stats(repo, tree_oid, pruned_tree_oid)?;
 
     eprintln!(
         "  pruned tree:  {} keys ({} dropped from tree)",
@@ -154,8 +153,8 @@ pub fn run(dry_run: bool) -> Result<()> {
     }
 
     // Commit the pruned tree
-    let name = git_utils::git2_get_name(&repo)?;
-    let email = git_utils::git2_get_email(&repo)?;
+    let name = git_utils::git2_get_name(repo)?;
+    let email = git_utils::git2_get_email(repo)?;
     let sig = git2::Signature::now(&name, &email)?;
     let pruned_tree = repo.find_tree(pruned_tree_oid)?;
 

@@ -1,17 +1,13 @@
 use anyhow::Result;
-use chrono::Utc;
 use dialoguer::{Confirm, Input, Select};
 
 use crate::commands::auto_prune::{parse_size, read_prune_rules};
-use crate::db::Db;
-use crate::git_utils;
+use crate::context::CommandContext;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_gix(None)?;
 
-    let existing = read_prune_rules(&db)?;
+    let existing = read_prune_rules(&ctx.db)?;
 
     if let Some(ref rules) = existing {
         println!("Current auto-prune configuration:");
@@ -173,27 +169,42 @@ pub fn run() -> Result<()> {
     }
 
     // -- write --
-    let email = git_utils::get_email(&repo)?;
-    let ts = Utc::now().timestamp_millis();
-
-    set_config(&db, "meta:prune:since", &since, &email, ts)?;
+    set_config(&ctx, "meta:prune:since", &since)?;
 
     match max_keys {
-        Some(ref v) => set_config(&db, "meta:prune:max-keys", v, &email, ts)?,
+        Some(ref v) => set_config(&ctx, "meta:prune:max-keys", v)?,
         None => {
-            db.rm("project", "", "meta:prune:max-keys", &email, ts)?;
+            ctx.db.rm(
+                "project",
+                "",
+                "meta:prune:max-keys",
+                &ctx.email,
+                ctx.timestamp,
+            )?;
         }
     }
     match max_size {
-        Some(ref v) => set_config(&db, "meta:prune:max-size", v, &email, ts)?,
+        Some(ref v) => set_config(&ctx, "meta:prune:max-size", v)?,
         None => {
-            db.rm("project", "", "meta:prune:max-size", &email, ts)?;
+            ctx.db.rm(
+                "project",
+                "",
+                "meta:prune:max-size",
+                &ctx.email,
+                ctx.timestamp,
+            )?;
         }
     }
     match min_size {
-        Some(ref v) => set_config(&db, "meta:prune:min-size", v, &email, ts)?,
+        Some(ref v) => set_config(&ctx, "meta:prune:min-size", v)?,
         None => {
-            db.rm("project", "", "meta:prune:min-size", &email, ts)?;
+            ctx.db.rm(
+                "project",
+                "",
+                "meta:prune:min-size",
+                &ctx.email,
+                ctx.timestamp,
+            )?;
         }
     }
 
@@ -201,9 +212,17 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-fn set_config(db: &Db, key: &str, value: &str, email: &str, ts: i64) -> Result<()> {
+fn set_config(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
     let stored = serde_json::to_string(value)?;
-    db.set("project", "", key, &stored, "string", email, ts)?;
+    ctx.db.set(
+        "project",
+        "",
+        key,
+        &stored,
+        "string",
+        &ctx.email,
+        ctx.timestamp,
+    )?;
     Ok(())
 }
 

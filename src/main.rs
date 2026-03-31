@@ -2,6 +2,7 @@
 
 mod cli;
 mod commands;
+mod context;
 mod db;
 mod git_utils;
 mod list_value;

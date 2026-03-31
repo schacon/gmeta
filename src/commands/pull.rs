@@ -1,15 +1,17 @@
 use anyhow::Result;
 
 use crate::commands::{materialize, serialize};
+use crate::context::CommandContext;
 use crate::db::Db;
 use crate::git_utils;
 use crate::types;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let ns = git_utils::git2_get_namespace(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let ns = git_utils::git2_get_namespace(repo)?;
 
-    let remote_name = git_utils::resolve_meta_remote(&repo, remote)?;
+    let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
     let remote_refspec = format!("refs/{}/main", ns);
     let tracking_ref = format!("refs/{}/remotes/main", ns);
     let fetch_refspec = format!("{}:{}", remote_refspec, tracking_ref);
@@ -28,7 +30,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
     // Fetch latest remote metadata
     eprintln!("Fetching metadata from {}...", remote_name);
-    git_utils::git2_run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
+    git_utils::git2_run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
 
     // Get the new tip
     let new_tip = repo
@@ -39,11 +41,9 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
     // Check if we need to materialize even if no new commits were fetched
     // (e.g. remote add fetched but never materialized)
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
-    let needs_materialize = db.get_last_materialized()?.is_none()
+    let needs_materialize = ctx.db.get_last_materialized()?.is_none()
         || repo
-            .find_reference(&git_utils::git2_local_ref(&repo)?)
+            .find_reference(&git_utils::git2_local_ref(repo)?)
             .is_err();
 
     // Count new commits
@@ -56,7 +56,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
             eprintln!("No new commits, but local state needs materializing.");
         }
         (Some(old), Some(new)) => {
-            let count = count_commits_between(&repo, old, new);
+            let count = count_commits_between(repo, old, new);
             eprintln!(
                 "Fetched {} new commit{}.",
                 count,
@@ -71,7 +71,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
     // Hydrate tip tree blobs so libgit2 can read them
     let short_ref = format!("{}/remotes/main", ns);
-    git_utils::hydrate_tip_blobs(&repo, &remote_name, &short_ref)?;
+    git_utils::hydrate_tip_blobs(repo, &remote_name, &short_ref)?;
 
     // Serialize local state so materialize can do a proper 3-way merge
     eprintln!("Serializing local metadata...");
@@ -86,7 +86,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     // On first materialize, walk the entire history (pass None as old_tip).
     if let Some(new) = new_tip {
         let walk_from = if needs_materialize { None } else { old_tip };
-        let promisor_count = insert_promisor_entries(&repo, &db, new, walk_from, verbose)?;
+        let promisor_count = insert_promisor_entries(repo, &ctx.db, new, walk_from, verbose)?;
         if promisor_count > 0 {
             eprintln!(
                 "Indexed {} keys from history (available on demand).",

@@ -1,14 +1,16 @@
 use anyhow::{bail, Result};
 
 use crate::commands::{materialize, serialize};
+use crate::context::CommandContext;
 use crate::git_utils;
 
 /// Push a README commit to refs/heads/main on the meta remote.
 /// This only succeeds if the branch doesn't already exist (no force push).
 pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
 
-    let remote_name = git_utils::resolve_meta_remote(&repo, remote)?;
+    let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
 
     // Gather project info from .git/config
     let config = repo.config()?;
@@ -18,7 +20,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     let meta_url = config
         .get_string(&format!("remote.{}.url", remote_name))
         .unwrap_or_else(|_| "unknown".to_string());
-    let ns = git_utils::git2_get_namespace(&repo)?;
+    let ns = git_utils::git2_get_namespace(repo)?;
 
     let readme_content = generate_readme(&origin_url, &meta_url, &ns);
 
@@ -61,7 +63,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     }
 
     eprintln!("Pushing README to {}...", remote_name);
-    let result = git_utils::git2_run_git(&repo, &["push", &remote_name, &push_refspec]);
+    let result = git_utils::git2_run_git(repo, &["push", &remote_name, &push_refspec]);
 
     match result {
         Ok(_) => {
@@ -153,12 +155,13 @@ See `gmeta --help` for the full command reference.
 const MAX_RETRIES: u32 = 5;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let ns = git_utils::git2_get_namespace(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let ns = git_utils::git2_get_namespace(repo)?;
 
     // Resolve which remote to push to
-    let remote_name = git_utils::resolve_meta_remote(&repo, remote)?;
-    let local_ref = git_utils::git2_local_ref(&repo)?;
+    let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
+    let local_ref = git_utils::git2_local_ref(repo)?;
     let remote_refspec = format!("refs/{}/main", ns);
 
     if verbose {
@@ -205,7 +208,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         }
 
         eprintln!("Pushing to {}...", remote_name);
-        let result = git_utils::git2_run_git(&repo, &["push", &remote_name, &push_refspec]);
+        let result = git_utils::git2_run_git(repo, &["push", &remote_name, &push_refspec]);
 
         match result {
             Ok(_) => {
@@ -229,11 +232,11 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
                 // Fetch latest remote data
                 let fetch_refspec = format!("{}:refs/{}/remotes/main", remote_refspec, ns);
-                git_utils::git2_run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
+                git_utils::git2_run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
 
                 // Hydrate tip tree blobs so libgit2 can read them
                 let short_ref = format!("{}/remotes/main", ns);
-                git_utils::hydrate_tip_blobs(&repo, &remote_name, &short_ref)?;
+                git_utils::hydrate_tip_blobs(repo, &remote_name, &short_ref)?;
 
                 // Materialize the remote data (merge into local DB)
                 materialize::run(None, false, verbose)?;
@@ -245,7 +248,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
                 // Rewrite local ref as a single commit on top of the remote tip.
                 // This avoids merge commits in the pushed history — the spec
                 // requires that push always produces a single fast-forward commit.
-                rebase_local_on_remote(&repo, &local_ref, &remote_tracking_ref, verbose)?;
+                rebase_local_on_remote(repo, &local_ref, &remote_tracking_ref, verbose)?;
             }
         }
     }

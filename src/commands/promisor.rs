@@ -1,13 +1,12 @@
 use anyhow::{bail, Result};
 
-use crate::db::Db;
+use crate::context::CommandContext;
 use crate::git_utils;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let ns = git_utils::git2_get_namespace(&repo)?;
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let ns = git_utils::git2_get_namespace(repo)?;
 
     let tracking_ref = format!("refs/{}/remotes/main", ns);
     let tip_commit = match repo.find_reference(&tracking_ref) {
@@ -69,7 +68,10 @@ pub fn run() -> Result<()> {
                         skipped_deletes += 1;
                         continue;
                     }
-                    if db.insert_promised(target_type, target_value, key, "string")? {
+                    if ctx
+                        .db
+                        .insert_promised(target_type, target_value, key, "string")?
+                    {
                         commit_inserted += 1;
                         inserted += 1;
                     } else {
@@ -91,13 +93,16 @@ pub fn run() -> Result<()> {
             None if commit.parent_count() == 0 => {
                 // Root commit without a change list — walk its tree
                 let tree = commit.tree()?;
-                let keys = super::pull::extract_keys_from_tree_pub(&repo, &tree)?;
+                let keys = super::pull::extract_keys_from_tree_pub(repo, &tree)?;
                 commits_parsed += 1;
                 let mut commit_inserted = 0;
                 let mut commit_skipped = 0;
 
                 for (target_type, target_value, key) in &keys {
-                    if db.insert_promised(target_type, target_value, key, "string")? {
+                    if ctx
+                        .db
+                        .insert_promised(target_type, target_value, key, "string")?
+                    {
                         commit_inserted += 1;
                         inserted += 1;
                     } else {

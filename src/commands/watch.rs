@@ -9,6 +9,7 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 
+use crate::context::CommandContext;
 use crate::db::Db;
 use crate::git_utils;
 
@@ -23,7 +24,8 @@ const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
 
 pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
     let workdir = repo
         .workdir()
         .context("bare repo not supported")?

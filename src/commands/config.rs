@@ -1,33 +1,30 @@
 use anyhow::{bail, Result};
-use chrono::Utc;
 
+use crate::context::CommandContext;
 use crate::db::Db;
-use crate::git_utils;
 use crate::types::validate_key;
 
 const CONFIG_PREFIX: &str = "meta:";
 
 pub fn run(list: bool, unset: bool, key: Option<&str>, value: Option<&str>) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_gix(None)?;
 
     if list {
-        return run_list(&db);
+        return run_list(&ctx.db);
     }
 
     if unset {
         let key = key.ok_or_else(|| anyhow::anyhow!("--unset requires a key"))?;
         validate_config_key(key)?;
-        return run_unset(&repo, &db, key);
+        return run_unset(&ctx, key);
     }
 
     let key = key.ok_or_else(|| anyhow::anyhow!("key is required"))?;
     validate_config_key(key)?;
 
     match value {
-        Some(val) => run_set(&repo, &db, key, val),
-        None => run_get(&db, key),
+        Some(val) => run_set(&ctx, key, val),
+        None => run_get(&ctx.db, key),
     }
 }
 
@@ -43,19 +40,17 @@ fn validate_config_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_set(repo: &gix::Repository, db: &Db, key: &str, value: &str) -> Result<()> {
-    let email = git_utils::get_email(repo)?;
-    let timestamp = Utc::now().timestamp_millis();
+fn run_set(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
     let stored_value = serde_json::to_string(value)?;
 
-    db.set(
+    ctx.db.set(
         "project",
         "",
         key,
         &stored_value,
         "string",
-        &email,
-        timestamp,
+        &ctx.email,
+        ctx.timestamp,
     )?;
     Ok(())
 }
@@ -86,11 +81,8 @@ fn run_list(db: &Db) -> Result<()> {
     Ok(())
 }
 
-fn run_unset(repo: &gix::Repository, db: &Db, key: &str) -> Result<()> {
-    let email = git_utils::get_email(repo)?;
-    let timestamp = Utc::now().timestamp_millis();
-
-    let removed = db.rm("project", "", key, &email, timestamp)?;
+fn run_unset(ctx: &CommandContext, key: &str) -> Result<()> {
+    let removed = ctx.db.rm("project", "", key, &ctx.email, ctx.timestamp)?;
     if !removed {
         eprintln!("key '{}' not found", key);
     }

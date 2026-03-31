@@ -1,42 +1,10 @@
 use std::fs;
 
 use anyhow::{bail, Context, Result};
-use chrono::Utc;
 
-use crate::db::Db;
-use crate::git_utils;
+use crate::context::CommandContext;
 use crate::list_value::{encode_entries, parse_entries};
 use crate::types::{validate_key, Target, ValueType, GIT_REF_THRESHOLD};
-
-struct CommandContext {
-    target: Target,
-    db: Db,
-    email: String,
-    timestamp: i64,
-}
-
-fn open_context(
-    target_str: &str,
-    key: &str,
-    timestamp_override: Option<i64>,
-) -> Result<CommandContext> {
-    let mut target = Target::parse(target_str)?;
-    validate_key(key)?;
-
-    let repo = git_utils::discover_repo()?;
-    target.resolve(&repo)?;
-    let db_path = git_utils::db_path(&repo)?;
-    let email = git_utils::get_email(&repo)?;
-    let timestamp = timestamp_override.unwrap_or_else(|| Utc::now().timestamp_millis());
-    let db = Db::open(&db_path)?;
-
-    Ok(CommandContext {
-        target,
-        db,
-        email,
-        timestamp,
-    })
-}
 
 fn print_result(action: &str, key: &str, target: &Target, json: bool) {
     let target_str = match &target.value {
@@ -65,7 +33,12 @@ pub fn run(
     json: bool,
     timestamp: Option<i64>,
 ) -> Result<()> {
-    let ctx = open_context(target_str, key, timestamp)?;
+    let mut target = Target::parse(target_str)?;
+    validate_key(key)?;
+
+    let ctx = CommandContext::open_gix(timestamp)?;
+    ctx.resolve_target(&mut target)?;
+
     let value_type = ValueType::from_str(value_type_str)?;
 
     let from_file = file.is_some();
@@ -83,12 +56,12 @@ pub fn run(
         from_file && matches!(value_type, ValueType::String) && raw_value.len() > GIT_REF_THRESHOLD;
 
     if use_git_ref {
-        let repo = git_utils::git2_discover_repo()?;
-        let blob_oid = repo.blob(raw_value.as_bytes())?;
+        let git2_repo = ctx.git2_repo()?;
+        let blob_oid = git2_repo.blob(raw_value.as_bytes())?;
         ctx.db.set_with_git_ref(
             None,
-            ctx.target.type_str(),
-            ctx.target.value_str(),
+            target.type_str(),
+            target.value_str(),
             key,
             &blob_oid.to_string(),
             value_type.as_str(),
@@ -110,8 +83,8 @@ pub fn run(
         };
 
         ctx.db.set(
-            ctx.target.type_str(),
-            ctx.target.value_str(),
+            target.type_str(),
+            target.value_str(),
             key,
             &stored_value,
             value_type.as_str(),
@@ -120,7 +93,7 @@ pub fn run(
         )?;
     }
 
-    print_result("set", key, &ctx.target, json);
+    print_result("set", key, &target, json);
     Ok(())
 }
 
@@ -131,16 +104,21 @@ pub fn run_add(
     json: bool,
     timestamp: Option<i64>,
 ) -> Result<()> {
-    let ctx = open_context(target_str, key, timestamp)?;
+    let mut target = Target::parse(target_str)?;
+    validate_key(key)?;
+
+    let ctx = CommandContext::open_gix(timestamp)?;
+    ctx.resolve_target(&mut target)?;
+
     ctx.db.set_add(
-        ctx.target.type_str(),
-        ctx.target.value_str(),
+        target.type_str(),
+        target.value_str(),
         key,
         value,
         &ctx.email,
         ctx.timestamp,
     )?;
-    print_result("added", key, &ctx.target, json);
+    print_result("added", key, &target, json);
     Ok(())
 }
 
@@ -151,15 +129,20 @@ pub fn run_rm(
     json: bool,
     timestamp: Option<i64>,
 ) -> Result<()> {
-    let ctx = open_context(target_str, key, timestamp)?;
+    let mut target = Target::parse(target_str)?;
+    validate_key(key)?;
+
+    let ctx = CommandContext::open_gix(timestamp)?;
+    ctx.resolve_target(&mut target)?;
+
     ctx.db.set_rm(
-        ctx.target.type_str(),
-        ctx.target.value_str(),
+        target.type_str(),
+        target.value_str(),
         key,
         value,
         &ctx.email,
         ctx.timestamp,
     )?;
-    print_result("removed", key, &ctx.target, json);
+    print_result("removed", key, &target, json);
     Ok(())
 }

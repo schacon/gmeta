@@ -1,12 +1,11 @@
 use std::collections::HashSet;
 
 use anyhow::{bail, Context, Result};
-use chrono::Utc;
 use git2::Repository;
 use serde_json::Value;
 
+use crate::context::CommandContext;
 use crate::db::Db;
-use crate::git_utils;
 use crate::types::GIT_REF_THRESHOLD;
 
 pub fn run(format: &str, dry_run: bool, since: Option<&str>) -> Result<()> {
@@ -30,21 +29,17 @@ pub fn run(format: &str, dry_run: bool, since: Option<&str>) -> Result<()> {
 }
 
 fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let email = git_utils::git2_get_email(&repo)?;
-    let fallback_ts = Utc::now().timestamp_millis();
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let email = &ctx.email;
+    let fallback_ts = ctx.timestamp;
 
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = if dry_run {
-        None
-    } else {
-        Some(Db::open(&db_path)?)
-    };
+    let db = if dry_run { None } else { Some(&ctx.db) };
 
     let mut imported_count = 0u64;
 
     // Resolve the checkpoints tree (local or remote)
-    let checkpoints_tree = resolve_entire_ref(&repo, "entire/checkpoints/v1")?;
+    let checkpoints_tree = resolve_entire_ref(repo, "entire/checkpoints/v1")?;
     if checkpoints_tree.is_none() {
         eprintln!("No entire/checkpoints/v1 ref found (local or remote), skipping checkpoints");
     }
@@ -64,13 +59,13 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
             eprintln!("Scanning commits for Entire-Checkpoint trailers...");
         }
         imported_count +=
-            import_checkpoints_from_commits(&repo, cp_tree, &db, &email, dry_run, since_epoch)?;
+            import_checkpoints_from_commits(repo, cp_tree, db, email, dry_run, since_epoch)?;
     }
 
     // Step 2: Import trails
-    if let Some(tree) = resolve_entire_ref(&repo, "entire/trails/v1")? {
+    if let Some(tree) = resolve_entire_ref(repo, "entire/trails/v1")? {
         eprintln!("Processing entire/trails/v1...");
-        imported_count += import_trails(&repo, &tree, &db, &email, fallback_ts, dry_run)?;
+        imported_count += import_trails(repo, &tree, db, email, fallback_ts, dry_run)?;
     } else {
         eprintln!("No entire/trails/v1 ref found, skipping trails");
     }
@@ -107,7 +102,7 @@ fn resolve_entire_ref<'a>(repo: &'a Repository, refname: &str) -> Result<Option<
 fn import_checkpoints_from_commits(
     repo: &Repository,
     checkpoints_tree: &git2::Tree,
-    db: &Option<Db>,
+    db: Option<&Db>,
     email: &str,
     dry_run: bool,
     since_epoch: Option<i64>,
@@ -298,7 +293,7 @@ fn import_checkpoints_from_commits(
 fn import_session(
     repo: &Repository,
     session_tree: &git2::Tree,
-    db: &Option<Db>,
+    db: Option<&Db>,
     commit_sha: &str,
     key_prefix: &str,
     email: &str,
@@ -507,7 +502,7 @@ fn entry_to_tree<'a>(
 }
 
 /// Load the set of trail IDs that have already been imported.
-fn load_imported_trail_ids(db: &Option<Db>) -> Result<HashSet<String>> {
+fn load_imported_trail_ids(db: Option<&Db>) -> Result<HashSet<String>> {
     let mut ids = HashSet::new();
     if let Some(db) = db {
         let mut stmt = db.conn.prepare(
@@ -527,7 +522,7 @@ fn load_imported_trail_ids(db: &Option<Db>) -> Result<HashSet<String>> {
 fn import_trails(
     repo: &Repository,
     root_tree: &git2::Tree,
-    db: &Option<Db>,
+    db: Option<&Db>,
     email: &str,
     base_ts: i64,
     dry_run: bool,
@@ -704,7 +699,7 @@ fn import_trails(
 /// Large string values (> GIT_REF_THRESHOLD bytes) are stored as git blob refs.
 fn set_value(
     repo: &Repository,
-    db: &Option<Db>,
+    db: Option<&Db>,
     dry_run: bool,
     target_type: &str,
     target_value: &str,
@@ -814,15 +809,11 @@ fn truncate(s: &str, max: usize) -> String {
 const NOTES_REFS: &[&str] = &["refs/remotes/notes/ai", "refs/notes/ai"];
 
 fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let email = git_utils::git2_get_email(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let email = &ctx.email;
 
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = if dry_run {
-        None
-    } else {
-        Some(Db::open(&db_path)?)
-    };
+    let db = if dry_run { None } else { Some(&ctx.db) };
 
     // Locate the notes ref — prefer remote mirror, fall back to local.
     let notes_ref = NOTES_REFS
@@ -938,7 +929,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 
             // Check whether we already have data for this commit so we can
             // report skips without touching the DB on a real run.
-            if let Some(ref db) = db {
+            if let Some(db) = db {
                 if db.get("commit", &commit_sha, "agent.blame")?.is_some() {
                     skipped_exists += 1;
                     continue;
@@ -956,7 +947,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                 },
             );
 
-            if let Some(ref db) = db {
+            if let Some(db) = db {
                 // agent.blame — store as git blob ref if large
                 let (blame_val, is_ref) = if parsed.blame.len() > GIT_REF_THRESHOLD {
                     let oid = repo.blob(parsed.blame.as_bytes())?;
@@ -971,7 +962,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                     "agent.blame",
                     &blame_val,
                     "string",
-                    &email,
+                    email,
                     commit_ts,
                     is_ref,
                 )?;
@@ -982,7 +973,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                     "agent.git-ai.schema-version",
                     &json_string(&parsed.schema_version),
                     "string",
-                    &email,
+                    email,
                     commit_ts,
                 )?;
 
@@ -993,7 +984,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                         "agent.git-ai.version",
                         &json_string(ver),
                         "string",
-                        &email,
+                        email,
                         commit_ts,
                     )?;
                 }
@@ -1005,7 +996,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                         "agent.model",
                         &json_string(&parsed.model),
                         "string",
-                        &email,
+                        email,
                         commit_ts,
                     )?;
                 }

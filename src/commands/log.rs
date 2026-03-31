@@ -4,6 +4,7 @@
 use anyhow::{Context, Result};
 use git2::{Oid, Repository, Sort};
 
+use crate::context::CommandContext;
 use crate::db::Db;
 use crate::git_utils;
 
@@ -21,12 +22,14 @@ pub fn run(
     count: usize,            // max commits to show
     metadata_only: bool,     // skip commits with no metadata
 ) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let db_path = git_utils::git2_db_path(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    // log needs a separate Db with an embedded repo for blob resolution during reads
+    let db_path = git_utils::git2_db_path(repo)?;
     let db = Db::open_with_repo(&db_path, git_utils::git2_discover_repo()?)?;
 
     // Resolve start ref → OID
-    let start_oid = resolve_start(&repo, start_ref)?;
+    let start_oid = resolve_start(repo, start_ref)?;
 
     // Walk commits
     let mut revwalk = repo.revwalk()?;
