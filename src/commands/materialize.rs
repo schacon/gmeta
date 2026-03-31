@@ -766,7 +766,6 @@ fn update_db_from_tree(
                 }
             }
             TreeValue::Set(set_members) => {
-                let mut visible: Vec<String> = set_members.values().cloned().collect();
                 let key = (target_type.clone(), target_value.clone(), key_name.clone());
                 let tombstoned: BTreeSet<String> = set_tombstones
                     .iter()
@@ -778,7 +777,11 @@ fn update_db_from_tree(
                         }
                     })
                     .collect();
-                visible.retain(|member| !tombstoned.contains(&set_member_id(member)));
+                let mut visible: Vec<String> = set_members
+                    .values()
+                    .filter(|member| !tombstoned.contains(&set_member_id(member)))
+                    .cloned()
+                    .collect();
                 visible.sort();
                 let json_val = serde_json::to_string(&visible)?;
                 let existing = db.get(target_type, target_value, key_name)?;
@@ -797,14 +800,14 @@ fn update_db_from_tree(
         }
     }
 
-    for ((target_type, target_value, key_name), tombstone) in tombstones {
-        if values.contains_key(&(target_type.clone(), target_value.clone(), key_name.clone())) {
+    for (key, tombstone) in tombstones {
+        if values.contains_key(key) {
             continue;
         }
         db.apply_tombstone(
-            target_type,
-            target_value,
-            key_name,
+            &key.0,
+            &key.1,
+            &key.2,
             &tombstone.email,
             tombstone.timestamp,
         )?;

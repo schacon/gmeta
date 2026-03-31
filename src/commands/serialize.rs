@@ -230,7 +230,7 @@ pub fn run(verbose: bool) -> Result<()> {
         .find_reference(&local_ref_name)
         .ok()
         .and_then(|r| r.peel_to_commit().ok())
-        .map(|c| c.tree().unwrap());
+        .and_then(|c| c.tree().ok());
 
     if verbose {
         if let Some(ref tree) = existing_tree {
