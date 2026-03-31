@@ -20,5 +20,7 @@ notify = "7"
 
 [dev-dependencies]
 assert_cmd = "2"
+gix-testtools = "0.18"
 predicates = "3"
+sha1 = "0.10"
 tempfile = "3"
