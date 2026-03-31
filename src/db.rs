@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{bail, Result};
 use git2::Repository;
@@ -6,6 +7,32 @@ use rusqlite::{params, Connection};
 
 use crate::list_value::{encode_entries, ensure_unique_timestamp, parse_entries, ListEntry};
 use crate::types::GIT_REF_THRESHOLD;
+
+/// The time to wait when the database is locked before giving up.
+const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Applies performance and correctness pragmas to a freshly opened SQLite connection.
+///
+/// Settings applied:
+/// - **WAL journal mode** — enables concurrent readers during writes.
+/// - **synchronous = NORMAL** — fsyncs only at critical moments (safe with WAL).
+/// - **wal_autocheckpoint = 1000** — checkpoints after ~1 MB of WAL growth.
+/// - **foreign_keys = ON** — enforces foreign key constraints.
+/// - **busy_timeout** — waits up to [`BUSY_TIMEOUT`] when the database is locked.
+///
+/// # Errors
+///
+/// Returns an error if any pragma or the busy-timeout call fails.
+fn configure_connection(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA wal_autocheckpoint = 1000;
+         PRAGMA foreign_keys = ON;",
+    )?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
+    Ok(())
+}
 
 pub struct Db {
     pub conn: Connection,
@@ -16,6 +43,7 @@ pub struct Db {
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
+        configure_connection(&conn)?;
         let db = Db { conn, repo: None };
         db.init_schema()?;
         Ok(db)
@@ -23,6 +51,7 @@ impl Db {
 
     pub fn open_with_repo(path: &Path, repo: Repository) -> Result<Self> {
         let conn = Connection::open(path)?;
+        configure_connection(&conn)?;
         let db = Db {
             conn,
             repo: Some(repo),
@@ -34,6 +63,7 @@ impl Db {
     #[cfg(test)]
     pub fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
+        configure_connection(&conn)?;
         let db = Db { conn, repo: None };
         db.init_schema()?;
         Ok(db)
