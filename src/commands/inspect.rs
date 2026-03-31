@@ -4,9 +4,10 @@
 //! - `gmeta inspect <target-type>`: list all keys for that target type
 //! - `gmeta inspect <target-type> <term>`: fuzzy-match keys/targets on term
 
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use std::collections::BTreeMap;
 
 use crate::db::Db;
 use crate::git_utils;

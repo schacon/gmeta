@@ -1,7 +1,8 @@
+use std::path::Path;
+
 use anyhow::{bail, Result};
 use git2::Repository;
 use rusqlite::{params, Connection};
-use std::path::Path;
 
 use crate::list_value::{encode_entries, ensure_unique_timestamp, parse_entries, ListEntry};
 use crate::types::GIT_REF_THRESHOLD;

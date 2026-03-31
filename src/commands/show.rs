@@ -1,9 +1,10 @@
 //! `gmeta show <commit-sha>` — display commit details with any associated metadata.
 
+use std::process::Command;
+
 use anyhow::{Context, Result};
 use chrono::{TimeZone, Utc};
 use git2::Repository;
-use std::process::Command;
 
 use crate::db::Db;
 use crate::git_utils;

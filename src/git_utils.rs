@@ -1,7 +1,8 @@
-use anyhow::{bail, Context, Result};
-use git2::Repository;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use anyhow::{bail, Context, Result};
+use git2::Repository;
 
 /// Discover the Git repository from the current directory (git2).
 pub fn git2_discover_repo() -> Result<Repository> {
@@ -305,6 +306,14 @@ pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<St
 
 // ── gix-based helpers (primary API) ──────────────────────────────────────────
 
+fn gix_config_string(repo: &gix::Repository, key: &str, default: &str) -> String {
+    let config = repo.config_snapshot();
+    config
+        .string(key)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| default.to_string())
+}
+
 /// Discover the Git repository from the current directory.
 pub fn discover_repo() -> Result<gix::Repository> {
     let repo =
@@ -319,30 +328,18 @@ pub fn db_path(repo: &gix::Repository) -> Result<PathBuf> {
 
 /// Get the user's email from Git config.
 pub fn get_email(repo: &gix::Repository) -> Result<String> {
-    let config = repo.config_snapshot();
-    Ok(config
-        .string("user.email")
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string()))
+    Ok(gix_config_string(repo, "user.email", "unknown"))
 }
 
 /// Get the user's name from Git config.
 #[allow(dead_code)]
 pub fn get_name(repo: &gix::Repository) -> Result<String> {
-    let config = repo.config_snapshot();
-    Ok(config
-        .string("user.name")
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string()))
+    Ok(gix_config_string(repo, "user.name", "unknown"))
 }
 
 /// Get the meta namespace from Git config (defaults to "meta").
 pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
-    let config = repo.config_snapshot();
-    Ok(config
-        .string("meta.namespace")
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "meta".to_string()))
+    Ok(gix_config_string(repo, "meta.namespace", "meta"))
 }
 
 /// Get the local ref name for serialization.

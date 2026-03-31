@@ -1,12 +1,13 @@
-use anyhow::{bail, Context, Result};
-use chrono::Utc;
-use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+
+use anyhow::{bail, Context, Result};
+use chrono::Utc;
+use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::db::Db;
 use crate::git_utils;

@@ -1,8 +1,9 @@
+use std::collections::HashSet;
+
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use git2::Repository;
 use serde_json::Value;
-use std::collections::HashSet;
 
 use crate::db::Db;
 use crate::git_utils;

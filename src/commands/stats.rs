@@ -1,5 +1,6 @@
-use anyhow::Result;
 use std::collections::BTreeMap;
+
+use anyhow::Result;
 
 use crate::db::Db;
 use crate::git_utils;

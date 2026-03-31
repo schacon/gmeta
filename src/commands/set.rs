@@ -1,6 +1,7 @@
+use std::fs;
+
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
-use std::fs;
 
 use crate::db::Db;
 use crate::git_utils;

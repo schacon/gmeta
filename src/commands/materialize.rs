@@ -1,6 +1,7 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use anyhow::Result;
 use chrono::Utc;
-use std::collections::{BTreeMap, BTreeSet};
 
 use crate::db::Db;
 use crate::git_utils;
