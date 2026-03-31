@@ -112,12 +112,12 @@ enum MergeState {
 }
 
 pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
-    let ns = git_utils::get_namespace(&repo)?;
-    let local_ref_name = git_utils::local_ref(&repo)?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
+    let local_ref_name = git_utils::git2_local_ref(&repo)?;
 
     if verbose {
         eprintln!("[verbose] namespace: {}", ns);
@@ -146,7 +146,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         }
     }
 
-    let email = git_utils::get_email(&repo)?;
+    let email = git_utils::git2_get_email(&repo)?;
     let now = Utc::now().timestamp_millis();
 
     for (ref_name, remote_oid) in &remote_refs {
@@ -645,7 +645,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
 
             let merged_tree = repo.find_tree(merged_tree_oid)?;
-            let name = git_utils::get_name(&repo)?;
+            let name = git_utils::git2_get_name(&repo)?;
             let sig = git2::Signature::now(&name, &email)?;
 
             let merge_commit_oid = repo.commit(

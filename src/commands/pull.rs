@@ -6,8 +6,8 @@ use crate::git_utils;
 use crate::types;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let ns = git_utils::get_namespace(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
 
     let remote_name = git_utils::resolve_meta_remote(&repo, remote)?;
     let remote_refspec = format!("refs/{}/main", ns);
@@ -28,7 +28,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
     // Fetch latest remote metadata
     eprintln!("Fetching metadata from {}...", remote_name);
-    git_utils::run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
+    git_utils::git2_run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
 
     // Get the new tip
     let new_tip = repo
@@ -39,10 +39,12 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
     // Check if we need to materialize even if no new commits were fetched
     // (e.g. remote add fetched but never materialized)
-    let db_path = git_utils::db_path(&repo)?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
     let needs_materialize = db.get_last_materialized()?.is_none()
-        || repo.find_reference(&git_utils::local_ref(&repo)?).is_err();
+        || repo
+            .find_reference(&git_utils::git2_local_ref(&repo)?)
+            .is_err();
 
     // Count new commits
     match (old_tip, new_tip) {

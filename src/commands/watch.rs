@@ -22,7 +22,7 @@ const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
 
 pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
+    let repo = git_utils::git2_discover_repo()?;
     let workdir = repo
         .workdir()
         .context("bare repo not supported")?
@@ -418,10 +418,10 @@ impl WatchState {
             None => return Ok(()),
         };
 
-        let repo = git_utils::discover_repo()?;
-        let db_path = git_utils::db_path(&repo)?;
+        let repo = git_utils::git2_discover_repo()?;
+        let db_path = git_utils::git2_db_path(&repo)?;
         let db = Db::open(&db_path)?;
-        let email = git_utils::get_email(&repo)?;
+        let email = git_utils::git2_get_email(&repo)?;
 
         for stack in stacks {
             let branches = match stack["branches"].as_array() {
@@ -592,10 +592,10 @@ impl WatchState {
             .or_insert(ts);
         let branch_id = format!("{}@{}", branch_name, first_seen);
 
-        let repo = git_utils::discover_repo()?;
-        let db_path = git_utils::db_path(&repo)?;
+        let repo = git_utils::git2_discover_repo()?;
+        let db_path = git_utils::git2_db_path(&repo)?;
         let db = Db::open(&db_path)?;
-        let email = git_utils::get_email(&repo)?;
+        let email = git_utils::git2_get_email(&repo)?;
 
         db.list_push_with_repo(
             Some(&repo),

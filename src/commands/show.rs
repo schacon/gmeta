@@ -18,7 +18,7 @@ const CYAN: &str = "\x1b[36m";
 const BLUE: &str = "\x1b[34m";
 
 pub fn run(commit_ref: &str) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
+    let repo = git_utils::git2_discover_repo()?;
 
     // Resolve the ref to a full commit SHA
     let obj = repo
@@ -103,7 +103,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
     }
 
     // ── Metadata ────────────────────────────────────────────────────────────
-    let db_path = git_utils::db_path(&repo)?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     // Collect metadata from both commit SHA and change-id

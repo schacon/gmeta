@@ -4,9 +4,9 @@ use crate::db::Db;
 use crate::git_utils;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let ns = git_utils::get_namespace(&repo)?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     let tracking_ref = format!("refs/{}/remotes/main", ns);

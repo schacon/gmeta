@@ -21,9 +21,9 @@ pub fn run(
     count: usize,            // max commits to show
     metadata_only: bool,     // skip commits with no metadata
 ) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
-    let db = Db::open_with_repo(&db_path, git_utils::discover_repo()?)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let db_path = git_utils::git2_db_path(&repo)?;
+    let db = Db::open_with_repo(&db_path, git_utils::git2_discover_repo()?)?;
 
     // Resolve start ref → OID
     let start_oid = resolve_start(&repo, start_ref)?;

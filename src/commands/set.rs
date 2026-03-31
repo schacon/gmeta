@@ -82,7 +82,7 @@ pub fn run(
         from_file && matches!(value_type, ValueType::String) && raw_value.len() > GIT_REF_THRESHOLD;
 
     if use_git_ref {
-        let repo = git_utils::discover_repo()?;
+        let repo = git_utils::git2_discover_repo()?;
         let blob_oid = repo.blob(raw_value.as_bytes())?;
         ctx.db.set_with_git_ref(
             None,

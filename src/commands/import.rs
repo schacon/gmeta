@@ -29,11 +29,11 @@ pub fn run(format: &str, dry_run: bool, since: Option<&str>) -> Result<()> {
 }
 
 fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let email = git_utils::get_email(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let email = git_utils::git2_get_email(&repo)?;
     let fallback_ts = Utc::now().timestamp_millis();
 
-    let db_path = git_utils::db_path(&repo)?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = if dry_run {
         None
     } else {
@@ -813,10 +813,10 @@ fn truncate(s: &str, max: usize) -> String {
 const NOTES_REFS: &[&str] = &["refs/remotes/notes/ai", "refs/notes/ai"];
 
 fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let email = git_utils::get_email(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let email = git_utils::git2_get_email(&repo)?;
 
-    let db_path = git_utils::db_path(&repo)?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = if dry_run {
         None
     } else {

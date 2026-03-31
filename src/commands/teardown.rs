@@ -3,11 +3,11 @@ use anyhow::Result;
 use crate::git_utils;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let ns = git_utils::get_namespace(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
 
     // Remove the SQLite database
-    let db = git_utils::db_path(&repo)?;
+    let db = git_utils::git2_db_path(&repo)?;
     if db.exists() {
         std::fs::remove_file(&db)?;
         println!("Removed {}", db.display());

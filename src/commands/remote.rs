@@ -22,7 +22,7 @@ fn expand_url(url: &str) -> String {
 /// Returns (has_match, other_namespaces) where other_namespaces are
 /// namespace prefixes that contain a "main" ref (e.g. "altmeta" from "refs/altmeta/main").
 fn check_remote_refs(repo: &git2::Repository, url: &str, ns: &str) -> Result<(bool, Vec<String>)> {
-    let output = git_utils::run_git(repo, &["ls-remote", url])?;
+    let output = git_utils::git2_run_git(repo, &["ls-remote", url])?;
 
     let expected_ref = format!("refs/{}/main", ns);
     let mut has_match = false;
@@ -56,10 +56,12 @@ fn check_remote_refs(repo: &git2::Repository, url: &str, ns: &str) -> Result<(bo
 }
 
 pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
+    let repo = git_utils::git2_discover_repo()?;
     let ns = namespace_override
         .map(|s| s.to_string())
-        .unwrap_or_else(|| git_utils::get_namespace(&repo).unwrap_or_else(|_| "meta".to_string()));
+        .unwrap_or_else(|| {
+            git_utils::git2_get_namespace(&repo).unwrap_or_else(|_| "meta".to_string())
+        });
     let url = expand_url(url);
 
     // Check if this remote name already exists
@@ -135,7 +137,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
     // Initial blobless fetch
     let fetch_refspec = format!("refs/{ns}/main:refs/{ns}/remotes/main");
     eprint!("Fetching metadata (blobless)...");
-    match git_utils::run_git(
+    match git_utils::git2_run_git(
         &repo,
         &["fetch", "--filter=blob:none", name, &fetch_refspec],
     ) {
@@ -182,7 +184,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             let tracking_ref_name = format!("refs/{}/remotes/main", ns);
             if let Ok(r) = repo.find_reference(&tracking_ref_name) {
                 if let Ok(tip) = r.peel_to_commit() {
-                    let db_path = git_utils::db_path(&repo)?;
+                    let db_path = git_utils::git2_db_path(&repo)?;
                     let db = Db::open(&db_path)?;
                     let count =
                         pull::insert_promisor_entries_pub(&repo, &db, tip.id(), None, false)?;
@@ -202,8 +204,8 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 }
 
 pub fn run_remove(name: &str) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let ns = git_utils::get_namespace(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
 
     // Verify this is a meta remote
     let config = repo.config()?;
@@ -255,7 +257,7 @@ pub fn run_remove(name: &str) -> Result<()> {
 }
 
 pub fn run_list() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
+    let repo = git_utils::git2_discover_repo()?;
     let remotes = git_utils::list_meta_remotes(&repo)?;
 
     if remotes.is_empty() {

@@ -43,7 +43,7 @@ fn validate_config_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_set(repo: &git2::Repository, db: &Db, key: &str, value: &str) -> Result<()> {
+fn run_set(repo: &gix::Repository, db: &Db, key: &str, value: &str) -> Result<()> {
     let email = git_utils::get_email(repo)?;
     let timestamp = Utc::now().timestamp_millis();
     let stored_value = serde_json::to_string(value)?;
@@ -86,7 +86,7 @@ fn run_list(db: &Db) -> Result<()> {
     Ok(())
 }
 
-fn run_unset(repo: &git2::Repository, db: &Db, key: &str) -> Result<()> {
+fn run_unset(repo: &gix::Repository, db: &Db, key: &str) -> Result<()> {
     let email = git_utils::get_email(repo)?;
     let timestamp = Utc::now().timestamp_millis();
 

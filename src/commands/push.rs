@@ -6,7 +6,7 @@ use crate::git_utils;
 /// Push a README commit to refs/heads/main on the meta remote.
 /// This only succeeds if the branch doesn't already exist (no force push).
 pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
+    let repo = git_utils::git2_discover_repo()?;
 
     let remote_name = git_utils::resolve_meta_remote(&repo, remote)?;
 
@@ -18,7 +18,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     let meta_url = config
         .get_string(&format!("remote.{}.url", remote_name))
         .unwrap_or_else(|_| "unknown".to_string());
-    let ns = git_utils::get_namespace(&repo)?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
 
     let readme_content = generate_readme(&origin_url, &meta_url, &ns);
 
@@ -61,7 +61,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     }
 
     eprintln!("Pushing README to {}...", remote_name);
-    let result = git_utils::run_git(&repo, &["push", &remote_name, &push_refspec]);
+    let result = git_utils::git2_run_git(&repo, &["push", &remote_name, &push_refspec]);
 
     match result {
         Ok(_) => {
@@ -153,12 +153,12 @@ See `gmeta --help` for the full command reference.
 const MAX_RETRIES: u32 = 5;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let ns = git_utils::get_namespace(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let ns = git_utils::git2_get_namespace(&repo)?;
 
     // Resolve which remote to push to
     let remote_name = git_utils::resolve_meta_remote(&repo, remote)?;
-    let local_ref = git_utils::local_ref(&repo)?;
+    let local_ref = git_utils::git2_local_ref(&repo)?;
     let remote_refspec = format!("refs/{}/main", ns);
 
     if verbose {
@@ -205,7 +205,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         }
 
         eprintln!("Pushing to {}...", remote_name);
-        let result = git_utils::run_git(&repo, &["push", &remote_name, &push_refspec]);
+        let result = git_utils::git2_run_git(&repo, &["push", &remote_name, &push_refspec]);
 
         match result {
             Ok(_) => {
@@ -229,7 +229,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
                 // Fetch latest remote data
                 let fetch_refspec = format!("{}:refs/{}/remotes/main", remote_refspec, ns);
-                git_utils::run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
+                git_utils::git2_run_git(&repo, &["fetch", &remote_name, &fetch_refspec])?;
 
                 // Hydrate tip tree blobs so libgit2 can read them
                 let short_ref = format!("{}/remotes/main", ns);

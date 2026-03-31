@@ -1,23 +1,23 @@
 use anyhow::{bail, Context, Result};
 use git2::Repository;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Discover the Git repository from the current directory.
-pub fn discover_repo() -> Result<Repository> {
+/// Discover the Git repository from the current directory (git2).
+pub fn git2_discover_repo() -> Result<Repository> {
     let repo = Repository::discover(".")
         .context("not a git repository (or any parent up to mount point)")?;
     Ok(repo)
 }
 
-/// Get the path to the gmeta SQLite database.
-pub fn db_path(repo: &Repository) -> Result<PathBuf> {
+/// Get the path to the gmeta SQLite database (git2).
+pub fn git2_db_path(repo: &Repository) -> Result<PathBuf> {
     let git_dir = repo.path(); // .git/
     Ok(git_dir.join("gmeta.sqlite"))
 }
 
-/// Get the user's email from Git config.
-pub fn get_email(repo: &Repository) -> Result<String> {
+/// Get the user's email from Git config (git2).
+pub fn git2_get_email(repo: &Repository) -> Result<String> {
     let config = repo.config()?;
     let email = config
         .get_string("user.email")
@@ -25,8 +25,8 @@ pub fn get_email(repo: &Repository) -> Result<String> {
     Ok(email)
 }
 
-/// Get the user's name from Git config.
-pub fn get_name(repo: &Repository) -> Result<String> {
+/// Get the user's name from Git config (git2).
+pub fn git2_get_name(repo: &Repository) -> Result<String> {
     let config = repo.config()?;
     let name = config
         .get_string("user.name")
@@ -34,8 +34,8 @@ pub fn get_name(repo: &Repository) -> Result<String> {
     Ok(name)
 }
 
-/// Get the meta namespace from Git config (defaults to "meta").
-pub fn get_namespace(repo: &Repository) -> Result<String> {
+/// Get the meta namespace from Git config (git2).
+pub fn git2_get_namespace(repo: &Repository) -> Result<String> {
     let config = repo.config()?;
     let ns = config
         .get_string("meta.namespace")
@@ -43,28 +43,27 @@ pub fn get_namespace(repo: &Repository) -> Result<String> {
     Ok(ns)
 }
 
-/// Get the local ref name for serialization.
-pub fn local_ref(repo: &Repository) -> Result<String> {
-    let ns = get_namespace(repo)?;
+/// Get the local ref name for serialization (git2).
+pub fn git2_local_ref(repo: &Repository) -> Result<String> {
+    let ns = git2_get_namespace(repo)?;
     Ok(format!("refs/{}/local/main", ns))
 }
 
-/// Get the ref name for a named destination (e.g. "private" -> "refs/meta/local/private").
-pub fn destination_ref(repo: &Repository, destination: &str) -> Result<String> {
-    let ns = get_namespace(repo)?;
+/// Get the ref name for a named destination (git2).
+pub fn git2_destination_ref(repo: &Repository, destination: &str) -> Result<String> {
+    let ns = git2_get_namespace(repo)?;
     Ok(format!("refs/{}/local/{}", ns, destination))
 }
 
-/// Get the ref pattern for remote metadata.
+/// Get the ref pattern for remote metadata (git2).
 #[allow(dead_code)]
-pub fn remote_ref(repo: &Repository, remote: &str) -> Result<String> {
-    let ns = get_namespace(repo)?;
+pub fn git2_remote_ref(repo: &Repository, remote: &str) -> Result<String> {
+    let ns = git2_get_namespace(repo)?;
     Ok(format!("refs/{}/{}", ns, remote))
 }
 
-/// Expand a partial commit SHA to the full 40-char hex string.
-/// Returns an error if the SHA is ambiguous or not found.
-pub fn resolve_commit_sha(repo: &Repository, partial: &str) -> Result<String> {
+/// Expand a partial commit SHA to the full 40-char hex string (git2).
+pub fn git2_resolve_commit_sha(repo: &Repository, partial: &str) -> Result<String> {
     let obj = repo
         .revparse_single(partial)
         .with_context(|| format!("could not resolve commit: {}", partial))?;
@@ -87,13 +86,12 @@ pub fn is_list_entry_name(name: &str) -> bool {
     }
 }
 
-/// Run a git CLI command in the repository's working directory.
-/// Returns stdout on success, or an error with stderr on failure.
-pub fn run_git(repo: &Repository, args: &[&str]) -> Result<String> {
-    run_git_inner(repo, args)
+/// Run a git CLI command in the repository's working directory (git2).
+pub fn git2_run_git(repo: &Repository, args: &[&str]) -> Result<String> {
+    git2_run_git_inner(repo, args)
 }
 
-fn run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
+fn git2_run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
     let workdir = repo
         .workdir()
         .or_else(|| Some(repo.path()))
@@ -151,7 +149,7 @@ pub fn hydrate_tip_blobs_counted(
     remote_name: &str,
     ref_name: &str,
 ) -> Result<usize> {
-    let blob_list = run_git(repo, &["ls-tree", "-r", "--object-only", ref_name]);
+    let blob_list = git2_run_git(repo, &["ls-tree", "-r", "--object-only", ref_name]);
 
     match blob_list {
         Ok(blobs) if !blobs.trim().is_empty() => {
@@ -302,6 +300,113 @@ pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<St
             }
         }
         None => Ok(meta_remotes[0].0.clone()),
+    }
+}
+
+// ── gix-based helpers (primary API) ──────────────────────────────────────────
+
+/// Discover the Git repository from the current directory.
+pub fn discover_repo() -> Result<gix::Repository> {
+    let repo =
+        gix::discover(".").context("not a git repository (or any parent up to mount point)")?;
+    Ok(repo)
+}
+
+/// Get the path to the gmeta SQLite database.
+pub fn db_path(repo: &gix::Repository) -> Result<PathBuf> {
+    Ok(repo.git_dir().join("gmeta.sqlite"))
+}
+
+/// Get the user's email from Git config.
+pub fn get_email(repo: &gix::Repository) -> Result<String> {
+    let config = repo.config_snapshot();
+    Ok(config
+        .string("user.email")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string()))
+}
+
+/// Get the user's name from Git config.
+#[allow(dead_code)]
+pub fn get_name(repo: &gix::Repository) -> Result<String> {
+    let config = repo.config_snapshot();
+    Ok(config
+        .string("user.name")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string()))
+}
+
+/// Get the meta namespace from Git config (defaults to "meta").
+pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
+    let config = repo.config_snapshot();
+    Ok(config
+        .string("meta.namespace")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "meta".to_string()))
+}
+
+/// Get the local ref name for serialization.
+#[allow(dead_code)]
+pub fn local_ref(repo: &gix::Repository) -> Result<String> {
+    let ns = get_namespace(repo)?;
+    Ok(format!("refs/{}/local/main", ns))
+}
+
+/// Get the ref name for a named destination (e.g. "private" -> "refs/meta/local/private").
+#[allow(dead_code)]
+pub fn destination_ref(repo: &gix::Repository, destination: &str) -> Result<String> {
+    let ns = get_namespace(repo)?;
+    Ok(format!("refs/{}/local/{}", ns, destination))
+}
+
+/// Get the ref pattern for remote metadata.
+#[allow(dead_code)]
+pub fn remote_ref(repo: &gix::Repository, remote: &str) -> Result<String> {
+    let ns = get_namespace(repo)?;
+    Ok(format!("refs/{}/{}", ns, remote))
+}
+
+/// Run a git CLI command in the repository's working directory.
+#[allow(dead_code)]
+pub fn run_git(repo: &gix::Repository, args: &[&str]) -> Result<String> {
+    let workdir = repo.workdir().unwrap_or_else(|| repo.git_dir());
+
+    run_git_in(workdir, args)
+}
+
+fn run_git_in(workdir: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(workdir)
+        .output()
+        .context("failed to run git command")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "git {} failed: {}",
+            args.first().unwrap_or(&""),
+            stderr.trim()
+        );
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Expand a partial commit SHA to the full 40-char hex string.
+pub fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Result<String> {
+    let obj = repo
+        .rev_parse_single(partial.as_bytes())
+        .with_context(|| format!("could not resolve commit: {}", partial))?;
+    let id = obj.detach();
+    // Verify it's a commit by peeling
+    let object = repo.find_object(id)?;
+    if object.kind != gix::object::Kind::Commit {
+        // Try peeling tags etc.
+        let peeled = object.peel_to_kind(gix::object::Kind::Commit)?;
+        Ok(peeled.id.to_string())
+    } else {
+        Ok(id.to_string())
     }
 }
 

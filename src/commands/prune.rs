@@ -15,8 +15,8 @@ use crate::db::Db;
 use crate::git_utils;
 
 pub fn run(dry_run: bool) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     // Read prune rules — need at least meta:prune:since
@@ -40,7 +40,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         .unwrap_or_else(|| "?".to_string());
 
     // Find the current serialized tree
-    let ref_name = git_utils::local_ref(&repo)?;
+    let ref_name = git_utils::git2_local_ref(&repo)?;
     let current_commit = match repo.find_reference(&ref_name) {
         Ok(r) => match r.peel_to_commit() {
             Ok(c) => c,
@@ -162,8 +162,8 @@ pub fn run(dry_run: bool) -> Result<()> {
     }
 
     // Commit the pruned tree
-    let name = git_utils::get_name(&repo)?;
-    let email = git_utils::get_email(&repo)?;
+    let name = git_utils::git2_get_name(&repo)?;
+    let email = git_utils::git2_get_email(&repo)?;
     let sig = git2::Signature::now(&name, &email)?;
     let pruned_tree = repo.find_tree(pruned_tree_oid)?;
 

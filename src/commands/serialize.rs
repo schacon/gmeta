@@ -198,11 +198,11 @@ fn build_commit_message(changes: &[(char, String, String)]) -> String {
 }
 
 pub fn run(verbose: bool) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
-    let local_ref_name = git_utils::local_ref(&repo)?;
+    let local_ref_name = git_utils::git2_local_ref(&repo)?;
     let last_materialized = db.get_last_materialized()?;
 
     if verbose {
@@ -551,12 +551,12 @@ pub fn run(verbose: bool) -> Result<()> {
     }
 
     // ── Build and commit trees per destination ──────────────────────────────
-    let name = git_utils::get_name(&repo)?;
-    let email = git_utils::get_email(&repo)?;
+    let name = git_utils::git2_get_name(&repo)?;
+    let email = git_utils::git2_get_email(&repo)?;
     let sig = git2::Signature::now(&name, &email)?;
 
     for dest in &all_dests {
-        let ref_name = git_utils::destination_ref(&repo, dest)?;
+        let ref_name = git_utils::git2_destination_ref(&repo, dest)?;
         let empty_meta: Vec<MetaEntry> = Vec::new();
         let empty_tomb: Vec<TombEntry> = Vec::new();
         let empty_set_tomb: Vec<SetTombEntry> = Vec::new();

@@ -17,9 +17,9 @@ pub fn run(
 ) -> Result<()> {
     let mut target = Target::parse(target_str)?;
 
-    let repo = git_utils::discover_repo()?;
-    target.resolve(&repo)?;
-    let db_path = git_utils::db_path(&repo)?;
+    let repo = git_utils::git2_discover_repo()?;
+    target.git2_resolve(&repo)?;
+    let db_path = git_utils::git2_db_path(&repo)?;
     let db = Db::open(&db_path)?;
 
     let include_target_subtree = target.target_type == TargetType::Path;
@@ -112,7 +112,7 @@ fn hydrate_promised_entries(
     target_type: &str,
     entries: &[(String, String)], // (target_value, key)
 ) -> Result<usize> {
-    let ns = git_utils::get_namespace(repo)?;
+    let ns = git_utils::git2_get_namespace(repo)?;
     let tracking_ref = format!("refs/{}/remotes/main", ns);
 
     let tip_commit = match repo.find_reference(&tracking_ref) {
