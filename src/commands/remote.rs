@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 
 use crate::commands::{materialize, pull, serialize};
-use crate::db::Db;
+use crate::context::CommandContext;
 use crate::git_utils;
 
 /// Expand shorthand "owner/repo" to a full GitHub SSH URL.
@@ -56,12 +56,9 @@ fn check_remote_refs(repo: &git2::Repository, url: &str, ns: &str) -> Result<(bo
 }
 
 pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let ns = namespace_override
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| {
-            git_utils::git2_get_namespace(&repo).unwrap_or_else(|_| "meta".to_string())
-        });
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let ns = namespace_override.unwrap_or(&ctx.namespace).to_string();
     let url = expand_url(url);
 
     // Check if this remote name already exists
@@ -71,7 +68,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 
     // Check the remote for meta refs before configuring
     eprintln!("Checking {}...", url);
-    match check_remote_refs(&repo, &url, &ns) {
+    match check_remote_refs(repo, &url, &ns) {
         Ok((has_match, other_namespaces)) => {
             if !has_match {
                 if other_namespaces.is_empty() {
@@ -134,10 +131,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
     // Initial blobless fetch
     let fetch_refspec = format!("refs/{ns}/main:refs/{ns}/remotes/main");
     eprint!("Fetching metadata (blobless)...");
-    match git_utils::git2_run_git(
-        &repo,
-        &["fetch", "--filter=blob:none", name, &fetch_refspec],
-    ) {
+    match git_utils::git2_run_git(repo, &["fetch", "--filter=blob:none", name, &fetch_refspec]) {
         Ok(_) => {
             eprintln!(" done.");
 
@@ -165,7 +159,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 
             // Hydrate tip tree blobs so libgit2 can read the metadata
             eprint!("Hydrating tip blobs...");
-            let blob_count = git_utils::hydrate_tip_blobs_counted(&repo, name, &remote_ref)?;
+            let blob_count = git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
             eprintln!(" {} blobs fetched.", blob_count);
 
             // Materialize remote metadata into local SQLite
@@ -181,10 +175,8 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             let tracking_ref_name = format!("refs/{}/remotes/main", ns);
             if let Ok(r) = repo.find_reference(&tracking_ref_name) {
                 if let Ok(tip) = r.peel_to_commit() {
-                    let db_path = git_utils::git2_db_path(&repo)?;
-                    let db = Db::open(&db_path)?;
                     let count =
-                        pull::insert_promisor_entries_pub(&repo, &db, tip.id(), None, false)?;
+                        pull::insert_promisor_entries_pub(repo, &ctx.db, tip.id(), None, false)?;
                     if count > 0 {
                         eprintln!("Indexed {} keys from history (available on demand).", count);
                     }
@@ -201,8 +193,9 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 }
 
 pub fn run_remove(name: &str) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let ns = git_utils::git2_get_namespace(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let ns = &ctx.namespace;
 
     // Verify this is a meta remote
     let config = repo.config()?;
@@ -253,8 +246,9 @@ pub fn run_remove(name: &str) -> Result<()> {
 }
 
 pub fn run_list() -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let remotes = git_utils::list_meta_remotes(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let remotes = git_utils::list_meta_remotes(repo)?;
 
     if remotes.is_empty() {
         println!("No metadata remotes configured.");

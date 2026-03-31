@@ -1,18 +1,20 @@
 use anyhow::Result;
 
+use crate::context::CommandContext;
 use crate::git_utils;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let ns = git_utils::git2_get_namespace(&repo)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
+    let ns = &ctx.namespace;
 
     // Remove the SQLite database
-    let db = git_utils::git2_db_path(&repo)?;
-    if db.exists() {
-        std::fs::remove_file(&db)?;
-        println!("Removed {}", db.display());
+    let db_path = git_utils::git2_db_path(repo)?;
+    if db_path.exists() {
+        std::fs::remove_file(&db_path)?;
+        println!("Removed {}", db_path.display());
     } else {
-        println!("No database found at {}", db.display());
+        println!("No database found at {}", db_path.display());
     }
 
     // Remove all refs under refs/{namespace}/

@@ -2,15 +2,12 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 
-use crate::db::Db;
-use crate::git_utils;
+use crate::context::CommandContext;
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_gix(None)?;
 
-    let rows = db.stats_by_target_type_and_key()?;
+    let rows = ctx.db.stats_by_target_type_and_key()?;
 
     if rows.is_empty() {
         println!("no metadata stored");
@@ -18,14 +15,14 @@ pub fn run() -> Result<()> {
     }
 
     // Show storage counts and size histogram at the top
-    let (sqlite_count, git_ref_count) = db.stats_storage_counts()?;
+    let (sqlite_count, git_ref_count) = ctx.db.stats_storage_counts()?;
     println!(
         "{} values in sqlite, {} values as git refs",
         sqlite_count, git_ref_count
     );
     println!();
 
-    let (buckets, _) = db.stats_value_size_histogram()?;
+    let (buckets, _) = ctx.db.stats_value_size_histogram()?;
     let max_count = buckets.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
     let bar_width = 30usize;
     println!("value sizes (inline):");

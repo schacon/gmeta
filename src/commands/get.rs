@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use git2::Repository;
 use serde_json::{json, Map, Value};
 
+use crate::context::CommandContext;
 use crate::db::Db;
 use crate::git_utils;
 use crate::list_value::list_values_from_json;
@@ -17,13 +18,12 @@ pub fn run(
 ) -> Result<()> {
     let mut target = Target::parse(target_str)?;
 
-    let repo = git_utils::git2_discover_repo()?;
-    target.git2_resolve(&repo)?;
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_git2(None)?;
+    ctx.git2_resolve_target(&mut target)?;
+    let repo = ctx.git2_repo()?;
 
     let include_target_subtree = target.target_type == TargetType::Path;
-    let mut entries = db.get_all_with_target_prefix(
+    let mut entries = ctx.db.get_all_with_target_prefix(
         target.type_str(),
         target.value_str(),
         include_target_subtree,
@@ -33,10 +33,14 @@ pub fn run(
     // If no exact match, try prefix expansion for non-commit types
     // (commits are already resolved by git, but change-ids/branches may be partial)
     if entries.is_empty() && target.target_type != TargetType::Path {
-        let matches = db.find_target_values_by_prefix(target.type_str(), target.value_str(), 2)?;
+        let matches =
+            ctx.db
+                .find_target_values_by_prefix(target.type_str(), target.value_str(), 2)?;
         if matches.len() == 1 {
             let expanded = &matches[0];
-            entries = db.get_all_with_target_prefix(target.type_str(), expanded, false, key)?;
+            entries = ctx
+                .db
+                .get_all_with_target_prefix(target.type_str(), expanded, false, key)?;
             if !entries.is_empty() {
                 eprintln!("expanded to {}:{}", target.type_str(), expanded);
             }
@@ -61,10 +65,10 @@ pub fn run(
         .collect();
 
     if !promised.is_empty() {
-        let hydrated = hydrate_promised_entries(&repo, &db, target.type_str(), &promised)?;
+        let hydrated = hydrate_promised_entries(repo, &ctx.db, target.type_str(), &promised)?;
         if hydrated > 0 {
             // Re-query to get the now-resolved values
-            entries = db.get_all_with_target_prefix(
+            entries = ctx.db.get_all_with_target_prefix(
                 target.type_str(),
                 target.value_str(),
                 include_target_subtree,
@@ -80,7 +84,7 @@ pub fn run(
         .map(
             |(entry_target_value, key, value, value_type, is_git_ref, _)| {
                 if is_git_ref {
-                    let resolved_value = resolve_git_ref(&repo, &value)?;
+                    let resolved_value = resolve_git_ref(repo, &value)?;
                     // JSON-encode the resolved content to match normal string format
                     let json_value = serde_json::to_string(&resolved_value)?;
                     Ok((entry_target_value, key, json_value, value_type))
@@ -96,7 +100,7 @@ pub fn run(
     }
 
     if json_output {
-        print_json(&db, &target, &resolved, with_authorship)?;
+        print_json(&ctx.db, &target, &resolved, with_authorship)?;
     } else {
         print_plain(&target, &resolved, key.is_some() && resolved.len() == 1)?;
     }

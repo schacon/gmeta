@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use anyhow::{bail, Context, Result};
@@ -42,25 +42,6 @@ pub fn git2_get_namespace(repo: &Repository) -> Result<String> {
         .get_string("meta.namespace")
         .unwrap_or_else(|_| "meta".to_string());
     Ok(ns)
-}
-
-/// Get the local ref name for serialization (git2).
-pub fn git2_local_ref(repo: &Repository) -> Result<String> {
-    let ns = git2_get_namespace(repo)?;
-    Ok(format!("refs/{}/local/main", ns))
-}
-
-/// Get the ref name for a named destination (git2).
-pub fn git2_destination_ref(repo: &Repository, destination: &str) -> Result<String> {
-    let ns = git2_get_namespace(repo)?;
-    Ok(format!("refs/{}/local/{}", ns, destination))
-}
-
-/// Get the ref pattern for remote metadata (git2).
-#[allow(dead_code)]
-pub fn git2_remote_ref(repo: &Repository, remote: &str) -> Result<String> {
-    let ns = git2_get_namespace(repo)?;
-    Ok(format!("refs/{}/{}", ns, remote))
 }
 
 /// Expand a partial commit SHA to the full 40-char hex string (git2).
@@ -331,63 +312,9 @@ pub fn get_email(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "user.email", "unknown"))
 }
 
-/// Get the user's name from Git config.
-#[allow(dead_code)]
-pub fn get_name(repo: &gix::Repository) -> Result<String> {
-    Ok(gix_config_string(repo, "user.name", "unknown"))
-}
-
 /// Get the meta namespace from Git config (defaults to "meta").
 pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "meta.namespace", "meta"))
-}
-
-/// Get the local ref name for serialization.
-#[allow(dead_code)]
-pub fn local_ref(repo: &gix::Repository) -> Result<String> {
-    let ns = get_namespace(repo)?;
-    Ok(format!("refs/{}/local/main", ns))
-}
-
-/// Get the ref name for a named destination (e.g. "private" -> "refs/meta/local/private").
-#[allow(dead_code)]
-pub fn destination_ref(repo: &gix::Repository, destination: &str) -> Result<String> {
-    let ns = get_namespace(repo)?;
-    Ok(format!("refs/{}/local/{}", ns, destination))
-}
-
-/// Get the ref pattern for remote metadata.
-#[allow(dead_code)]
-pub fn remote_ref(repo: &gix::Repository, remote: &str) -> Result<String> {
-    let ns = get_namespace(repo)?;
-    Ok(format!("refs/{}/{}", ns, remote))
-}
-
-/// Run a git CLI command in the repository's working directory.
-#[allow(dead_code)]
-pub fn run_git(repo: &gix::Repository, args: &[&str]) -> Result<String> {
-    let workdir = repo.workdir().unwrap_or_else(|| repo.git_dir());
-
-    run_git_in(workdir, args)
-}
-
-fn run_git_in(workdir: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        .output()
-        .context("failed to run git command")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
-            "git {} failed: {}",
-            args.first().unwrap_or(&""),
-            stderr.trim()
-        );
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Expand a partial commit SHA to the full 40-char hex string.

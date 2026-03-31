@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use chrono::{Duration, Utc};
 
+use crate::context::CommandContext;
 use crate::db::Db;
-use crate::git_utils;
 use crate::list_value::list_values_from_json;
 
 // ── ANSI colours ──────────────────────────────────────────────────────────────
@@ -27,21 +27,19 @@ pub fn run(
     timeline: bool,
     promisor: bool,
 ) -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_gix(None)?;
 
     if promisor {
-        return run_promisor_list(&db, target_type);
+        return run_promisor_list(&ctx.db, target_type);
     }
 
     if timeline {
-        return run_timeline(&db);
+        return run_timeline(&ctx.db);
     }
 
     match target_type {
-        None => run_overview(&db),
-        Some(tt) => run_list(&db, tt, term),
+        None => run_overview(&ctx.db),
+        Some(tt) => run_list(&ctx.db, tt, term),
     }
 }
 

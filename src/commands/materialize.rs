@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Result;
-use chrono::Utc;
-
+use crate::context::CommandContext;
 use crate::db::Db;
 use crate::git_utils;
 use crate::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
@@ -13,6 +11,7 @@ use crate::types::{
     LIST_VALUE_DIR, PATH_TARGET_SEPARATOR, SET_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_BLOB,
     TOMBSTONE_ROOT,
 };
+use anyhow::Result;
 
 type Key = (String, String, String); // (target_type, target_value, key)
 
@@ -113,12 +112,11 @@ enum MergeState {
 }
 
 pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
 
-    let ns = git_utils::git2_get_namespace(&repo)?;
-    let local_ref_name = git_utils::git2_local_ref(&repo)?;
+    let ns = &ctx.namespace;
+    let local_ref_name = ctx.local_ref();
 
     if verbose {
         eprintln!("[verbose] namespace: {}", ns);
@@ -133,7 +131,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     }
 
     // Find remote refs to materialize
-    let remote_refs = find_remote_refs(&repo, &ns, remote)?;
+    let remote_refs = find_remote_refs(repo, ns, remote)?;
 
     if remote_refs.is_empty() {
         println!("no remote metadata refs found");
@@ -147,8 +145,8 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         }
     }
 
-    let email = git_utils::git2_get_email(&repo)?;
-    let now = Utc::now().timestamp_millis();
+    let email = &ctx.email;
+    let now = ctx.timestamp;
 
     for (ref_name, remote_oid) in &remote_refs {
         if verbose {
@@ -157,7 +155,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
 
         let remote_commit = repo.find_commit(*remote_oid)?;
         let remote_tree = remote_commit.tree()?;
-        let remote_entries = parse_tree(&repo, &remote_tree, "")?;
+        let remote_entries = parse_tree(repo, &remote_tree, "")?;
 
         if verbose {
             eprintln!(
@@ -252,7 +250,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
 
         if can_fast_forward {
             let local_entries = if let Some(local_c) = &local_commit {
-                parse_tree(&repo, &local_c.tree()?, "")?
+                parse_tree(repo, &local_c.tree()?, "")?
             } else {
                 ParsedTree::default()
             };
@@ -291,7 +289,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
                 let mut planned_changes = collect_db_changes_from_tree(
-                    &db,
+                    &ctx.db,
                     &remote_entries.values,
                     &remote_entries.tombstones,
                     &remote_entries.set_tombstones,
@@ -314,13 +312,13 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
 
             // Fast-forward: update SQLite from remote tree first.
             update_db_from_tree(
-                &repo,
-                &db,
+                repo,
+                &ctx.db,
                 &remote_entries.values,
                 &remote_entries.tombstones,
                 &remote_entries.set_tombstones,
                 &remote_entries.list_tombstones,
-                &email,
+                email,
                 now,
             )?;
 
@@ -335,7 +333,8 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                             key_name
                         );
                     }
-                    db.apply_tombstone(target_type, target_value, key_name, &email, now)?;
+                    ctx.db
+                        .apply_tombstone(target_type, target_value, key_name, email, now)?;
                 }
             }
 
@@ -351,7 +350,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         } else {
             // Need a real merge
             let local_c = local_commit.as_ref().unwrap();
-            let local_entries = parse_tree(&repo, &local_c.tree()?, "")?;
+            let local_entries = parse_tree(repo, &local_c.tree()?, "")?;
 
             if verbose {
                 eprintln!(
@@ -385,7 +384,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 merge_strategy,
             ) = if let Some(base_oid) = merge_base_oid {
                 let base_commit = repo.find_commit(base_oid)?;
-                let base_entries = parse_tree(&repo, &base_commit.tree()?, "")?;
+                let base_entries = parse_tree(repo, &base_commit.tree()?, "")?;
 
                 if verbose {
                     eprintln!(
@@ -552,7 +551,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
                 let mut planned_changes = collect_db_changes_from_tree(
-                    &db,
+                    &ctx.db,
                     &merged_values,
                     &merged_tombstones,
                     &merged_set_tombstones,
@@ -597,13 +596,13 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 eprintln!("[verbose] updating SQLite database...");
             }
             update_db_from_tree(
-                &repo,
-                &db,
+                repo,
+                &ctx.db,
                 &merged_values,
                 &merged_tombstones,
                 &merged_set_tombstones,
                 &merged_list_tombstones,
-                &email,
+                email,
                 now,
             )?;
 
@@ -619,7 +618,8 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                                 key_name
                             );
                         }
-                        db.apply_tombstone(target_type, target_value, key_name, &email, now)?;
+                        ctx.db
+                            .apply_tombstone(target_type, target_value, key_name, email, now)?;
                     }
                 }
             }
@@ -629,7 +629,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 eprintln!("[verbose] building merged tree...");
             }
             let merged_tree_oid = build_merged_tree(
-                &repo,
+                repo,
                 &merged_values,
                 &merged_tombstones,
                 &merged_set_tombstones,
@@ -646,8 +646,8 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
 
             let merged_tree = repo.find_tree(merged_tree_oid)?;
-            let name = git_utils::git2_get_name(&repo)?;
-            let sig = git2::Signature::now(&name, &email)?;
+            let name = git_utils::git2_get_name(repo)?;
+            let sig = git2::Signature::now(&name, email)?;
 
             let merge_commit_oid = repo.commit(
                 Some(&local_ref_name),
@@ -672,7 +672,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     }
 
     if !dry_run {
-        db.set_last_materialized(now)?;
+        ctx.db.set_last_materialized(now)?;
     }
 
     Ok(())

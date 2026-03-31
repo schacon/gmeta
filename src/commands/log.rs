@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use git2::{Oid, Repository, Sort};
 
-use crate::db::Db;
+use crate::context::CommandContext;
 use crate::git_utils;
 
 // ── ANSI colours ──────────────────────────────────────────────────────────────
@@ -21,12 +21,13 @@ pub fn run(
     count: usize,            // max commits to show
     metadata_only: bool,     // skip commits with no metadata
 ) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open_with_repo(&db_path, git_utils::git2_discover_repo()?)?;
+    let mut ctx = CommandContext::open_git2(None)?;
+    // Attach a repo to the Db so blob-ref values are resolved during reads.
+    ctx.db.repo = Some(git_utils::git2_discover_repo()?);
+    let repo = ctx.git2_repo()?;
 
     // Resolve start ref → OID
-    let start_oid = resolve_start(&repo, start_ref)?;
+    let start_oid = resolve_start(repo, start_ref)?;
 
     // Walk commits
     let mut revwalk = repo.revwalk()?;
@@ -45,7 +46,7 @@ pub fn run(
         let sha = oid.to_string();
 
         // Fetch metadata before deciding whether to print the commit
-        let entries = db.get_all("commit", &sha, None).unwrap_or_default();
+        let entries = ctx.db.get_all("commit", &sha, None).unwrap_or_default();
         // get_all returns (key, value, value_type, is_git_ref)
         // value is a JSON-encoded string for string types
         let meta: Vec<(String, String)> = entries

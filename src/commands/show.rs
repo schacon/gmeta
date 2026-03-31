@@ -6,8 +6,7 @@ use anyhow::{Context, Result};
 use chrono::{TimeZone, Utc};
 use git2::Repository;
 
-use crate::db::Db;
-use crate::git_utils;
+use crate::context::CommandContext;
 
 // ── ANSI colours ──────────────────────────────────────────────────────────────
 const RESET: &str = "\x1b[0m";
@@ -19,7 +18,8 @@ const CYAN: &str = "\x1b[36m";
 const BLUE: &str = "\x1b[34m";
 
 pub fn run(commit_ref: &str) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
 
     // Resolve the ref to a full commit SHA
     let obj = repo
@@ -34,7 +34,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
     println!("{YELLOW}Commit:{RESET}     {CYAN}{sha}{RESET}");
 
     // Try to get change-id from GitButler
-    let change_id = get_change_id(&repo, &sha);
+    let change_id = get_change_id(repo, &sha);
     if let Some(ref cid) = change_id {
         println!("{YELLOW}Change-ID:{RESET}  {CYAN}{cid}{RESET}");
     }
@@ -104,14 +104,11 @@ pub fn run(commit_ref: &str) -> Result<()> {
     }
 
     // ── Metadata ────────────────────────────────────────────────────────────
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
-
     // Collect metadata from both commit SHA and change-id
     let mut meta_entries: Vec<(String, String, String)> = Vec::new(); // (source, key, display_value)
 
     // Metadata on commit:<sha>
-    let commit_entries = db.get_all("commit", &sha, None).unwrap_or_default();
+    let commit_entries = ctx.db.get_all("commit", &sha, None).unwrap_or_default();
     for (key, value, value_type, _is_git_ref) in &commit_entries {
         let display = format_meta_value(value, value_type);
         meta_entries.push(("commit".to_string(), key.clone(), display));
@@ -119,7 +116,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
 
     // Metadata on change-id:<cid>
     if let Some(ref cid) = change_id {
-        let cid_entries = db.get_all("change-id", cid, None).unwrap_or_default();
+        let cid_entries = ctx.db.get_all("change-id", cid, None).unwrap_or_default();
         for (key, value, value_type, _is_git_ref) in &cid_entries {
             let display = format_meta_value(value, value_type);
             meta_entries.push(("change-id".to_string(), key.clone(), display));

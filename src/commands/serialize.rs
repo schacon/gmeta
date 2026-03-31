@@ -3,7 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 
-use crate::commands::auto_prune::{self, parse_since_to_cutoff_ms};
+use crate::commands::prune::auto::{self, parse_since_to_cutoff_ms};
+use crate::context::CommandContext;
 use crate::db::Db;
 use crate::git_utils;
 use crate::list_value::{make_entry_name, parse_entries};
@@ -199,12 +200,11 @@ fn build_commit_message(changes: &[(char, String, String)]) -> String {
 }
 
 pub fn run(verbose: bool) -> Result<()> {
-    let repo = git_utils::git2_discover_repo()?;
-    let db_path = git_utils::git2_db_path(&repo)?;
-    let db = Db::open(&db_path)?;
+    let ctx = CommandContext::open_git2(None)?;
+    let repo = ctx.git2_repo()?;
 
-    let local_ref_name = git_utils::git2_local_ref(&repo)?;
-    let last_materialized = db.get_last_materialized()?;
+    let local_ref_name = ctx.local_ref();
+    let last_materialized = ctx.db.get_last_materialized()?;
 
     if verbose {
         eprintln!("[verbose] local ref: {}", local_ref_name);
@@ -257,7 +257,7 @@ pub fn run(verbose: bool) -> Result<()> {
         dirty_target_bases,
         changes,
     ) = if let Some(since) = last_materialized {
-        let modified = db.get_modified_since(since)?;
+        let modified = ctx.db.get_modified_since(since)?;
         if verbose {
             eprintln!(
                 "[verbose] incremental mode: {} entries modified since last materialize",
@@ -304,10 +304,10 @@ pub fn run(verbose: bool) -> Result<()> {
             dirty_bases.insert(target.tree_base_path());
         }
 
-        let metadata = db.get_all_metadata()?;
-        let tombstones = db.get_all_tombstones()?;
-        let set_tombstones = db.get_all_set_tombstones()?;
-        let list_tombstones = db.get_all_list_tombstones()?;
+        let metadata = ctx.db.get_all_metadata()?;
+        let tombstones = ctx.db.get_all_tombstones()?;
+        let set_tombstones = ctx.db.get_all_set_tombstones()?;
+        let list_tombstones = ctx.db.get_all_list_tombstones()?;
 
         // Note: tombstone/set-tombstone targets don't need to be added to
         // dirty_bases separately — delete operations are logged in metadata_log,
@@ -338,7 +338,7 @@ pub fn run(verbose: bool) -> Result<()> {
             eprintln!("[verbose] full serialization mode (no previous materialize)");
         }
 
-        let metadata = db.get_all_metadata()?;
+        let metadata = ctx.db.get_all_metadata()?;
 
         // Full serialize: all entries are adds
         let changes: Vec<(char, String, String)> = metadata
@@ -357,9 +357,9 @@ pub fn run(verbose: bool) -> Result<()> {
 
         (
             metadata,
-            db.get_all_tombstones()?,
-            db.get_all_set_tombstones()?,
-            db.get_all_list_tombstones()?,
+            ctx.db.get_all_tombstones()?,
+            ctx.db.get_all_set_tombstones()?,
+            ctx.db.get_all_list_tombstones()?,
             None,
             changes,
         )
@@ -374,10 +374,11 @@ pub fn run(verbose: bool) -> Result<()> {
     // If meta:prune:since is configured, drop entries older than the cutoff
     // before building the tree. This avoids building a large tree only to
     // prune it, and keeps the summary counts accurate.
-    let prune_since = db
+    let prune_since = ctx
+        .db
         .get("project", "", "meta:prune:since")?
         .and_then(|(value, _, _)| serde_json::from_str::<String>(&value).ok());
-    let prune_rules = auto_prune::read_prune_rules(&db)?;
+    let prune_rules = auto::read_prune_rules(&ctx.db)?;
     let prune_cutoff_ms = prune_since
         .as_deref()
         .map(parse_since_to_cutoff_ms)
@@ -400,7 +401,7 @@ pub fn run(verbose: bool) -> Result<()> {
     };
 
     // ── Read filter rules ───────────────────────────────────────────────────
-    let filter_rules = parse_filter_rules(&db)?;
+    let filter_rules = parse_filter_rules(&ctx.db)?;
     if verbose && !filter_rules.is_empty() {
         eprintln!("[verbose] filter rules: {}", filter_rules.len());
         for rule in &filter_rules {
@@ -552,12 +553,12 @@ pub fn run(verbose: bool) -> Result<()> {
     }
 
     // ── Build and commit trees per destination ──────────────────────────────
-    let name = git_utils::git2_get_name(&repo)?;
-    let email = git_utils::git2_get_email(&repo)?;
+    let name = git_utils::git2_get_name(repo)?;
+    let email = git_utils::git2_get_email(repo)?;
     let sig = git2::Signature::now(&name, &email)?;
 
     for dest in &all_dests {
-        let ref_name = git_utils::git2_destination_ref(&repo, dest)?;
+        let ref_name = ctx.destination_ref(dest);
         let empty_meta: Vec<MetaEntry> = Vec::new();
         let empty_tomb: Vec<TombEntry> = Vec::new();
         let empty_set_tomb: Vec<SetTombEntry> = Vec::new();
@@ -581,7 +582,7 @@ pub fn run(verbose: bool) -> Result<()> {
 
         eprintln!("Building git tree for {}...", ref_name);
         let tree_oid = build_tree(
-            &repo, meta, tombs, set_tombs, list_tombs, existing, dirty, verbose,
+            repo, meta, tombs, set_tombs, list_tombs, existing, dirty, verbose,
         )?;
 
         if verbose {
@@ -642,7 +643,7 @@ pub fn run(verbose: bool) -> Result<()> {
                             .unwrap_or_else(|| "none".to_string())
                     );
                 }
-                if auto_prune::should_prune(&repo, tree_oid, prune_rules)? {
+                if auto::should_prune(repo, tree_oid, prune_rules)? {
                     eprintln!(
                         "Auto-prune triggered, pruning with --since={}...",
                         prune_rules.since
@@ -659,7 +660,7 @@ pub fn run(verbose: bool) -> Result<()> {
                         );
                     }
 
-                    let prune_tree_oid = prune_tree(&repo, tree_oid, prune_rules, &db, verbose)?;
+                    let prune_tree_oid = prune_tree(repo, tree_oid, prune_rules, &ctx.db, verbose)?;
 
                     if prune_tree_oid != tree_oid {
                         if verbose {
@@ -672,7 +673,7 @@ pub fn run(verbose: bool) -> Result<()> {
                         let prune_parent = repo.find_reference(&ref_name)?.peel_to_commit()?;
 
                         let (keys_dropped, keys_retained) =
-                            count_prune_stats(&repo, tree_oid, prune_tree_oid)?;
+                            count_prune_stats(repo, tree_oid, prune_tree_oid)?;
 
                         if verbose {
                             eprintln!(
@@ -720,7 +721,7 @@ pub fn run(verbose: bool) -> Result<()> {
     }
 
     let now = Utc::now().timestamp_millis();
-    db.set_last_materialized(now)?;
+    ctx.db.set_last_materialized(now)?;
 
     Ok(())
 }
@@ -1099,7 +1100,7 @@ fn merge_dir_into_tree(
 pub fn prune_tree(
     repo: &git2::Repository,
     tree_oid: git2::Oid,
-    rules: &auto_prune::PruneRules,
+    rules: &auto::PruneRules,
     db: &Db,
     verbose: bool,
 ) -> Result<git2::Oid> {
@@ -1129,7 +1130,7 @@ pub fn prune_tree(
 
             // Check min-size: if the subtree is smaller than the threshold, keep it
             if min_size > 0 {
-                let size = auto_prune::compute_tree_size_for(repo, &subtree)?;
+                let size = auto::compute_tree_size_for(repo, &subtree)?;
                 if size < min_size {
                     if verbose {
                         eprintln!(

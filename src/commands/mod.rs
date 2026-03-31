@@ -1,12 +1,9 @@
-pub mod auto_prune;
 pub mod bench;
 pub mod config;
-pub mod config_prune;
 pub mod get;
 pub mod import;
 pub mod inspect;
 pub mod list;
-pub mod local_prune;
 pub mod log;
 pub mod materialize;
 pub mod promisor;

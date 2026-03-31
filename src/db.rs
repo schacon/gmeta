@@ -1429,37 +1429,6 @@ impl Db {
         Ok(results)
     }
 
-    /// Get the set of (target_type, target_value, key) that have been locally
-    /// modified since a given timestamp.
-    #[allow(dead_code)]
-    pub fn get_locally_modified_keys(
-        &self,
-        since: Option<i64>,
-    ) -> Result<std::collections::HashSet<(String, String, String)>> {
-        use std::collections::HashSet;
-
-        let since_ts = since.unwrap_or(0);
-        let mut stmt = self.conn.prepare(
-            "SELECT DISTINCT target_type, target_value, key
-             FROM metadata_log
-             WHERE timestamp > ?1",
-        )?;
-
-        let rows = stmt.query_map(params![since_ts], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-
-        let mut result = HashSet::new();
-        for row in rows {
-            result.insert(row?);
-        }
-        Ok(result)
-    }
-
     /// Get the last materialized timestamp.
     pub fn get_last_materialized(&self) -> Result<Option<i64>> {
         let mut stmt = self

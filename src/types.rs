@@ -271,7 +271,6 @@ pub fn validate_key(key: &str) -> Result<()> {
 
 /// Build the full tree path segments for a key under a target.
 /// Key is split by ':' into subtree segments.
-#[allow(dead_code)]
 pub fn key_to_path_segments(key: &str) -> Vec<String> {
     key.split(':').map(|s| s.to_string()).collect()
 }
@@ -298,21 +297,18 @@ pub fn build_key_tree_path(target: &Target, key: &str) -> Result<String> {
 }
 
 /// Build the full tree path for a string value.
-#[allow(dead_code)]
 pub fn build_tree_path(target: &Target, key: &str) -> Result<String> {
     let key_path = build_key_tree_path(target, key)?;
     Ok(format!("{}/{}", key_path, STRING_VALUE_BLOB))
 }
 
 /// Build the list directory path for a key.
-#[allow(dead_code)]
 pub fn build_list_tree_dir_path(target: &Target, key: &str) -> Result<String> {
     let key_path = build_key_tree_path(target, key)?;
     Ok(format!("{}/{}", key_path, LIST_VALUE_DIR))
 }
 
 /// Build the tombstone blob path for a key.
-#[allow(dead_code)]
 pub fn build_tombstone_tree_path(target: &Target, key: &str) -> Result<String> {
     validate_key(key)?;
     let base = target.tree_base_path();
