@@ -7,4 +7,5 @@
 pub mod db;
 pub mod git_utils;
 pub mod list_value;
+pub mod tree;
 pub mod types;

@@ -8,11 +8,10 @@
 use anyhow::Result;
 
 use super::auto::parse_since_to_cutoff_ms;
-use crate::commands::serialize::{
-    build_filtered_tree, classify_key, count_prune_stats, parse_filter_rules, MAIN_DEST,
-};
+use crate::commands::serialize::{build_filtered_tree, count_prune_stats};
 use crate::context::CommandContext;
 use gmeta_core::git_utils;
+use gmeta_core::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
 use gmeta_core::types::TargetType;
 
 pub fn run(dry_run: bool) -> Result<()> {
