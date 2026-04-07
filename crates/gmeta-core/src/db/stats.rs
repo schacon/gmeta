@@ -1,5 +1,6 @@
-use anyhow::Result;
 use rusqlite::params;
+
+use crate::error::Result;
 
 use super::{escape_like_pattern, Db};
 use crate::types::TargetType;

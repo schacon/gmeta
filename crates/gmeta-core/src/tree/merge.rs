@@ -5,7 +5,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::Result;
+use crate::error::Result;
 
 use super::model::{Key, TombstoneEntry, TreeValue};
 

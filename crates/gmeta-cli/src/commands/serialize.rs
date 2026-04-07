@@ -782,7 +782,7 @@ fn build_tree(
         }
         build_tree_incremental(repo, existing, &files, dirty_bases)
     } else {
-        build_tree_from_paths(repo, &files)
+        Ok(build_tree_from_paths(repo, &files)?)
     }
 }
 

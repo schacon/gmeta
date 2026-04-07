@@ -1,5 +1,6 @@
-use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
+
+use crate::error::Result;
 
 use super::Db;
 use crate::types::TargetType;

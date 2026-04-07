@@ -1,13 +1,13 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
 use git2::Repository;
+
+use crate::error::{Error, Result};
 
 /// Discover the Git repository from the current directory (git2).
 pub fn git2_discover_repo() -> Result<Repository> {
-    let repo = Repository::discover(".")
-        .context("not a git repository (or any parent up to mount point)")?;
+    let repo = Repository::discover(".").map_err(|_| Error::NotARepository)?;
     Ok(repo)
 }
 
@@ -48,10 +48,10 @@ pub fn git2_get_namespace(repo: &Repository) -> Result<String> {
 pub fn git2_resolve_commit_sha(repo: &Repository, partial: &str) -> Result<String> {
     let obj = repo
         .revparse_single(partial)
-        .with_context(|| format!("could not resolve commit: {}", partial))?;
+        .map_err(|_| Error::ResolveError(partial.to_string()))?;
     let commit = obj
         .peel_to_commit()
-        .with_context(|| format!("{} does not point to a commit", partial))?;
+        .map_err(|_| Error::ResolveError(format!("{partial} does not point to a commit")))?;
     Ok(commit.id().to_string())
 }
 
@@ -77,21 +77,21 @@ fn git2_run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
     let workdir = repo
         .workdir()
         .or_else(|| Some(repo.path()))
-        .context("cannot determine repository directory")?;
+        .ok_or_else(|| Error::Other("cannot determine repository directory".into()))?;
 
     let output = Command::new("git")
         .args(args)
         .current_dir(workdir)
         .output()
-        .context("failed to run git command")?;
+        .map_err(|e| Error::GitCommand(format!("{e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!(
+        return Err(Error::GitCommand(format!(
             "git {} failed: {}",
             args.first().unwrap_or(&""),
             stderr.trim()
-        );
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -139,7 +139,7 @@ pub fn hydrate_tip_blobs_counted(
             let workdir = repo
                 .workdir()
                 .or_else(|| Some(repo.path()))
-                .context("cannot determine repository directory")?;
+                .ok_or_else(|| Error::Other("cannot determine repository directory".into()))?;
 
             let mut child = Command::new("git")
                 .args([
@@ -157,25 +157,33 @@ pub fn hydrate_tip_blobs_counted(
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::piped())
-                .spawn()?;
+                .spawn()
+                .map_err(|e| Error::GitCommand(format!("{e}")))?;
 
             if let Some(mut stdin) = child.stdin.take() {
                 use std::io::Write;
-                stdin.write_all(blobs.as_bytes())?;
+                stdin
+                    .write_all(blobs.as_bytes())
+                    .map_err(|e| Error::GitCommand(format!("{e}")))?;
             }
 
-            let output = child.wait_with_output()?;
+            let output = child
+                .wait_with_output()
+                .map_err(|e| Error::GitCommand(format!("{e}")))?;
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                bail!("blob hydration failed: {}", stderr.trim());
+                return Err(Error::GitCommand(format!(
+                    "blob hydration failed: {}",
+                    stderr.trim()
+                )));
             }
 
             Ok(count)
         }
         Ok(_) => Ok(0),
-        Err(e) => {
-            bail!("ls-tree failed for {}: {}", ref_name, e);
-        }
+        Err(e) => Err(Error::GitCommand(format!(
+            "ls-tree failed for {ref_name}: {e}"
+        ))),
     }
 }
 
@@ -222,7 +230,7 @@ pub fn fetch_blob_oids(repo: &Repository, remote_name: &str, oids: &[git2::Oid])
     let workdir = repo
         .workdir()
         .or_else(|| Some(repo.path()))
-        .context("cannot determine repository directory")?;
+        .ok_or_else(|| Error::Other("cannot determine repository directory".into()))?;
 
     let oid_list: String = oids.iter().map(|o| format!("{}\n", o)).collect();
 
@@ -242,16 +250,21 @@ pub fn fetch_blob_oids(repo: &Repository, remote_name: &str, oids: &[git2::Oid])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::inherit())
-        .spawn()?;
+        .spawn()
+        .map_err(|e| Error::GitCommand(format!("{e}")))?;
 
     if let Some(mut stdin) = child.stdin.take() {
         use std::io::Write;
-        stdin.write_all(oid_list.as_bytes())?;
+        stdin
+            .write_all(oid_list.as_bytes())
+            .map_err(|e| Error::GitCommand(format!("{e}")))?;
     }
 
-    let output = child.wait_with_output()?;
+    let output = child
+        .wait_with_output()
+        .map_err(|e| Error::GitCommand(format!("{e}")))?;
     if !output.status.success() {
-        bail!("blob fetch failed");
+        return Err(Error::GitCommand("blob fetch failed".into()));
     }
 
     Ok(())
@@ -262,7 +275,7 @@ pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<St
     let meta_remotes = list_meta_remotes(repo)?;
 
     if meta_remotes.is_empty() {
-        bail!("no metadata remotes configured. Add one with: gmeta remote add <url>");
+        return Err(Error::NoRemotes);
     }
 
     match remote {
@@ -270,15 +283,7 @@ pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<St
             if meta_remotes.iter().any(|(n, _)| n == name) {
                 Ok(name.to_string())
             } else {
-                bail!(
-                    "'{}' is not a metadata remote. Available: {}",
-                    name,
-                    meta_remotes
-                        .iter()
-                        .map(|(n, _)| n.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
+                Err(Error::RemoteNotFound(name.to_string()))
             }
         }
         None => Ok(meta_remotes[0].0.clone()),
@@ -294,8 +299,7 @@ fn gix_config_string(repo: &gix::Repository, key: &str, default: &str) -> String
 
 /// Discover the Git repository from the current directory.
 pub fn discover_repo() -> Result<gix::Repository> {
-    let repo =
-        gix::discover(".").context("not a git repository (or any parent up to mount point)")?;
+    let repo = gix::discover(".").map_err(|_| Error::NotARepository)?;
     Ok(repo)
 }
 
@@ -318,13 +322,17 @@ pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
 pub fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Result<String> {
     let obj = repo
         .rev_parse_single(partial.as_bytes())
-        .with_context(|| format!("could not resolve commit: {}", partial))?;
+        .map_err(|_| Error::ResolveError(partial.to_string()))?;
     let id = obj.detach();
     // Verify it's a commit by peeling
-    let object = repo.find_object(id)?;
+    let object = repo
+        .find_object(id)
+        .map_err(|e| Error::Other(format!("{e}")))?;
     if object.kind != gix::object::Kind::Commit {
         // Try peeling tags etc.
-        let peeled = object.peel_to_kind(gix::object::Kind::Commit)?;
+        let peeled = object
+            .peel_to_kind(gix::object::Kind::Commit)
+            .map_err(|e| Error::Other(format!("{e}")))?;
         Ok(peeled.id.to_string())
     } else {
         Ok(id.to_string())

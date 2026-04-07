@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
 use git2::Repository;
 use rusqlite::{params, OptionalExtension};
+
+use crate::error::{Error, Result};
 
 use super::{
     blob_if_large, load_list_entries_by_metadata_id, load_list_entries_by_metadata_id_tx,
@@ -169,7 +170,10 @@ impl Db {
         match existing {
             Some((metadata_id, current_type)) => {
                 if current_type != "list" {
-                    bail!("key '{}' is not a list", key);
+                    return Err(Error::TypeMismatch {
+                        key: key.to_string(),
+                        expected: "list".into(),
+                    });
                 }
                 let mut list_rows = load_list_rows_by_metadata_id_tx(&tx, metadata_id)?;
                 if let Some(pos) = list_rows.iter().rposition(|row| row.value == value) {
@@ -179,7 +183,7 @@ impl Db {
                         params![removed.rowid],
                     )?;
                 } else {
-                    bail!("value '{}' not found in list", value);
+                    return Err(Error::ValueNotFound(format!("'{value}' not found in list")));
                 }
 
                 let list_entries: Vec<ListEntry> = list_rows
@@ -214,7 +218,9 @@ impl Db {
 
                 Ok(())
             }
-            None => bail!("key '{}' not found", key),
+            None => Err(Error::KeyNotFound {
+                key: key.to_string(),
+            }),
         }
     }
 
@@ -238,11 +244,16 @@ impl Db {
         match metadata_id {
             Some((id, vtype)) => {
                 if vtype != "list" {
-                    bail!("key '{}' is not a list", key);
+                    return Err(Error::TypeMismatch {
+                        key: key.to_string(),
+                        expected: "list".into(),
+                    });
                 }
                 load_list_entries_by_metadata_id(&self.conn, self.repo.as_ref(), id)
             }
-            None => bail!("key '{}' not found", key),
+            None => Err(Error::KeyNotFound {
+                key: key.to_string(),
+            }),
         }
     }
 
@@ -273,15 +284,17 @@ impl Db {
         match existing {
             Some((metadata_id, current_type)) => {
                 if current_type != "list" {
-                    bail!("key '{}' is not a list", key);
+                    return Err(Error::TypeMismatch {
+                        key: key.to_string(),
+                        expected: "list".into(),
+                    });
                 }
                 let mut list_rows = load_list_rows_by_metadata_id_tx(&tx, metadata_id)?;
                 if index >= list_rows.len() {
-                    bail!(
-                        "index {} out of range (list has {} entries)",
+                    return Err(Error::IndexOutOfRange {
                         index,
-                        list_rows.len()
-                    );
+                        size: list_rows.len(),
+                    });
                 }
 
                 let removed = list_rows.remove(index);
@@ -338,7 +351,9 @@ impl Db {
 
                 Ok(())
             }
-            None => bail!("key '{}' not found", key),
+            None => Err(Error::KeyNotFound {
+                key: key.to_string(),
+            }),
         }
     }
 }

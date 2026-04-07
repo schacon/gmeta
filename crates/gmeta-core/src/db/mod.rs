@@ -10,9 +10,10 @@ mod tombstones;
 use std::path::Path;
 use std::time::Duration;
 
-use anyhow::Result;
 use git2::Repository;
 use rusqlite::{params, Connection};
+
+use crate::error::Result;
 
 use crate::list_value::{encode_entries, ListEntry};
 use crate::types::GIT_REF_THRESHOLD;
