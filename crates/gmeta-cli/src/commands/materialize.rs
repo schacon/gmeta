@@ -94,6 +94,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                     }
                     TreeValue::List(l) => format!("list ({} entries)", l.len()),
                     TreeValue::Set(s) => format!("set ({} members)", s.len()),
+                    _ => "unknown type".to_string(),
                 };
                 eprintln!("  {} {} -> {}", target, k, val_desc);
             }
@@ -187,7 +188,12 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 for key in remote_entries.values.keys() {
                     match local_entries.values.get(key) {
                         None => added += 1,
-                        Some(local_val) if local_val != remote_entries.values.get(key).unwrap() => {
+                        Some(local_val)
+                            if remote_entries
+                                .values
+                                .get(key)
+                                .is_some_and(|v| local_val != v) =>
+                        {
                             changed += 1
                         }
                         _ => {}
@@ -268,7 +274,9 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             println!("materialized {} (fast-forward)", ref_name);
         } else {
             // Need a real merge
-            let local_c = local_commit.as_ref().unwrap();
+            let local_c = local_commit
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("expected local commit for merge but found None"))?;
             let local_entries = parse_tree(repo, &local_c.tree()?, "")?;
 
             if verbose {
@@ -719,6 +727,7 @@ fn update_db_from_tree(
                     )?;
                 }
             }
+            _ => {}
         }
     }
 
@@ -830,6 +839,7 @@ fn collect_db_changes_from_tree(
                     });
                 }
             }
+            _ => {}
         }
     }
 

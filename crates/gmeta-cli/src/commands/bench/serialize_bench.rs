@@ -177,7 +177,7 @@ fn do_serialize(repo: &git2::Repository, db: &Db, ref_name: &str) -> Result<()> 
         &parents,
     )?;
 
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
     db.set_last_materialized(now)?;
 
     Ok(())
@@ -304,7 +304,8 @@ pub fn run(rounds: usize) -> Result<()> {
 
         // Insert keys into the database
         let t_insert = Instant::now();
-        let timestamp_base = chrono::Utc::now().timestamp_millis();
+        let timestamp_base =
+            time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
 
         for i in 0..n_keys {
             let sha = fake_sha(&mut rng);
@@ -415,7 +416,9 @@ pub fn run(rounds: usize) -> Result<()> {
     // Serialize time trend (first vs last round)
     if round_stats.len() >= 2 {
         let first = &round_stats[0];
-        let last = round_stats.last().unwrap();
+        let last = round_stats
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("round_stats is empty"))?;
         let first_per_key = first.serialize_secs / first.keys_inserted as f64;
         let last_per_key = last.serialize_secs / last.keys_inserted as f64;
         let slowdown = last.serialize_secs / first.serialize_secs;

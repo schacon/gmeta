@@ -39,8 +39,17 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
         };
 
         let ms = parse_since_to_cutoff_ms(&since)?;
-        let cutoff_date = chrono::DateTime::from_timestamp_millis(ms)
-            .map(|d| d.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+        let cutoff_date = time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
+            .ok()
+            .and_then(|d| {
+                d.format(
+                    &time::format_description::parse(
+                        "[year]-[month]-[day] [hour]:[minute]:[second] UTC",
+                    )
+                    .unwrap_or_default(),
+                )
+                .ok()
+            })
             .unwrap_or_else(|| "?".to_string());
 
         eprintln!(

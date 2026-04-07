@@ -11,12 +11,13 @@ use gmeta_core::types::{ImportFormat, TargetType, ValueType, GIT_REF_THRESHOLD};
 pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<()> {
     let since_epoch = match since {
         Some(date_str) => {
-            let date =
-                chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d").with_context(|| {
-                    format!("invalid --since date '{}', expected YYYY-MM-DD", date_str)
-                })?;
-            let dt = date.and_hms_opt(0, 0, 0).unwrap();
-            Some(dt.and_utc().timestamp())
+            let date_fmt =
+                time::format_description::parse("[year]-[month]-[day]").unwrap_or_default();
+            let date = time::Date::parse(date_str, &date_fmt).with_context(|| {
+                format!("invalid --since date '{}', expected YYYY-MM-DD", date_str)
+            })?;
+            let odt = time::OffsetDateTime::new_utc(date, time::Time::MIDNIGHT);
+            Some(odt.unix_timestamp())
         }
         None => None,
     };
@@ -24,6 +25,7 @@ pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<(
     match format {
         ImportFormat::Entire => run_entire(dry_run, since_epoch),
         ImportFormat::GitAi => run_git_ai(dry_run, since_epoch),
+        _ => bail!("unsupported import format"),
     }
 }
 
@@ -47,8 +49,15 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
     // For each one, look up the checkpoint in the checkpoints tree and import.
     if let Some(ref cp_tree) = checkpoints_tree {
         if let Some(ts) = since_epoch {
-            let date_str = chrono::DateTime::from_timestamp(ts, 0)
-                .map(|d| d.format("%Y-%m-%d").to_string())
+            let date_str = time::OffsetDateTime::from_unix_timestamp(ts)
+                .ok()
+                .and_then(|d| {
+                    d.format(
+                        &time::format_description::parse("[year]-[month]-[day]")
+                            .unwrap_or_default(),
+                    )
+                    .ok()
+                })
                 .unwrap_or_else(|| "unknown".to_string());
             eprintln!(
                 "Scanning commits for Entire-Checkpoint trailers (since {})...",

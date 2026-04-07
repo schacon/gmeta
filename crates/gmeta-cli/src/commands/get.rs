@@ -317,6 +317,7 @@ fn hydrate_promised_entries(
                 )?;
                 hydrated += 1;
             }
+            _ => anyhow::bail!("unsupported value type"),
         }
     }
 
@@ -396,6 +397,7 @@ fn print_value_only(value: &str, value_type: &ValueType) -> Result<()> {
                 println!("{}", item);
             }
         }
+        _ => anyhow::bail!("unsupported value type"),
     }
     Ok(())
 }
@@ -416,6 +418,7 @@ fn format_value_compact(value: &str, value_type: &ValueType) -> Result<String> {
             set.sort();
             Ok(set.join(", "))
         }
+        _ => anyhow::bail!("unsupported value type"),
     }
 }
 
@@ -474,6 +477,7 @@ fn parse_stored_value(value: &str, value_type: &ValueType) -> Result<Value> {
             set.sort();
             Ok(Value::Array(set.into_iter().map(Value::String).collect()))
         }
+        _ => anyhow::bail!("unsupported value type"),
     }
 }
 

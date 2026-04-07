@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use chrono::Utc;
+use time::{Duration, OffsetDateTime};
 
 use gmeta_core::db::Db;
 use gmeta_core::types::TargetType;
@@ -153,31 +153,31 @@ fn compute_tree_size_recursive(
 
 /// Parse a duration string like "90d", "6m", "1y" or an ISO date into a cutoff timestamp (millis).
 pub fn parse_since_to_cutoff_ms(since: &str) -> Result<i64> {
+    let now_ms = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
     let s = since.trim().to_lowercase();
     if let Some(num_str) = s.strip_suffix('d') {
         let days: i64 = num_str
             .parse()
             .with_context(|| format!("invalid duration: {}", since))?;
-        return Ok(Utc::now().timestamp_millis() - days * 86_400_000);
+        return Ok(now_ms - Duration::days(days).whole_milliseconds() as i64);
     }
     if let Some(num_str) = s.strip_suffix('m') {
         let months: i64 = num_str
             .parse()
             .with_context(|| format!("invalid duration: {}", since))?;
-        return Ok(Utc::now().timestamp_millis() - months * 30 * 86_400_000);
+        return Ok(now_ms - Duration::days(months * 30).whole_milliseconds() as i64);
     }
     if let Some(num_str) = s.strip_suffix('y') {
         let years: i64 = num_str
             .parse()
             .with_context(|| format!("invalid duration: {}", since))?;
-        return Ok(Utc::now().timestamp_millis() - years * 365 * 86_400_000);
+        return Ok(now_ms - Duration::days(years * 365).whole_milliseconds() as i64);
     }
 
-    if let Ok(date) = chrono::NaiveDate::parse_from_str(since, "%Y-%m-%d") {
-        let dt = date
-            .and_hms_opt(0, 0, 0)
-            .ok_or_else(|| anyhow::anyhow!("invalid date"))?;
-        return Ok(dt.and_utc().timestamp_millis());
+    let date_fmt = time::format_description::parse("[year]-[month]-[day]").unwrap_or_default();
+    if let Ok(date) = time::Date::parse(since, &date_fmt) {
+        let odt = OffsetDateTime::new_utc(date, time::Time::MIDNIGHT);
+        return Ok(odt.unix_timestamp_nanos() as i64 / 1_000_000);
     }
 
     bail!(

@@ -6,8 +6,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
-use chrono::Utc;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use time::OffsetDateTime;
 
 use crate::context::CommandContext;
 use gmeta_core::db::Db;
@@ -479,7 +479,8 @@ impl WatchState {
                     );
 
                     if let Some(ref cid) = change_id {
-                        let ts = Utc::now().timestamp_millis();
+                        let ts =
+                            OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
                         let first_seen = *self
                             .branch_first_seen
                             .entry(branch_name.clone())
@@ -596,7 +597,7 @@ impl WatchState {
         };
 
         let transcript_content = lines.join("\n");
-        let ts = Utc::now().timestamp_millis();
+        let ts = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
 
         let first_seen = *self
             .branch_first_seen

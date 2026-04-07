@@ -661,17 +661,32 @@ fn print_report(results: &[SchemeResult], n_base: usize) {
     println!("{} ── Verdict ──{}", BOLD, RESET);
     let fastest_write = results
         .iter()
-        .min_by(|a, b| a.write_batch_secs.partial_cmp(&b.write_batch_secs).unwrap())
-        .unwrap();
+        .min_by(|a, b| {
+            a.write_batch_secs
+                .partial_cmp(&b.write_batch_secs)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(&results[0]);
     let fastest_read = results
         .iter()
-        .min_by(|a, b| a.read_1k_secs.partial_cmp(&b.read_1k_secs).unwrap())
-        .unwrap();
-    let smallest_pack = results.iter().min_by_key(|r| r.pack_bytes).unwrap();
+        .min_by(|a, b| {
+            a.read_1k_secs
+                .partial_cmp(&b.read_1k_secs)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(&results[0]);
+    let smallest_pack = results
+        .iter()
+        .min_by_key(|r| r.pack_bytes)
+        .unwrap_or(&results[0]);
     let fastest_diff = results
         .iter()
-        .min_by(|a, b| a.diff_secs.partial_cmp(&b.diff_secs).unwrap())
-        .unwrap();
+        .min_by(|a, b| {
+            a.diff_secs
+                .partial_cmp(&b.diff_secs)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(&results[0]);
 
     println!(
         "  fastest write  {}{}{}",

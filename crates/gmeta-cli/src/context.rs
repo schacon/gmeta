@@ -1,7 +1,7 @@
 use std::cell::OnceCell;
 
 use anyhow::Result;
-use chrono::Utc;
+use time::OffsetDateTime;
 
 use gmeta_core::db::Db;
 use gmeta_core::git_utils;
@@ -47,7 +47,8 @@ impl CommandContext {
         let db_path = git_utils::db_path(&repo)?;
         let email = git_utils::get_email(&repo)?;
         let namespace = git_utils::get_namespace(&repo)?;
-        let timestamp = timestamp_override.unwrap_or_else(|| Utc::now().timestamp_millis());
+        let timestamp = timestamp_override
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000);
         let db = Db::open(&db_path)?;
 
         let gix_cell = OnceCell::new();
@@ -77,7 +78,8 @@ impl CommandContext {
         let db_path = git_utils::git2_db_path(&repo)?;
         let email = git_utils::git2_get_email(&repo)?;
         let namespace = git_utils::git2_get_namespace(&repo)?;
-        let timestamp = timestamp_override.unwrap_or_else(|| Utc::now().timestamp_millis());
+        let timestamp = timestamp_override
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000);
         let db = Db::open(&db_path)?;
 
         let git2_cell = OnceCell::new();

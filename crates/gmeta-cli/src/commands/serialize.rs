@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use time::OffsetDateTime;
 
 use crate::commands::prune::auto::{self, parse_since_to_cutoff_ms};
 use crate::context::CommandContext;
@@ -54,8 +54,11 @@ pub fn run(verbose: bool) -> Result<()> {
             match last_materialized {
                 Some(ts) => format!(
                     "{} ({}ms)",
-                    chrono::DateTime::from_timestamp_millis(ts)
-                        .map(|d| d.to_rfc3339())
+                    OffsetDateTime::from_unix_timestamp_nanos(ts as i128 * 1_000_000)
+                        .ok()
+                        .and_then(|d| d
+                            .format(&time::format_description::well_known::Rfc3339)
+                            .ok())
                         .unwrap_or_else(|| "?".to_string()),
                     ts
                 ),
@@ -349,6 +352,7 @@ pub fn run(verbose: bool) -> Result<()> {
                     ValueType::String => string_count += 1,
                     ValueType::List => list_count += 1,
                     ValueType::Set => set_count += 1,
+                    _ => {}
                 }
             }
         }
@@ -488,9 +492,14 @@ pub fn run(verbose: bool) -> Result<()> {
                         let cutoff_ms = parse_since_to_cutoff_ms(&prune_rules.since)?;
                         eprintln!(
                             "[verbose] prune cutoff: {} ({}ms)",
-                            chrono::DateTime::from_timestamp_millis(cutoff_ms)
-                                .map(|d| d.to_rfc3339())
-                                .unwrap_or_else(|| "?".to_string()),
+                            OffsetDateTime::from_unix_timestamp_nanos(
+                                cutoff_ms as i128 * 1_000_000
+                            )
+                            .ok()
+                            .and_then(|d| d
+                                .format(&time::format_description::well_known::Rfc3339)
+                                .ok())
+                            .unwrap_or_else(|| "?".to_string()),
                             cutoff_ms
                         );
                     }
@@ -555,7 +564,7 @@ pub fn run(verbose: bool) -> Result<()> {
         }
     }
 
-    let now = Utc::now().timestamp_millis();
+    let now = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
     ctx.db.set_last_materialized(now)?;
 
     Ok(())
@@ -681,6 +690,7 @@ fn build_tree(
                     files.insert(full_path, member.into_bytes());
                 }
             }
+            _ => anyhow::bail!("unsupported value type"),
         }
     }
 

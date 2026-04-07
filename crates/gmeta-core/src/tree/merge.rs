@@ -10,6 +10,7 @@ use anyhow::Result;
 use super::model::{Key, TombstoneEntry, TreeValue};
 
 /// Reason a merge conflict occurred.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictReason {
     /// Both sides changed the same key to different values.
@@ -38,6 +39,7 @@ impl ConflictReason {
 }
 
 /// How a conflict was resolved.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictResolution {
     /// Local/ours side was chosen.

@@ -15,6 +15,7 @@ pub const META_LOCAL_PREFIX: &str = "meta:local:";
 pub const MAIN_DEST: &str = "main";
 
 /// What to do with a key that matches a filter rule.
+#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum FilterAction {
     /// Exclude the key from serialization entirely.

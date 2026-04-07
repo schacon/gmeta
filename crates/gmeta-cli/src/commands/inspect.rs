@@ -7,7 +7,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::Result;
-use chrono::{Duration, Utc};
+use time::{Duration, OffsetDateTime};
 
 use crate::context::CommandContext;
 use gmeta_core::db::Db;
@@ -258,11 +258,11 @@ fn run_timeline(db: &Db) -> Result<()> {
         return Ok(());
     }
 
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     let weeks = 20usize;
     let week_duration = Duration::weeks(1);
     let start = now - Duration::weeks(weeks as i64);
-    let start_ms = start.timestamp_millis();
+    let start_ms = start.unix_timestamp_nanos() as i64 / 1_000_000;
 
     // Bucket entries by week (0 = oldest week, weeks-1 = current week)
     let mut buckets = vec![0u64; weeks];
@@ -274,7 +274,7 @@ fn run_timeline(db: &Db) -> Result<()> {
             continue;
         }
         let offset_ms = ts - start_ms;
-        let week_ms = week_duration.num_milliseconds();
+        let week_ms = week_duration.whole_milliseconds() as i64;
         let bucket = (offset_ms / week_ms) as usize;
         if bucket < weeks {
             buckets[bucket] += 1;
@@ -292,7 +292,11 @@ fn run_timeline(db: &Db) -> Result<()> {
 
     for (i, count) in buckets.iter().enumerate() {
         let week_start = start + Duration::weeks(i as i64);
-        let label = week_start.format("%b %d").to_string();
+        let label = week_start
+            .format(
+                &time::format_description::parse("[month repr:short] [day]").unwrap_or_default(),
+            )
+            .unwrap_or_else(|_| "?".to_string());
         let filled = ((*count as f64 / max_count as f64) * bar_width as f64).round() as usize;
         let bar: String = "█".repeat(filled);
         let pad: String = " ".repeat(bar_width - filled);
@@ -365,6 +369,7 @@ fn format_value_oneline(
                 "[set]".to_string()
             }
         }
+        _ => "[unknown type]".to_string(),
     }
 }
 

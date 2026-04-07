@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 pub type Key = (String, String, String);
 
 /// A parsed metadata entry from a Git tree.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeValue {
     /// A single string value.

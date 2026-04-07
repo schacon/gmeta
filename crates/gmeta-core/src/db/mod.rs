@@ -43,6 +43,7 @@ fn configure_connection(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// SQLite-backed metadata database with optional git repository for blob resolution.
 pub struct Db {
     pub conn: Connection,
     /// Optional git repository for resolving git-ref list item blobs on read.
