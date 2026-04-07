@@ -3,9 +3,8 @@
 //! Determines which keys should be serialized and to which destinations,
 //! based on user-configured filter rules stored in the database.
 
-use anyhow::{bail, Result};
-
 use crate::db::Db;
+use crate::error::{Error, Result};
 use crate::types::{TargetType, ValueType};
 
 /// Prefix for local-only metadata keys that are never serialized.
@@ -88,17 +87,18 @@ pub fn parse_filter_rules(db: &Db) -> Result<Vec<FilterRule>> {
 fn parse_rule(s: &str) -> Result<FilterRule> {
     let parts: Vec<&str> = s.split_whitespace().collect();
     if parts.len() < 2 {
-        bail!(
-            "invalid filter rule (need at least action and pattern): '{}'",
-            s
-        );
+        return Err(Error::InvalidFilterRule(format!(
+            "invalid filter rule (need at least action and pattern): '{s}'"
+        )));
     }
 
     let action = match parts[0] {
         "exclude" => FilterAction::Exclude,
         "route" => {
             if parts.len() < 3 {
-                bail!("route rule requires a destination: '{}'", s);
+                return Err(Error::InvalidFilterRule(format!(
+                    "route rule requires a destination: '{s}'"
+                )));
             }
             let destinations: Vec<String> = parts[2]
                 .split(',')
@@ -107,7 +107,11 @@ fn parse_rule(s: &str) -> Result<FilterRule> {
                 .collect();
             FilterAction::Route(destinations)
         }
-        other => bail!("unknown filter action '{}' in rule '{}'", other, s),
+        other => {
+            return Err(Error::InvalidFilterRule(format!(
+                "unknown filter action '{other}' in rule '{s}'"
+            )))
+        }
     };
 
     let pattern = parse_pattern(parts[1]);

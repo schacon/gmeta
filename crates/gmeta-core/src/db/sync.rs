@@ -1,5 +1,6 @@
-use anyhow::Result;
 use rusqlite::{params, OptionalExtension};
+
+use crate::error::Result;
 
 use super::{encode_list_entries_by_metadata_id, encode_set_values_by_metadata_id, Db};
 use crate::types::ValueType;

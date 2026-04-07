@@ -141,7 +141,7 @@ impl CommandContext {
     /// # Parameters
     /// - `target`: The target whose commit SHA should be expanded to 40 characters.
     pub fn git2_resolve_target(&self, target: &mut Target) -> Result<()> {
-        target.git2_resolve(self.git2_repo()?)
+        Ok(target.git2_resolve(self.git2_repo()?)?)
     }
 
     /// Resolve a target's partial commit SHA using the `gix` repository.
@@ -149,6 +149,6 @@ impl CommandContext {
     /// # Parameters
     /// - `target`: The target whose commit SHA should be expanded to 40 characters.
     pub fn resolve_target(&self, target: &mut Target) -> Result<()> {
-        target.resolve(self.gix_repo()?)
+        Ok(target.resolve(self.gix_repo()?)?)
     }
 }

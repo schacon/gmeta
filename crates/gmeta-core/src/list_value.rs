@@ -1,7 +1,8 @@
-use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+
+use crate::error::{Error, Result};
 
 /// A single timestamped entry in a metadata list value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,35 +26,33 @@ pub fn parse_entries(raw: &str) -> Result<Vec<ListEntry>> {
                 });
             }
             Value::Object(mut map) => {
-                let val_field = map
-                    .remove("value")
-                    .ok_or_else(|| anyhow!("list entry missing 'value' field"))?;
+                let val_field = map.remove("value").ok_or_else(|| {
+                    Error::InvalidValue("list entry missing 'value' field".into())
+                })?;
                 let value = val_field
                     .as_str()
-                    .ok_or_else(|| anyhow!("list entry 'value' must be string"))?
+                    .ok_or_else(|| Error::InvalidValue("list entry 'value' must be string".into()))?
                     .to_string();
                 let timestamp = match map.remove("timestamp") {
-                    Some(Value::Number(num)) => num
-                        .as_i64()
-                        .ok_or_else(|| anyhow!("list entry 'timestamp' must be integer"))?,
-                    Some(Value::String(s)) => s
-                        .parse::<i64>()
-                        .map_err(|_| anyhow!("list entry 'timestamp' must be integer"))?,
+                    Some(Value::Number(num)) => num.as_i64().ok_or_else(|| {
+                        Error::InvalidValue("list entry 'timestamp' must be integer".into())
+                    })?,
+                    Some(Value::String(s)) => s.parse::<i64>().map_err(|_| {
+                        Error::InvalidValue("list entry 'timestamp' must be integer".into())
+                    })?,
                     None => legacy_timestamp(idx),
                     Some(other) => {
-                        return Err(anyhow!(
-                            "list entry 'timestamp' must be integer, got {:?}",
-                            other
-                        ))
+                        return Err(Error::InvalidValue(format!(
+                            "list entry 'timestamp' must be integer, got {other:?}"
+                        )))
                     }
                 };
                 entries.push(ListEntry { value, timestamp });
             }
             other => {
-                return Err(anyhow!(
-                    "invalid list entry type: expected string or object, got {:?}",
-                    other
-                ));
+                return Err(Error::InvalidValue(format!(
+                    "invalid list entry type: expected string or object, got {other:?}"
+                )));
             }
         }
     }

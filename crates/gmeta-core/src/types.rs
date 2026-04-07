@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
 use sha1::{Digest, Sha1};
+
+use crate::error::{Error, Result};
 
 /// The kind of object a metadata entry is attached to.
 #[non_exhaustive]
@@ -30,7 +31,7 @@ impl TargetType {
             "branch" => Ok(TargetType::Branch),
             "path" => Ok(TargetType::Path),
             "project" => Ok(TargetType::Project),
-            _ => bail!("unknown target type: {}", s),
+            _ => Err(Error::UnknownTargetType(s.to_string())),
         }
     }
 
@@ -63,7 +64,7 @@ impl Target {
         }
 
         let (type_str, value) = s.split_once(':').ok_or_else(|| {
-            anyhow::anyhow!("target must be in type:value format (e.g. commit:abc123)")
+            Error::InvalidTarget("target must be in type:value format (e.g. commit:abc123)".into())
         })?;
 
         let target_type = TargetType::from_str(type_str)?;
@@ -76,7 +77,9 @@ impl Target {
         }
 
         if value.len() < 3 {
-            bail!("target value must be at least 3 characters, got: {}", value);
+            return Err(Error::InvalidTarget(format!(
+                "target value must be at least 3 characters, got: {value}"
+            )));
         }
 
         Ok(Target {
@@ -95,7 +98,7 @@ impl Target {
 
     /// If this is a commit target with a partial SHA, expand it to 40 chars
     /// using the given git2 repository.
-    pub fn git2_resolve(&mut self, repo: &git2::Repository) -> anyhow::Result<()> {
+    pub fn git2_resolve(&mut self, repo: &git2::Repository) -> Result<()> {
         if self.target_type == TargetType::Commit {
             if let Some(ref v) = self.value {
                 if v.len() < 40 {
@@ -109,7 +112,7 @@ impl Target {
 
     /// If this is a commit target with a partial SHA, expand it to 40 chars
     /// using the given Git repository.
-    pub fn resolve(&mut self, repo: &gix::Repository) -> anyhow::Result<()> {
+    pub fn resolve(&mut self, repo: &gix::Repository) -> Result<()> {
         if self.target_type == TargetType::Commit {
             if let Some(ref v) = self.value {
                 if v.len() < 40 {
@@ -173,7 +176,7 @@ impl ValueType {
             "string" => Ok(ValueType::String),
             "list" => Ok(ValueType::List),
             "set" => Ok(ValueType::Set),
-            _ => bail!("unknown value type: {}", s),
+            _ => Err(Error::UnknownValueType(s.to_string())),
         }
     }
 }
@@ -194,7 +197,7 @@ impl ImportFormat {
         match s {
             "entire" => Ok(ImportFormat::Entire),
             "git-ai" => Ok(ImportFormat::GitAi),
-            _ => bail!("unsupported import format: {}", s),
+            _ => Err(Error::UnsupportedFormat(s.to_string())),
         }
     }
 }
@@ -248,7 +251,9 @@ pub fn encode_path_target_value(value: &str) -> String {
 /// Decode escaped path target segments back into a slash-separated path string.
 pub fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
     if segments.is_empty() {
-        bail!("path target must include at least one segment");
+        return Err(Error::InvalidTreePath(
+            "path target must include at least one segment".into(),
+        ));
     }
 
     let decoded = segments
@@ -277,23 +282,31 @@ pub fn set_member_id(value: &str) -> String {
 
 fn validate_key_segment(segment: &str) -> Result<()> {
     if segment.is_empty() {
-        bail!("key segments cannot be empty");
+        return Err(Error::InvalidKey("key segments cannot be empty".into()));
     }
     if segment == "." || segment == ".." {
-        bail!("key segment '{}' is not allowed", segment);
+        return Err(Error::InvalidKey(format!(
+            "key segment '{segment}' is not allowed"
+        )));
     }
     if segment.contains('/') {
-        bail!("key segment '{}' must not contain '/'", segment);
+        return Err(Error::InvalidKey(format!(
+            "key segment '{segment}' must not contain '/'"
+        )));
     }
     if segment.contains('\0') {
-        bail!("key segment '{}' must not contain null byte", segment);
+        return Err(Error::InvalidKey(format!(
+            "key segment '{segment}' must not contain null byte"
+        )));
     }
     if segment.starts_with("__")
         || segment == STRING_VALUE_BLOB
         || segment == LIST_VALUE_DIR
         || segment == SET_VALUE_DIR
     {
-        bail!("key segment '{}' is reserved", segment);
+        return Err(Error::InvalidKey(format!(
+            "key segment '{segment}' is reserved"
+        )));
     }
     Ok(())
 }
@@ -301,7 +314,7 @@ fn validate_key_segment(segment: &str) -> Result<()> {
 /// Validate that a metadata key can be serialized into the Git tree layout.
 pub fn validate_key(key: &str) -> Result<()> {
     if key.is_empty() {
-        bail!("key cannot be empty");
+        return Err(Error::InvalidKey("key cannot be empty".into()));
     }
     for segment in key.split(':') {
         validate_key_segment(segment)?;
@@ -318,7 +331,9 @@ pub fn key_to_path_segments(key: &str) -> Vec<String> {
 /// Decode raw key path segments back into `:`-namespaced key form.
 pub fn decode_key_path_segments(segments: &[&str]) -> Result<String> {
     if segments.is_empty() {
-        bail!("key path must include at least one key segment");
+        return Err(Error::InvalidKey(
+            "key path must include at least one key segment".into(),
+        ));
     }
     let mut decoded = Vec::with_capacity(segments.len());
     for segment in segments {

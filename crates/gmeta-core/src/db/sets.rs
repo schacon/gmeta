@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
 use rusqlite::{params, OptionalExtension};
+
+use crate::error::{Error, Result};
 
 use super::{encode_set_values_by_metadata_id, Db};
 use crate::types::TargetType;
@@ -32,7 +33,10 @@ impl Db {
         match existing {
             Some((metadata_id, current_type)) => {
                 if current_type != "set" {
-                    bail!("key '{}' is not a set", key);
+                    return Err(Error::TypeMismatch {
+                        key: key.to_string(),
+                        expected: "set".into(),
+                    });
                 }
 
                 let member_id = crate::types::set_member_id(value);
@@ -42,7 +46,7 @@ impl Db {
                 )?;
 
                 if deleted == 0 {
-                    bail!("value '{}' not found in set", value);
+                    return Err(Error::ValueNotFound(format!("'{value}' not found in set")));
                 }
 
                 tx.execute(
@@ -77,7 +81,9 @@ impl Db {
                 tx.commit()?;
                 Ok(())
             }
-            None => bail!("key '{}' not found", key),
+            None => Err(Error::KeyNotFound {
+                key: key.to_string(),
+            }),
         }
     }
 
@@ -108,7 +114,10 @@ impl Db {
         let metadata_id = match existing {
             Some((metadata_id, current_type)) => {
                 if current_type != "set" {
-                    bail!("key '{}' is not a set", key);
+                    return Err(Error::TypeMismatch {
+                        key: key.to_string(),
+                        expected: "set".into(),
+                    });
                 }
 
                 tx.execute(

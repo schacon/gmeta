@@ -1,6 +1,7 @@
-use anyhow::{bail, Result};
 use git2::Repository;
 use rusqlite::{params, OptionalExtension};
+
+use crate::error::{Error, Result};
 
 use super::{
     blob_if_large, encode_list_entries_by_metadata_id, encode_set_values_by_metadata_id,
@@ -57,9 +58,9 @@ impl Db {
         if *value_type == ValueType::String && !is_git_ref {
             match serde_json::from_str::<serde_json::Value>(value) {
                 Ok(v) if !v.is_string() => {
-                    bail!(
+                    return Err(Error::InvalidValue(format!(
                         "string value must be a JSON-encoded string (e.g. '\"hello\"'), \
-                         got {} for key '{}'. Wrap with serde_json::to_string() first.",
+                         got {} for key '{key}'. Wrap with serde_json::to_string() first.",
                         if v.is_object() {
                             "an object"
                         } else if v.is_array() {
@@ -71,8 +72,7 @@ impl Db {
                         } else {
                             "null"
                         },
-                        key,
-                    );
+                    )));
                 }
                 _ => {} // valid JSON string, or not valid JSON at all (legacy)
             }

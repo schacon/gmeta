@@ -1,5 +1,6 @@
-use anyhow::Result;
 use rusqlite::Connection;
+
+use crate::error::Result;
 
 /// Current schema version.
 const SCHEMA_VERSION: i32 = 1;

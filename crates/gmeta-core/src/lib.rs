@@ -4,6 +4,9 @@
     clippy::should_implement_trait
 )]
 
+/// Typed error types for all gmeta-core operations.
+pub mod error;
+
 /// Local SQLite database for caching and querying metadata.
 pub mod db;
 /// Git utility helpers for resolving commits and working with objects.

@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::Result;
+use crate::error::{Error, Result};
 
 use super::model::{Key, ParsedTree, TombstoneBlob, TombstoneEntry, TreeValue};
 use crate::git_utils;
@@ -359,7 +359,7 @@ fn collect_blobs(
 /// Returns an error if the path is too short or missing required separators.
 pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a [&'a str])> {
     if parts.is_empty() {
-        anyhow::bail!("empty path");
+        return Err(Error::InvalidTreePath("empty path".into()));
     }
 
     let target_type = parts[0];
@@ -372,10 +372,14 @@ pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a
         let separator_index = parts
             .iter()
             .position(|part| *part == PATH_TARGET_SEPARATOR)
-            .ok_or_else(|| anyhow::anyhow!("path target missing separator: {:?}", parts))?;
+            .ok_or_else(|| {
+                Error::InvalidTreePath(format!("path target missing separator: {parts:?}"))
+            })?;
 
         if separator_index < 2 || separator_index + 1 >= parts.len() {
-            anyhow::bail!("invalid path target layout: {:?}", parts);
+            return Err(Error::InvalidTreePath(format!(
+                "invalid path target layout: {parts:?}"
+            )));
         }
 
         let target_value = decode_path_target_segments(&parts[1..separator_index])?;
@@ -387,7 +391,9 @@ pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a
     }
 
     if parts.len() < 4 {
-        anyhow::bail!("path too short for sharded target: {:?}", parts);
+        return Err(Error::InvalidTreePath(format!(
+            "path too short for sharded target: {parts:?}"
+        )));
     }
 
     let target_value = parts[2].to_string();
