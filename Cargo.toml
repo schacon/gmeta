@@ -1,26 +1,17 @@
-[package]
-name = "gmeta"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["crates/gmeta-core", "crates/gmeta-cli"]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
 anyhow = "1"
 chrono = "0.4"
-clap = { version = "4", features = ["derive"] }
 git2 = "0.20"
-gix = { version = "0.81.0", default-features = false, features = ["sha1", "revision", "merge", "tree-editor"] }
+gix = { version = "0.81.0", default-features = false, features = [
+    "sha1", "revision", "merge", "tree-editor",
+] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha1 = "0.10"
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"] }
-dialoguer = "0.11"
-notify = "7"
-
-[dev-dependencies]
-assert_cmd = "2"
-gix-testtools = "0.18"
-predicates = "3"
-sha1 = "0.10"
-tempfile = "3"
