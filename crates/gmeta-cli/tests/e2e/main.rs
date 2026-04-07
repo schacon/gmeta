@@ -5,6 +5,8 @@
 //! provides environment isolation and fixture-based repo setup inspired by
 //! GitButler's `but-testsupport` crate.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 #[allow(dead_code)]
 mod harness;
 

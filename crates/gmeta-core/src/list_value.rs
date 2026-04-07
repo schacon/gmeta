@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+/// A single timestamped entry in a metadata list value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ListEntry {
     pub value: String,
@@ -88,6 +89,7 @@ pub fn make_entry_name(entry: &ListEntry) -> String {
     make_entry_name_from_parts(entry.timestamp, &entry.value)
 }
 
+/// Build a deterministic entry name from a timestamp and value content hash.
 pub fn make_entry_name_from_parts(timestamp: i64, value: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(value.as_bytes());
@@ -95,6 +97,7 @@ pub fn make_entry_name_from_parts(timestamp: i64, value: &str) -> String {
     format!("{}-{}", timestamp, &hash[..5])
 }
 
+/// Extract the timestamp from a list entry name (format: `<timestamp>-<hash>`).
 pub fn parse_timestamp_from_entry_name(name: &str) -> Option<i64> {
     let idx = name.find('-')?;
     name[..idx].parse().ok()

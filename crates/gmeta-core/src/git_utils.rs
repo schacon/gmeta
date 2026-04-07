@@ -332,6 +332,7 @@ pub fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Result<Strin
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

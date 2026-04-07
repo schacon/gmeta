@@ -3,8 +3,8 @@
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use chrono::{TimeZone, Utc};
 use git2::Repository;
+use time::OffsetDateTime;
 
 use crate::context::CommandContext;
 use gmeta_core::types::{TargetType, ValueType};
@@ -48,16 +48,21 @@ pub fn run(commit_ref: &str) -> Result<()> {
     let epoch = commit.time().seconds();
     let offset_minutes = commit.time().offset_minutes();
     let offset_secs = (offset_minutes as i64) * 60;
-    let local_time = chrono::FixedOffset::east_opt(offset_secs as i32)
-        .unwrap()
-        .timestamp_opt(epoch, 0)
-        .single()
-        .unwrap();
+    let utc_offset =
+        time::UtcOffset::from_whole_seconds(offset_secs as i32).unwrap_or(time::UtcOffset::UTC);
+    let local_time = OffsetDateTime::from_unix_timestamp(epoch)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+        .to_offset(utc_offset);
     let relative = format_relative_time(epoch);
-    println!(
-        "{YELLOW}Date:{RESET}       {GREEN}{}{RESET} {DIM}({relative}){RESET}",
-        local_time.format("%Y-%m-%d %H:%M:%S %z")
-    );
+    let date_fmt = local_time
+        .format(
+            &time::format_description::parse(
+                "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory][offset_minute]",
+            )
+            .unwrap_or_default(),
+        )
+        .unwrap_or_else(|_| "?".to_string());
+    println!("{YELLOW}Date:{RESET}       {GREEN}{date_fmt}{RESET} {DIM}({relative}){RESET}");
 
     println!();
     if let Some(message) = commit.message() {
@@ -156,6 +161,7 @@ fn format_meta_value(value: &str, value_type: &ValueType) -> String {
                 value.to_string()
             }
         }
+        _ => "[unknown type]".to_string(),
     }
 }
 
@@ -195,19 +201,20 @@ fn get_change_id(repo: &Repository, sha: &str) -> Option<String> {
 
 /// Format seconds-since-epoch as a human-readable relative time string.
 fn format_relative_time(epoch: i64) -> String {
-    let now = Utc::now().timestamp();
+    let now = OffsetDateTime::now_utc().unix_timestamp();
     let diff = now - epoch;
 
     if diff < 0 {
         return "in the future".to_string();
     }
 
-    let minutes = diff / 60;
-    let hours = diff / 3600;
-    let days = diff / 86400;
-    let weeks = diff / 604800;
-    let months = diff / 2592000;
-    let years = diff / 31536000;
+    let dur = time::Duration::seconds(diff);
+    let minutes = dur.whole_minutes();
+    let hours = dur.whole_hours();
+    let days = dur.whole_days();
+    let weeks = days / 7;
+    let months = days / 30;
+    let years = days / 365;
 
     if diff < 60 {
         format!("{diff}s ago")

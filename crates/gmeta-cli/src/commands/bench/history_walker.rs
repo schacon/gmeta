@@ -557,7 +557,10 @@ pub fn run(n_commits: usize) -> Result<()> {
     let mut rng: u64 = 0xdeadbeef_cafebabe;
     let gen = generate_history(&repo, n_commits, &mut rng)?;
 
-    let tip_oid = *gen.commit_chain.last().unwrap();
+    let tip_oid = *gen
+        .commit_chain
+        .last()
+        .ok_or_else(|| anyhow::anyhow!("commit chain is empty after generation"))?;
 
     println!(
         "\n{}generation complete{} in {}{}{}",

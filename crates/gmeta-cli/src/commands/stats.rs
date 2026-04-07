@@ -109,6 +109,7 @@ fn group_keys_by_integer_pattern(keys: &BTreeMap<String, u64>) -> BTreeMap<Strin
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

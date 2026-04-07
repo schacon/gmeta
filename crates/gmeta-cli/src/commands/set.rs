@@ -18,7 +18,7 @@ fn print_result(action: &str, key: &str, target: &Target, json: bool) {
             "target_type": target.type_str(),
             "target_value": target.value.as_deref().unwrap_or(""),
         });
-        println!("{}", serde_json::to_string(&json_obj).unwrap());
+        println!("{}", serde_json::to_string(&json_obj).unwrap_or_default());
     } else {
         println!("{} key {} for {}", action, key, target_str);
     }
@@ -80,6 +80,7 @@ pub fn run(
                 let values: Vec<String> = serde_json::from_str(&raw_value)?;
                 serde_json::to_string(&values)?
             }
+            _ => bail!("unsupported value type"),
         };
 
         ctx.db.set(

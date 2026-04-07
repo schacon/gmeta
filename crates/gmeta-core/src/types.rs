@@ -1,6 +1,8 @@
 use anyhow::{bail, Result};
 use sha1::{Digest, Sha1};
 
+/// The kind of object a metadata entry is attached to.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TargetType {
     Commit,
@@ -44,6 +46,7 @@ impl TargetType {
     }
 }
 
+/// A resolved metadata target consisting of a type and an optional value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Target {
     pub target_type: TargetType,
@@ -147,6 +150,8 @@ impl Target {
     }
 }
 
+/// The storage type of a metadata value.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueType {
     String,
@@ -174,6 +179,7 @@ impl ValueType {
 }
 
 /// Supported import source formats.
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportFormat {
     /// Import the entire git history.
@@ -230,6 +236,7 @@ fn escape_path_target_segment(segment: &str) -> String {
     }
 }
 
+/// Encode a path target value by escaping reserved segments for safe tree storage.
 pub fn encode_path_target_value(value: &str) -> String {
     value
         .split('/')
@@ -238,6 +245,7 @@ pub fn encode_path_target_value(value: &str) -> String {
         .join("/")
 }
 
+/// Decode escaped path target segments back into a slash-separated path string.
 pub fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
     if segments.is_empty() {
         bail!("path target must include at least one segment");
@@ -258,6 +266,7 @@ pub fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
     Ok(decoded)
 }
 
+/// Compute a deterministic set member ID by hashing the value as a git blob.
 pub fn set_member_id(value: &str) -> String {
     let header = format!("blob {}\0", value.len());
     let mut hasher = Sha1::new();
@@ -350,11 +359,13 @@ pub fn build_tombstone_tree_path(target: &Target, key: &str) -> Result<String> {
     ))
 }
 
+/// Build the set directory path for a key.
 pub fn build_set_tree_dir_path(target: &Target, key: &str) -> Result<String> {
     let key_path = build_key_tree_path(target, key)?;
     Ok(format!("{}/{}", key_path, SET_VALUE_DIR))
 }
 
+/// Build the tombstone path for a specific list entry.
 pub fn build_list_entry_tombstone_tree_path(
     target: &Target,
     key: &str,
@@ -367,6 +378,7 @@ pub fn build_list_entry_tombstone_tree_path(
     ))
 }
 
+/// Build the tombstone path for a specific set member.
 pub fn build_set_member_tombstone_tree_path(
     target: &Target,
     key: &str,
@@ -377,6 +389,7 @@ pub fn build_set_member_tombstone_tree_path(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 

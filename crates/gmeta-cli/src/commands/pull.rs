@@ -367,6 +367,7 @@ fn count_commits_between(repo: &git2::Repository, old: git2::Oid, new: git2::Oid
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
