@@ -1,8 +1,5 @@
 use anyhow::{bail, Result};
-use gix::prelude::ObjectIdExt;
-use gix::refs::transaction::PreviousValue;
 
-use crate::commands::{materialize, serialize};
 use crate::context::CommandContext;
 use gmeta_core::git_utils;
 
@@ -172,167 +169,52 @@ const MAX_RETRIES: u32 = 5;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.session.repo();
-    let ns = ctx.session.namespace();
-
-    // Resolve which remote to push to
-    let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
-    let local_ref = ctx.session.local_ref();
-    let remote_refspec = format!("refs/{}/main", ns);
+    let resolved_remote = git_utils::resolve_meta_remote(ctx.session.repo(), remote)?;
 
     if verbose {
-        eprintln!("[verbose] remote: {}", remote_name);
+        let ns = ctx.session.namespace();
+        let local_ref = ctx.session.local_ref();
+        let remote_refspec = format!("refs/{}/main", ns);
+        eprintln!("[verbose] remote: {}", resolved_remote);
         eprintln!("[verbose] local ref: {}", local_ref);
         eprintln!("[verbose] remote refspec: {}", remote_refspec);
     }
-
-    // Serialize local metadata to the local ref
-    eprintln!("Serializing local metadata...");
-    serialize::run(verbose)?;
-
-    // Verify we have something to push
-    if repo.find_reference(&local_ref).is_err() {
-        bail!("nothing to push (no local metadata ref)");
-    }
-
-    // Check if local ref already matches the remote ref (nothing new to push)
-    let remote_tracking_ref = format!("refs/{}/remotes/main", ns);
-    let local_oid = repo
-        .find_reference(&local_ref)
-        .ok()
-        .and_then(|r| r.into_fully_peeled_id().ok())
-        .map(|id| id.detach());
-    let remote_oid = repo
-        .find_reference(&remote_tracking_ref)
-        .ok()
-        .and_then(|r| r.into_fully_peeled_id().ok())
-        .map(|id| id.detach());
-
-    if let (Some(local), Some(remote)) = (local_oid, remote_oid) {
-        if local == remote {
-            println!("Everything up-to-date");
-            return Ok(());
-        }
-    }
-
-    // Try push with retry loop for non-fast-forward failures
-    let push_refspec = format!("{}:{}", local_ref, remote_refspec);
 
     for attempt in 1..=MAX_RETRIES {
         if verbose {
             eprintln!("[verbose] push attempt {}/{}", attempt, MAX_RETRIES);
         }
 
-        eprintln!("Pushing to {}...", remote_name);
-        let result = git_utils::run_git(repo, &["push", &remote_name, &push_refspec]);
+        eprintln!("Pushing to {}...", resolved_remote);
+        let output = ctx.session.push_once(remote)?;
 
-        match result {
-            Ok(_) => {
-                println!("Pushed metadata to {} ({})", remote_name, remote_refspec);
-                return Ok(());
-            }
-            Err(e) => {
-                let err_msg = e.to_string();
-                let is_non_ff = err_msg.contains("non-fast-forward")
-                    || err_msg.contains("rejected")
-                    || err_msg.contains("fetch first");
-
-                if !is_non_ff || attempt == MAX_RETRIES {
-                    bail!("push failed: {}", err_msg);
-                }
-
-                eprintln!(
-                    "Push rejected (remote has new data), fetching and merging (attempt {}/{})...",
-                    attempt, MAX_RETRIES
+        if output.success {
+            if output.up_to_date {
+                println!("Everything up-to-date");
+            } else {
+                println!(
+                    "Pushed metadata to {} ({})",
+                    output.remote_name, output.remote_ref
                 );
-
-                // Fetch latest remote data
-                let fetch_refspec = format!("{}:refs/{}/remotes/main", remote_refspec, ns);
-                git_utils::run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
-
-                // Hydrate tip tree blobs so gix can read them
-                let short_ref = format!("{}/remotes/main", ns);
-                git_utils::hydrate_tip_blobs(repo, &remote_name, &short_ref)?;
-
-                // Materialize the remote data (merge into local DB)
-                materialize::run(None, false, verbose)?;
-
-                // Re-serialize with merged data
-                eprintln!("Re-serializing after merge...");
-                serialize::run(verbose)?;
-
-                // Rewrite local ref as a single commit on top of the remote tip.
-                // This avoids merge commits in the pushed history — the spec
-                // requires that push always produces a single fast-forward commit.
-                rebase_local_on_remote(repo, &local_ref, &remote_tracking_ref, verbose)?;
             }
+            return Ok(());
+        }
+
+        if !output.non_fast_forward || attempt == MAX_RETRIES {
+            bail!("push failed");
+        }
+
+        eprintln!(
+            "Push rejected (remote has new data), fetching and merging (attempt {}/{})...",
+            attempt, MAX_RETRIES
+        );
+
+        ctx.session.resolve_push_conflict(remote, ctx.timestamp)?;
+
+        if verbose {
+            eprintln!("[verbose] conflict resolved, retrying push");
         }
     }
 
     bail!("push failed after {} attempts", MAX_RETRIES);
-}
-
-/// Rewrite the local ref as a single non-merge commit whose parent is the
-/// remote tip and whose tree is the current local ref's tree. This ensures
-/// the pushed history is always a clean fast-forward with no merge commits.
-fn rebase_local_on_remote(
-    repo: &gix::Repository,
-    local_ref: &str,
-    remote_ref: &str,
-    verbose: bool,
-) -> anyhow::Result<()> {
-    let local_ref_obj = repo.find_reference(local_ref)?;
-    let local_oid = local_ref_obj.into_fully_peeled_id()?.detach();
-    let local_commit_obj = local_oid.attach(repo).object()?.into_commit();
-    let local_decoded = local_commit_obj.decode()?;
-
-    let remote_ref_obj = repo.find_reference(remote_ref)?;
-    let remote_oid = remote_ref_obj.into_fully_peeled_id()?.detach();
-
-    // If the local commit is already a single-parent child of remote, nothing to do
-    let parent_ids: Vec<gix::ObjectId> = local_decoded.parents().collect();
-    if parent_ids.len() == 1 && parent_ids[0] == remote_oid {
-        return Ok(());
-    }
-
-    let tree_id = local_decoded.tree();
-    let message = local_decoded.message.to_owned();
-    let author_ref = local_decoded.author().map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    let commit = gix::objs::Commit {
-        message,
-        tree: tree_id,
-        author: gix::actor::Signature {
-            name: author_ref.name.into(),
-            email: author_ref.email.into(),
-            time: author_ref.time().map_err(|e| anyhow::anyhow!("{e}"))?,
-        },
-        committer: gix::actor::Signature {
-            name: author_ref.name.into(),
-            email: author_ref.email.into(),
-            time: author_ref.time().map_err(|e| anyhow::anyhow!("{e}"))?,
-        },
-        encoding: None,
-        parents: vec![remote_oid].into(),
-        extra_headers: Default::default(),
-    };
-
-    let new_oid = repo.write_object(&commit)?.detach();
-    repo.reference(
-        local_ref,
-        new_oid,
-        PreviousValue::Any,
-        "gmeta: rebase for push",
-    )?;
-
-    if verbose {
-        eprintln!(
-            "[verbose] rebased local ref onto remote tip: {} -> {} (parent: {})",
-            &local_oid.to_string()[..8],
-            &new_oid.to_string()[..8],
-            &remote_oid.to_string()[..8],
-        );
-    }
-
-    Ok(())
 }

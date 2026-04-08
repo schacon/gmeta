@@ -167,4 +167,62 @@ impl Session {
     ) -> crate::error::Result<crate::materialize::MaterializeOutput> {
         crate::materialize::run(self, remote, now)
     }
+
+    /// Pull metadata from remote: fetch, materialize, and index history.
+    ///
+    /// Resolves the remote, fetches the metadata ref, hydrates tip blobs,
+    /// serializes local state for merge, materializes remote changes, and
+    /// indexes historical keys for lazy loading.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name to pull from. If `None`, the first
+    ///   configured metadata remote is used.
+    /// - `now`: the current timestamp in milliseconds since the Unix epoch,
+    ///   used for database writes during materialization.
+    ///
+    /// See [`crate::pull::run()`] for full details.
+    pub fn pull(
+        &self,
+        remote: Option<&str>,
+        now: i64,
+    ) -> crate::error::Result<crate::pull::PullOutput> {
+        crate::pull::run(self, remote, now)
+    }
+
+    /// Serialize and attempt a single push to the remote.
+    ///
+    /// Returns the result of the push attempt. On non-fast-forward failure,
+    /// the caller is responsible for calling [`resolve_push_conflict()`](Self::resolve_push_conflict)
+    /// and retrying.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name to push to. If `None`, the first
+    ///   configured metadata remote is used.
+    ///
+    /// See [`crate::push::push_once()`] for full details.
+    pub fn push_once(&self, remote: Option<&str>) -> crate::error::Result<crate::push::PushOutput> {
+        crate::push::push_once(self, remote)
+    }
+
+    /// After a failed push, fetch remote changes, materialize, re-serialize,
+    /// and rebase local ref for clean fast-forward.
+    ///
+    /// Call this between push retries. See [`crate::push::resolve_push_conflict()`]
+    /// for full details.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name. If `None`, the first configured
+    ///   metadata remote is used.
+    /// - `now`: the current timestamp in milliseconds since the Unix epoch,
+    ///   used for database writes during materialization.
+    pub fn resolve_push_conflict(
+        &self,
+        remote: Option<&str>,
+        now: i64,
+    ) -> crate::error::Result<()> {
+        crate::push::resolve_push_conflict(self, remote, now)
+    }
 }

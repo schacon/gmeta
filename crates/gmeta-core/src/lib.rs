@@ -17,6 +17,10 @@ pub mod list_value;
 pub mod materialize;
 /// Auto-prune rule evaluation and tree-size computation.
 pub mod prune;
+/// Pull remote metadata: fetch, materialize, and index history.
+pub mod pull;
+/// Push local metadata to a remote: serialize, push, and conflict resolution.
+pub mod push;
 /// Serialize local metadata to Git tree(s) and commit(s).
 pub mod serialize;
 /// The library entry point: a session combining a git repo with a metadata store.
@@ -32,6 +36,8 @@ pub mod types;
 pub use db::{Batch, Store, TargetHandle};
 pub use error::{Error, Result};
 pub use materialize::{MaterializeOutput, MaterializeRefResult, MaterializeStrategy};
+pub use pull::PullOutput;
+pub use push::PushOutput;
 pub use serialize::SerializeOutput;
 pub use session::Session;
 pub use types::{MetaValue, Target, TargetType, ValueType};
