@@ -1,8 +1,21 @@
+use time::OffsetDateTime;
+
 /// A session combining a Git repository with its gmeta metadata store.
 ///
 /// This is the primary entry point for gmeta-core consumers. It owns the
 /// `gix::Repository`, the SQLite [`Store`](crate::db::Store), and resolved
 /// configuration values (namespace, user email).
+///
+/// # Timestamps
+///
+/// By default, workflow operations use the wall clock for timestamps.
+/// For deterministic tests, call [`with_timestamp()`](Self::with_timestamp)
+/// to pin all operations to a fixed time:
+///
+/// ```ignore
+/// let session = Session::discover()?.with_timestamp(1_700_000_000_000);
+/// session.serialize()?; // uses the fixed timestamp
+/// ```
 ///
 /// # Example
 ///
@@ -20,6 +33,7 @@ pub struct Session {
     namespace: String,
     email: String,
     name: String,
+    timestamp_override: Option<i64>,
 }
 
 impl Session {
@@ -42,12 +56,34 @@ impl Session {
         Self::from_repo(repo)
     }
 
+    /// Pin all workflow operations to a fixed timestamp.
+    ///
+    /// The value is milliseconds since the Unix epoch. When set,
+    /// [`now()`](Self::now) returns this value instead of the wall clock.
+    /// Useful for deterministic tests and replay scenarios.
+    #[must_use]
+    pub fn with_timestamp(mut self, timestamp_ms: i64) -> Self {
+        self.timestamp_override = Some(timestamp_ms);
+        self
+    }
+
+    /// The current timestamp in milliseconds since the Unix epoch.
+    ///
+    /// Returns the fixed timestamp if [`with_timestamp()`](Self::with_timestamp)
+    /// was called, otherwise the wall clock.
+    pub(crate) fn now(&self) -> i64 {
+        self.timestamp_override
+            .unwrap_or_else(|| OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000)
+    }
+
     fn from_repo(repo: gix::Repository) -> crate::error::Result<Self> {
         let db_path = crate::git_utils::db_path(&repo)?;
         let email = crate::git_utils::get_email(&repo)?;
         let name = crate::git_utils::get_name(&repo)?;
         let namespace = crate::git_utils::get_namespace(&repo)?;
-        let store = crate::db::Store::open(&db_path)?;
+        let store_repo =
+            gix::open(repo.git_dir()).map_err(|e| crate::error::Error::Other(format!("{e}")))?;
+        let store = crate::db::Store::open_with_repo(&db_path, store_repo)?;
 
         Ok(Self {
             repo,
@@ -55,17 +91,13 @@ impl Session {
             namespace,
             email,
             name,
+            timestamp_override: None,
         })
     }
 
     /// Access the metadata store.
     pub fn store(&self) -> &crate::db::Store {
         &self.store
-    }
-
-    /// Access the metadata store mutably.
-    pub fn store_mut(&mut self) -> &mut crate::db::Store {
-        &mut self.store
     }
 
     /// Access the underlying `gix` repository.
@@ -102,6 +134,22 @@ impl Session {
     /// A ref path for a named destination (e.g. `refs/meta/local/{destination}`).
     pub fn destination_ref(&self, destination: &str) -> String {
         format!("refs/{}/local/{}", self.namespace, destination)
+    }
+
+    /// Create a scoped handle for operations on a specific target.
+    ///
+    /// The handle carries the session's email and timestamp, so write
+    /// operations don't need them as parameters:
+    ///
+    /// ```ignore
+    /// let handle = session.target(&Target::parse("commit:abc123")?);
+    /// handle.set_value("key", &MetaValue::String("value".into()))?;
+    /// ```
+    pub fn target(
+        &self,
+        target: &crate::types::Target,
+    ) -> crate::session_handle::SessionTargetHandle<'_> {
+        crate::session_handle::SessionTargetHandle::new(self, target.clone())
     }
 
     /// Resolve a target's partial commit SHA using this session's repository.
@@ -141,10 +189,8 @@ impl Session {
     /// Determines incremental vs full mode automatically. Applies filter
     /// routing and pruning rules. Updates local refs and the materialization
     /// timestamp.
-    ///
-    /// See [`crate::serialize::run()`] for full details.
     pub fn serialize(&self) -> crate::error::Result<crate::serialize::SerializeOutput> {
-        crate::serialize::run(self)
+        crate::serialize::run(self, self.now())
     }
 
     /// Materialize remote metadata into the local store.
@@ -156,16 +202,11 @@ impl Session {
     ///
     /// - `remote`: optional remote name filter. If `None`, all remotes are
     ///   materialized.
-    /// - `now`: the current timestamp in milliseconds since the Unix epoch,
-    ///   used for database writes and the `last_materialized` marker.
-    ///
-    /// See [`crate::materialize::run()`] for full details.
     pub fn materialize(
         &self,
         remote: Option<&str>,
-        now: i64,
     ) -> crate::error::Result<crate::materialize::MaterializeOutput> {
-        crate::materialize::run(self, remote, now)
+        crate::materialize::run(self, remote, self.now())
     }
 
     /// Pull metadata from remote: fetch, materialize, and index history.
@@ -178,16 +219,8 @@ impl Session {
     ///
     /// - `remote`: optional remote name to pull from. If `None`, the first
     ///   configured metadata remote is used.
-    /// - `now`: the current timestamp in milliseconds since the Unix epoch,
-    ///   used for database writes during materialization.
-    ///
-    /// See [`crate::pull::run()`] for full details.
-    pub fn pull(
-        &self,
-        remote: Option<&str>,
-        now: i64,
-    ) -> crate::error::Result<crate::pull::PullOutput> {
-        crate::pull::run(self, remote, now)
+    pub fn pull(&self, remote: Option<&str>) -> crate::error::Result<crate::pull::PullOutput> {
+        crate::pull::run(self, remote, self.now())
     }
 
     /// Serialize and attempt a single push to the remote.
@@ -200,29 +233,20 @@ impl Session {
     ///
     /// - `remote`: optional remote name to push to. If `None`, the first
     ///   configured metadata remote is used.
-    ///
-    /// See [`crate::push::push_once()`] for full details.
     pub fn push_once(&self, remote: Option<&str>) -> crate::error::Result<crate::push::PushOutput> {
-        crate::push::push_once(self, remote)
+        crate::push::push_once(self, remote, self.now())
     }
 
     /// After a failed push, fetch remote changes, materialize, re-serialize,
     /// and rebase local ref for clean fast-forward.
     ///
-    /// Call this between push retries. See [`crate::push::resolve_push_conflict()`]
-    /// for full details.
+    /// Call this between push retries.
     ///
     /// # Parameters
     ///
     /// - `remote`: optional remote name. If `None`, the first configured
     ///   metadata remote is used.
-    /// - `now`: the current timestamp in milliseconds since the Unix epoch,
-    ///   used for database writes during materialization.
-    pub fn resolve_push_conflict(
-        &self,
-        remote: Option<&str>,
-        now: i64,
-    ) -> crate::error::Result<()> {
-        crate::push::resolve_push_conflict(self, remote, now)
+    pub fn resolve_push_conflict(&self, remote: Option<&str>) -> crate::error::Result<()> {
+        crate::push::resolve_push_conflict(self, remote, self.now())
     }
 }

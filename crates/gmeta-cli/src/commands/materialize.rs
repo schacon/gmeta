@@ -37,8 +37,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         return run_dry_run(&ctx, remote, verbose);
     }
 
-    let now = ctx.timestamp;
-    let output = ctx.session.materialize(remote, now)?;
+    let output = ctx.session.materialize(remote)?;
 
     if output.results.is_empty() {
         println!("no remote metadata refs found");

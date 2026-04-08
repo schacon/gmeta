@@ -45,6 +45,8 @@ pub struct PushOutput {
 /// - `session`: the gmeta session providing the repository, store, and config.
 /// - `remote`: optional remote name to push to. If `None`, the first
 ///   configured metadata remote is used.
+/// - `now`: the current timestamp in milliseconds since the Unix epoch,
+///   used for the commit signature during serialization.
 ///
 /// # Returns
 ///
@@ -57,7 +59,7 @@ pub struct PushOutput {
 /// Returns an error if serialization fails, the local ref cannot be read,
 /// or the push fails for a reason other than non-fast-forward rejection
 /// (in which case `success` is `false` and `non_fast_forward` is `false`).
-pub fn push_once(session: &Session, remote: Option<&str>) -> Result<PushOutput> {
+pub fn push_once(session: &Session, remote: Option<&str>, now: i64) -> Result<PushOutput> {
     let repo = session.repo();
     let ns = session.namespace();
 
@@ -66,7 +68,7 @@ pub fn push_once(session: &Session, remote: Option<&str>) -> Result<PushOutput> 
     let remote_refspec = format!("refs/{}/main", ns);
 
     // Serialize local metadata to the local ref
-    crate::serialize::run(session)?;
+    crate::serialize::run(session, now)?;
 
     // Verify we have something to push
     if repo.find_reference(&local_ref).is_err() {
@@ -181,7 +183,7 @@ pub fn resolve_push_conflict(session: &Session, remote: Option<&str>, now: i64) 
     crate::materialize::run(session, None, now)?;
 
     // Re-serialize with merged data
-    crate::serialize::run(session)?;
+    crate::serialize::run(session, now)?;
 
     // Rewrite local ref as a single commit on top of the remote tip.
     // This avoids merge commits in the pushed history — the spec

@@ -14,7 +14,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         eprintln!("[verbose] fetch refspec: {}", fetch_refspec);
     }
 
-    let output = ctx.session.pull(remote, ctx.timestamp)?;
+    let output = ctx.session.pull(remote)?;
 
     if !output.materialized {
         println!("Already up-to-date.");

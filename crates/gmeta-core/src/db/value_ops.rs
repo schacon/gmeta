@@ -2,7 +2,6 @@ use crate::error::Result;
 use crate::list_value::{encode_entries, parse_entries};
 use crate::types::{MetaValue, Target, ValueType};
 
-use super::target_handle::TargetHandle;
 use super::Store;
 
 impl Store {
@@ -106,25 +105,6 @@ impl Store {
             },
         }
     }
-
-    /// Create a scoped handle for operations on a specific target.
-    ///
-    /// This reduces parameter noise when performing multiple operations
-    /// on the same target.
-    ///
-    /// # Parameters
-    ///
-    /// - `target`: the target to scope the handle to (cloned internally)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let handle = store.target(&Target::parse("commit:abc123")?);
-    /// handle.set_value("key", &MetaValue::String("val".into()), email, ts)?;
-    /// ```
-    pub fn target(&self, target: &Target) -> TargetHandle<'_> {
-        TargetHandle::new(self, target.clone())
-    }
 }
 
 #[cfg(test)]
@@ -218,67 +198,123 @@ mod tests {
     }
 
     #[test]
-    fn test_target_handle_get_set() {
+    fn test_set_value_and_get_via_store() {
         let db = Store::open_in_memory().unwrap();
         let target = Target::parse("commit:abc123").unwrap();
-        let handle = db.target(&target);
 
-        handle
-            .set_value("key", &MetaValue::String("val".into()), "a@b.com", 1000)
-            .unwrap();
-        let result = handle.get_value("key").unwrap();
+        db.set_value(
+            &target,
+            "key",
+            &MetaValue::String("val".into()),
+            "a@b.com",
+            1000,
+        )
+        .unwrap();
+        let result = db.get_value(&target, "key").unwrap();
         assert_eq!(result, Some(MetaValue::String("val".to_string())));
     }
 
     #[test]
-    fn test_target_handle_remove() {
+    fn test_remove_via_store() {
         let db = Store::open_in_memory().unwrap();
         let target = Target::parse("commit:abc123").unwrap();
-        let handle = db.target(&target);
 
-        handle
-            .set_value("key", &MetaValue::String("val".into()), "a@b.com", 1000)
-            .unwrap();
-        assert!(handle.remove("key", "a@b.com", 2000).unwrap());
-        assert_eq!(handle.get_value("key").unwrap(), None);
+        db.set_value(
+            &target,
+            "key",
+            &MetaValue::String("val".into()),
+            "a@b.com",
+            1000,
+        )
+        .unwrap();
+        assert!(db
+            .remove(
+                &target.target_type,
+                target.value_str(),
+                "key",
+                "a@b.com",
+                2000
+            )
+            .unwrap());
+        assert_eq!(db.get_value(&target, "key").unwrap(), None);
     }
 
     #[test]
-    fn test_target_handle_list_push_pop() {
+    fn test_list_push_pop_via_store() {
         let db = Store::open_in_memory().unwrap();
         let target = Target::parse("commit:abc123").unwrap();
-        let handle = db.target(&target);
 
-        handle.list_push("tags", "a", "a@b.com", 1000).unwrap();
-        handle.list_push("tags", "b", "a@b.com", 2000).unwrap();
-        handle.list_pop("tags", "b", "a@b.com", 3000).unwrap();
+        db.list_push(
+            &target.target_type,
+            target.value_str(),
+            "tags",
+            "a",
+            "a@b.com",
+            1000,
+        )
+        .unwrap();
+        db.list_push(
+            &target.target_type,
+            target.value_str(),
+            "tags",
+            "b",
+            "a@b.com",
+            2000,
+        )
+        .unwrap();
+        db.list_pop(
+            &target.target_type,
+            target.value_str(),
+            "tags",
+            "b",
+            "a@b.com",
+            3000,
+        )
+        .unwrap();
 
-        let entry = handle.get("tags").unwrap().unwrap();
-        let list = crate::list_value::list_values_from_json(&entry.value).unwrap();
-        assert_eq!(list, vec!["a"]);
+        let result = db.get_value(&target, "tags").unwrap().unwrap();
+        match result {
+            MetaValue::List(entries) => assert_eq!(entries.len(), 1),
+            _ => panic!("expected list"),
+        }
     }
 
     #[test]
-    fn test_target_handle_set_add_remove() {
+    fn test_set_add_remove_via_store() {
         let db = Store::open_in_memory().unwrap();
         let target = Target::parse("commit:abc123").unwrap();
-        let handle = db.target(&target);
 
-        handle.set_add("owners", "alice", "a@b.com", 1000).unwrap();
-        handle.set_add("owners", "bob", "a@b.com", 2000).unwrap();
-        handle.set_remove("owners", "bob", "a@b.com", 3000).unwrap();
+        db.set_add(
+            &target.target_type,
+            target.value_str(),
+            "owners",
+            "alice",
+            "a@b.com",
+            1000,
+        )
+        .unwrap();
+        db.set_add(
+            &target.target_type,
+            target.value_str(),
+            "owners",
+            "bob",
+            "a@b.com",
+            2000,
+        )
+        .unwrap();
+        db.set_remove(
+            &target.target_type,
+            target.value_str(),
+            "owners",
+            "bob",
+            "a@b.com",
+            3000,
+        )
+        .unwrap();
 
-        let result = handle.get_value("owners").unwrap().unwrap();
+        let result = db.get_value(&target, "owners").unwrap().unwrap();
         let mut expected = BTreeSet::new();
         expected.insert("alice".to_string());
         assert_eq!(result, MetaValue::Set(expected));
-    }
-
-    #[test]
-    fn test_target_handle_target_accessor() {
-        let target = Target::parse("commit:abc123").unwrap();
-        let db = Store::open_in_memory().unwrap();
-        let handle = db.target(&target);
-        assert_eq!(handle.target(), &target);
     }
 }

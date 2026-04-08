@@ -197,11 +197,14 @@ fn compute_tree_size_recursive(
 /// Parse a duration string like `"90d"`, `"6m"`, `"1y"` or an ISO date
 /// into a cutoff timestamp in milliseconds since the Unix epoch.
 ///
+/// # Parameters
+/// - `since`: the duration or date string
+/// - `now_ms`: the current time in milliseconds since Unix epoch
+///
 /// # Errors
 ///
 /// Returns an error if the string cannot be parsed as a supported format.
-pub fn parse_since_to_cutoff_ms(since: &str) -> Result<i64> {
-    let now_ms = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
+pub fn parse_since_to_cutoff_ms(since: &str, now_ms: i64) -> Result<i64> {
     let s = since.trim().to_lowercase();
     if let Some(num_str) = s.strip_suffix('d') {
         let days: i64 = num_str

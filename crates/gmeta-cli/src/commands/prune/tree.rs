@@ -38,7 +38,8 @@ pub fn run(dry_run: bool) -> Result<()> {
         }
     };
 
-    let cutoff_ms = parse_since_to_cutoff_ms(&since)?;
+    let now_ms = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
+    let cutoff_ms = parse_since_to_cutoff_ms(&since, now_ms)?;
     let cutoff_date =
         time::OffsetDateTime::from_unix_timestamp_nanos(cutoff_ms as i128 * 1_000_000)
             .ok()

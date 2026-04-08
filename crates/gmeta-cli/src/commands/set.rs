@@ -3,8 +3,8 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::list_value::{encode_entries, parse_entries};
-use gmeta_core::types::{validate_key, Target, ValueType, GIT_REF_THRESHOLD};
+use gmeta_core::list_value::parse_entries;
+use gmeta_core::types::{validate_key, MetaValue, Target, ValueType, GIT_REF_THRESHOLD};
 
 fn print_result(action: &str, key: &str, target: &Target, json: bool) {
     let target_str = match &target.value {
@@ -56,7 +56,11 @@ pub fn run(
         from_file && matches!(value_type, ValueType::String) && raw_value.len() > GIT_REF_THRESHOLD;
 
     if use_git_ref {
+        // Git-ref path: store large file as a blob, then record the OID.
+        // This is a power-user path that bypasses the MetaValue API.
         let repo = ctx.session.repo();
+        let email = ctx.session.email().to_string();
+        let ts = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
         let blob_oid: gix::ObjectId = repo.write_blob(raw_value.as_bytes())?.into();
         ctx.session.store().set_with_git_ref(
             None,
@@ -65,33 +69,25 @@ pub fn run(
             key,
             &blob_oid.to_string(),
             &value_type,
-            ctx.session.email(),
-            ctx.timestamp,
+            &email,
+            ts,
             true,
         )?;
     } else {
-        let stored_value = match value_type {
-            ValueType::String => serde_json::to_string(&raw_value)?,
+        let handle = ctx.session.target(&target);
+        let meta_value = match value_type {
+            ValueType::String => MetaValue::String(raw_value),
             ValueType::List => {
                 let entries = parse_entries(&raw_value)?;
-                encode_entries(&entries)?
+                MetaValue::List(entries)
             }
             ValueType::Set => {
                 let values: Vec<String> = serde_json::from_str(&raw_value)?;
-                serde_json::to_string(&values)?
+                MetaValue::Set(values.into_iter().collect())
             }
             _ => bail!("unsupported value type"),
         };
-
-        ctx.session.store().set(
-            &target.target_type,
-            target.value_str(),
-            key,
-            &stored_value,
-            &value_type,
-            ctx.session.email(),
-            ctx.timestamp,
-        )?;
+        handle.set_value(key, &meta_value)?;
     }
 
     print_result("set", key, &target, json);
@@ -111,14 +107,7 @@ pub fn run_add(
     let ctx = CommandContext::open(timestamp)?;
     ctx.session.resolve_target(&mut target)?;
 
-    ctx.session.store().set_add(
-        &target.target_type,
-        target.value_str(),
-        key,
-        value,
-        ctx.session.email(),
-        ctx.timestamp,
-    )?;
+    ctx.session.target(&target).set_add(key, value)?;
     print_result("added", key, &target, json);
     Ok(())
 }
@@ -136,14 +125,7 @@ pub fn run_rm(
     let ctx = CommandContext::open(timestamp)?;
     ctx.session.resolve_target(&mut target)?;
 
-    ctx.session.store().set_remove(
-        &target.target_type,
-        target.value_str(),
-        key,
-        value,
-        ctx.session.email(),
-        ctx.timestamp,
-    )?;
+    ctx.session.target(&target).set_remove(key, value)?;
     print_result("removed", key, &target, json);
     Ok(())
 }

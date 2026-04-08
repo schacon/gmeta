@@ -323,7 +323,7 @@ fn materialize_merge(
     let sig = gix::actor::Signature {
         name: name.into(),
         email: email.into(),
-        time: gix::date::Time::now_local_or_utc(),
+        time: gix::date::Time::new(now / 1000, 0),
     };
 
     let commit = gix::objs::Commit {

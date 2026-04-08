@@ -209,7 +209,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
             attempt, MAX_RETRIES
         );
 
-        ctx.session.resolve_push_conflict(remote, ctx.timestamp)?;
+        ctx.session.resolve_push_conflict(remote)?;
 
         if verbose {
             eprintln!("[verbose] conflict resolved, retrying push");

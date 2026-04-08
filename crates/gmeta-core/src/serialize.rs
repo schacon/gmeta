@@ -12,7 +12,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 use gix::refs::transaction::PreviousValue;
-use time::OffsetDateTime;
 
 use crate::db::types::SerializableEntry;
 use crate::db::Store;
@@ -50,6 +49,8 @@ pub struct SerializeOutput {
 /// # Parameters
 ///
 /// - `session`: the gmeta session providing the repository, store, and config.
+/// - `now`: the current timestamp in milliseconds since the Unix epoch,
+///   used for the commit signature and the `last_materialized` marker.
 ///
 /// # Returns
 ///
@@ -59,7 +60,7 @@ pub struct SerializeOutput {
 /// # Errors
 ///
 /// Returns an error if database reads, Git object writes, or ref updates fail.
-pub fn run(session: &Session) -> Result<SerializeOutput> {
+pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     let repo = session.repo();
     let local_ref_name = session.local_ref();
     let last_materialized = session.store().get_last_materialized()?;
@@ -188,7 +189,7 @@ pub fn run(session: &Session) -> Result<SerializeOutput> {
     let prune_rules = prune::read_prune_rules(session.store())?;
     let prune_cutoff_ms = prune_since
         .as_deref()
-        .map(prune::parse_since_to_cutoff_ms)
+        .map(|s| prune::parse_since_to_cutoff_ms(s, now))
         .transpose()?;
     let mut pruned_count = 0u64;
     let metadata_entries = if let Some(cutoff) = prune_cutoff_ms {
@@ -277,7 +278,7 @@ pub fn run(session: &Session) -> Result<SerializeOutput> {
     let sig = gix::actor::Signature {
         name: name.into(),
         email: email.into(),
-        time: gix::date::Time::now_local_or_utc(),
+        time: gix::date::Time::new(now / 1000, 0),
     };
 
     let mut refs_written = Vec::new();
@@ -345,7 +346,7 @@ pub fn run(session: &Session) -> Result<SerializeOutput> {
             if let Some(ref prune_rules_val) = prune_rules {
                 if prune::should_prune(repo, tree_oid, prune_rules_val)? {
                     let prune_tree_oid =
-                        prune_tree(repo, tree_oid, prune_rules_val, session.store())?;
+                        prune_tree(repo, tree_oid, prune_rules_val, session.store(), now)?;
 
                     if prune_tree_oid != tree_oid {
                         let prune_parent_oid = repo
@@ -397,7 +398,6 @@ pub fn run(session: &Session) -> Result<SerializeOutput> {
         }
     }
 
-    let now = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
     session.store().set_last_materialized(now)?;
 
     Ok(SerializeOutput {
@@ -774,8 +774,9 @@ pub fn prune_tree(
     tree_oid: gix::ObjectId,
     rules: &PruneRules,
     db: &Store,
+    now_ms: i64,
 ) -> Result<gix::ObjectId> {
-    let cutoff_ms = prune::parse_since_to_cutoff_ms(&rules.since)?;
+    let cutoff_ms = prune::parse_since_to_cutoff_ms(&rules.since, now_ms)?;
     let min_size = rules.min_size.unwrap_or(0);
 
     let tree = tree_oid

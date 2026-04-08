@@ -8,15 +8,12 @@ mod schema;
 mod sets;
 mod stats;
 mod sync;
-/// Target-scoped handle for reducing parameter noise.
-pub mod target_handle;
 mod tombstones;
 /// Named return types for database query methods.
 pub mod types;
 mod value_ops;
 
 pub use batch::Batch;
-pub use target_handle::TargetHandle;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -92,11 +89,6 @@ impl Store {
         let db = Store { conn, repo: None };
         schema::run_migrations(&db.conn)?;
         Ok(db)
-    }
-
-    /// Attach a git repository for resolving blob-ref values during reads.
-    pub fn set_repo(&mut self, repo: gix::Repository) {
-        self.repo = Some(repo);
     }
 
     /// Create a nestable savepoint on the connection.
