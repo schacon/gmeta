@@ -29,12 +29,12 @@ pub struct FilterRule {
     /// The action to take for matching keys.
     pub action: FilterAction,
     /// The segments that form the match pattern.
-    pub pattern: Vec<PatternSegment>,
+    pub(crate) pattern: Vec<PatternSegment>,
 }
 
 /// A single segment in a filter pattern.
 #[derive(Debug, Clone)]
-pub enum PatternSegment {
+pub(crate) enum PatternSegment {
     /// Matches exactly this literal segment.
     Literal(String),
     /// Matches one arbitrary segment.

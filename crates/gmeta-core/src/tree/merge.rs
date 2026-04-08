@@ -466,18 +466,7 @@ pub fn merge_list_tombstones(
 
 /// Resolve a conflict where both sides changed the same key.
 /// Lists union; all other direct conflicts prefer the local/ours side.
-///
-/// # Parameters
-///
-/// - `local`: the local value
-/// - `remote`: the remote value
-/// - `_local_timestamp`: local commit timestamp (reserved for future use)
-/// - `_remote_timestamp`: remote commit timestamp (reserved for future use)
-///
-/// # Returns
-///
-/// A tuple of `(resolved_value, resolution_strategy)`.
-pub fn resolve_conflict(
+fn resolve_conflict(
     local: &TreeValue,
     remote: &TreeValue,
     _local_timestamp: i64,

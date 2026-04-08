@@ -33,10 +33,6 @@ pub enum Error {
     #[error("unknown value type: {0}")]
     UnknownValueType(String),
 
-    /// Unsupported import format string.
-    #[error("unsupported import format: {0}")]
-    UnsupportedFormat(String),
-
     /// Metadata key does not exist for the given target.
     #[error("key '{key}' not found")]
     KeyNotFound {

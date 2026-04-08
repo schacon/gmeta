@@ -276,7 +276,7 @@ pub const SET_VALUE_DIR: &str = "__set";
 pub const TOMBSTONE_ROOT: &str = "__tombstones";
 
 /// Reserved filename for tombstone blobs.
-pub const TOMBSTONE_BLOB: &str = "__deleted";
+pub(crate) const TOMBSTONE_BLOB: &str = "__deleted";
 
 /// Reserved separator between a serialized path target and its key path.
 pub const PATH_TARGET_SEPARATOR: &str = "__target__";
@@ -298,7 +298,7 @@ fn escape_path_target_segment(segment: &str) -> String {
 }
 
 /// Encode a path target value by escaping reserved segments for safe tree storage.
-pub fn encode_path_target_value(value: &str) -> String {
+pub(crate) fn encode_path_target_value(value: &str) -> String {
     value
         .split('/')
         .map(escape_path_target_segment)
@@ -307,7 +307,7 @@ pub fn encode_path_target_value(value: &str) -> String {
 }
 
 /// Decode escaped path target segments back into a slash-separated path string.
-pub fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
+pub(crate) fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
     if segments.is_empty() {
         return Err(Error::InvalidTreePath(
             "path target must include at least one segment".into(),
@@ -382,12 +382,12 @@ pub fn validate_key(key: &str) -> Result<()> {
 
 /// Build the full tree path segments for a key under a target.
 /// Key is split by ':' into subtree segments.
-pub fn key_to_path_segments(key: &str) -> Vec<String> {
+pub(crate) fn key_to_path_segments(key: &str) -> Vec<String> {
     key.split(':').map(|s| s.to_string()).collect()
 }
 
 /// Decode raw key path segments back into `:`-namespaced key form.
-pub fn decode_key_path_segments(segments: &[&str]) -> Result<String> {
+pub(crate) fn decode_key_path_segments(segments: &[&str]) -> Result<String> {
     if segments.is_empty() {
         return Err(Error::InvalidKey(
             "key path must include at least one key segment".into(),
@@ -402,63 +402,11 @@ pub fn decode_key_path_segments(segments: &[&str]) -> Result<String> {
 }
 
 /// Build the common tree path prefix for any key.
-pub fn build_key_tree_path(target: &Target, key: &str) -> Result<String> {
+fn build_key_tree_path(target: &Target, key: &str) -> Result<String> {
     validate_key(key)?;
     let base = target.tree_base_path();
     let segments = key_to_path_segments(key).join("/");
     Ok(format!("{}/{}", base, segments))
-}
-
-/// Build the full tree path for a string value.
-pub fn build_tree_path(target: &Target, key: &str) -> Result<String> {
-    let key_path = build_key_tree_path(target, key)?;
-    Ok(format!("{}/{}", key_path, STRING_VALUE_BLOB))
-}
-
-/// Build the list directory path for a key.
-pub fn build_list_tree_dir_path(target: &Target, key: &str) -> Result<String> {
-    let key_path = build_key_tree_path(target, key)?;
-    Ok(format!("{}/{}", key_path, LIST_VALUE_DIR))
-}
-
-/// Build the tombstone blob path for a key.
-pub fn build_tombstone_tree_path(target: &Target, key: &str) -> Result<String> {
-    validate_key(key)?;
-    let base = target.tree_base_path();
-    let segments = key_to_path_segments(key).join("/");
-    Ok(format!(
-        "{}/{}/{}/{}",
-        base, TOMBSTONE_ROOT, segments, TOMBSTONE_BLOB
-    ))
-}
-
-/// Build the set directory path for a key.
-pub fn build_set_tree_dir_path(target: &Target, key: &str) -> Result<String> {
-    let key_path = build_key_tree_path(target, key)?;
-    Ok(format!("{}/{}", key_path, SET_VALUE_DIR))
-}
-
-/// Build the tombstone path for a specific list entry.
-pub fn build_list_entry_tombstone_tree_path(
-    target: &Target,
-    key: &str,
-    entry_name: &str,
-) -> Result<String> {
-    let key_path = build_key_tree_path(target, key)?;
-    Ok(format!(
-        "{}/{}/{}/{}",
-        key_path, LIST_VALUE_DIR, TOMBSTONE_ROOT, entry_name
-    ))
-}
-
-/// Build the tombstone path for a specific set member.
-pub fn build_set_member_tombstone_tree_path(
-    target: &Target,
-    key: &str,
-    member_id: &str,
-) -> Result<String> {
-    let key_path = build_key_tree_path(target, key)?;
-    Ok(format!("{}/{}/{}", key_path, TOMBSTONE_ROOT, member_id))
 }
 
 #[cfg(test)]
@@ -516,9 +464,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_tree_path() {
+    fn test_tree_path() {
         let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        let path = build_tree_path(&t, "agent:model").unwrap();
+        let path = t.tree_path("agent:model").unwrap();
         assert_eq!(
             path,
             "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/agent/model/__value"
@@ -605,9 +553,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_list_tree_dir_path() {
+    fn test_list_dir_path() {
         let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        let path = super::build_list_tree_dir_path(&t, "agent:chat").unwrap();
+        let path = t.list_dir_path("agent:chat").unwrap();
         assert_eq!(
             path,
             "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/agent/chat/__list"
@@ -615,9 +563,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_tombstone_tree_path() {
+    fn test_tombstone_path() {
         let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        let path = super::build_tombstone_tree_path(&t, "agent:chat").unwrap();
+        let path = t.tombstone_path("agent:chat").unwrap();
         assert_eq!(
             path,
             "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/__tombstones/agent/chat/__deleted"

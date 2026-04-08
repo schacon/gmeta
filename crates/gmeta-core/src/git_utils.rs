@@ -4,7 +4,7 @@ use std::process::Command;
 use crate::error::{Error, Result};
 
 /// Check if a tree entry name looks like a list entry (timestamp-hash format).
-pub fn is_list_entry_name(name: &str) -> bool {
+pub(crate) fn is_list_entry_name(name: &str) -> bool {
     // Format: {ms_epoch}-{first_5_sha256}
     if let Some((ts_part, hash_part)) = name.split_once('-') {
         ts_part.chars().all(|c| c.is_ascii_digit())

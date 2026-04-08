@@ -74,7 +74,7 @@ pub fn list_values_from_json(raw: &str) -> Result<Vec<String>> {
 }
 
 /// Ensure the proposed timestamp is strictly greater than any existing entry.
-pub fn ensure_unique_timestamp(mut timestamp: i64, entries: &[ListEntry]) -> i64 {
+pub(crate) fn ensure_unique_timestamp(mut timestamp: i64, entries: &[ListEntry]) -> i64 {
     if let Some(last) = entries.last() {
         if timestamp <= last.timestamp {
             timestamp = last.timestamp + 1;
@@ -89,7 +89,7 @@ pub fn make_entry_name(entry: &ListEntry) -> String {
 }
 
 /// Build a deterministic entry name from a timestamp and value content hash.
-pub fn make_entry_name_from_parts(timestamp: i64, value: &str) -> String {
+pub(crate) fn make_entry_name_from_parts(timestamp: i64, value: &str) -> String {
     let mut hasher = Sha1::new();
     hasher.update(value.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
