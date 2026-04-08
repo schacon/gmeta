@@ -44,7 +44,7 @@ pub struct Tombstone {
 }
 
 /// The fully parsed contents of a serialized gmeta Git tree.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ParsedTree {
     /// Metadata values keyed by `(target_type, target_value, key)`.
     pub values: BTreeMap<Key, TreeValue>,

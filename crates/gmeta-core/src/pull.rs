@@ -16,7 +16,7 @@ use crate::session::Session;
 ///
 /// Contains all the information needed by a CLI or other consumer
 /// to report what happened, without performing any I/O itself.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullOutput {
     /// The remote that was pulled from.
     pub remote_name: String,

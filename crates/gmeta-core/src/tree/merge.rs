@@ -11,7 +11,7 @@ use super::model::{Key, Tombstone, TreeValue};
 
 /// Reason a merge conflict occurred.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConflictReason {
     /// Both sides changed the same key to different values.
     BothChanged,
@@ -40,7 +40,7 @@ impl ConflictReason {
 
 /// How a conflict was resolved.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ConflictResolution {
     /// Local/ours side was chosen.
     Local,
@@ -62,7 +62,7 @@ impl ConflictResolution {
 }
 
 /// A record of how one key's conflict was resolved during a merge.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConflictDecision {
     /// The key that had a conflict.
     pub key: Key,

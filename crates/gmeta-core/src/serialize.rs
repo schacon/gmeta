@@ -31,6 +31,7 @@ const MAX_COMMIT_CHANGES: usize = 1000;
 ///
 /// Contains all the information needed by a CLI or other consumer
 /// to report what happened, without performing any I/O itself.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SerializeOutput {
     /// Number of metadata changes serialized (total entries across all destinations).
     pub changes: usize,

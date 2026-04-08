@@ -24,7 +24,7 @@ use crate::tree::model::{Key, ParsedTree, Tombstone, TreeValue};
 use crate::types::TargetType;
 
 /// How a remote ref was materialized.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum MaterializeStrategy {
     /// Remote was a strict superset of local — direct apply.
@@ -38,7 +38,7 @@ pub enum MaterializeStrategy {
 }
 
 /// Result of materializing a single remote ref.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MaterializeRefResult {
     /// The ref that was materialized.
     pub ref_name: String,
@@ -51,7 +51,7 @@ pub struct MaterializeRefResult {
 }
 
 /// Result of a materialize operation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MaterializeOutput {
     /// Results per remote ref.
     pub results: Vec<MaterializeRefResult>,

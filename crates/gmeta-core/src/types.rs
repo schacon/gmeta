@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 
 /// The kind of object a metadata entry is attached to.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TargetType {
     Commit,
     ChangeId,
@@ -62,7 +62,7 @@ impl TargetType {
 }
 
 /// A resolved metadata target consisting of a type and an optional value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Target {
     pub target_type: TargetType,
     pub value: Option<String>,
@@ -257,7 +257,7 @@ impl Target {
 
 /// The storage type of a metadata value.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ValueType {
     String,
     List,

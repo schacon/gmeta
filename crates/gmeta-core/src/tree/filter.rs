@@ -15,7 +15,7 @@ pub const MAIN_DEST: &str = "main";
 
 /// What to do with a key that matches a filter rule.
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FilterAction {
     /// Exclude the key from serialization entirely.
     Exclude,
@@ -24,7 +24,7 @@ pub enum FilterAction {
 }
 
 /// A filter rule consisting of a pattern and an action.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilterRule {
     /// The action to take for matching keys.
     pub action: FilterAction,
@@ -33,7 +33,7 @@ pub struct FilterRule {
 }
 
 /// A single segment in a filter pattern.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PatternSegment {
     /// Matches exactly this literal segment.
     Literal(String),
