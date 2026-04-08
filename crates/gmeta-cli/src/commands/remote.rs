@@ -20,12 +20,8 @@ fn expand_url(url: &str) -> String {
 /// Scan ls-remote output for meta refs under a given namespace.
 /// Returns (has_match, other_namespaces) where other_namespaces are
 /// namespace prefixes that contain a "main" ref (e.g. "altmeta" from "refs/altmeta/main").
-fn check_remote_refs(
-    session: &gmeta_core::Session,
-    url: &str,
-    ns: &str,
-) -> Result<(bool, Vec<String>)> {
-    let output = gmeta_core::git_utils::run_git(session.repo(), &["ls-remote", url])?;
+fn check_remote_refs(session: &gmeta::Session, url: &str, ns: &str) -> Result<(bool, Vec<String>)> {
+    let output = gmeta::git_utils::run_git(session.repo(), &["ls-remote", url])?;
 
     let expected_ref = format!("refs/{ns}/main");
     let mut has_match = false;
@@ -147,10 +143,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
     // Initial blobless fetch
     let fetch_refspec = format!("refs/{ns}/main:refs/{ns}/remotes/main");
     eprint!("Fetching metadata (blobless)...");
-    match gmeta_core::git_utils::run_git(
-        repo,
-        &["fetch", "--filter=blob:none", name, &fetch_refspec],
-    ) {
+    match gmeta::git_utils::run_git(repo, &["fetch", "--filter=blob:none", name, &fetch_refspec]) {
         Ok(_) => {
             eprintln!(" done.");
 
@@ -177,8 +170,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 
             // Hydrate tip tree blobs so gix can read the metadata
             eprint!("Hydrating tip blobs...");
-            let blob_count =
-                gmeta_core::git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
+            let blob_count = gmeta::git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
             eprintln!(" {blob_count} blobs fetched.");
 
             // Materialize remote metadata into local SQLite
@@ -194,7 +186,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             let tracking_ref_name = format!("refs/{ns}/remotes/main");
             if let Ok(r) = repo.find_reference(&tracking_ref_name) {
                 if let Ok(tip_id) = r.into_fully_peeled_id() {
-                    let count = gmeta_core::sync::insert_promisor_entries(
+                    let count = gmeta::sync::insert_promisor_entries(
                         repo,
                         ctx.session.store(),
                         tip_id.detach(),
@@ -288,7 +280,7 @@ pub fn run_remove(name: &str) -> Result<()> {
 
 pub fn run_list() -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let remotes = gmeta_core::git_utils::list_meta_remotes(ctx.session.repo())?;
+    let remotes = gmeta::git_utils::list_meta_remotes(ctx.session.repo())?;
 
     if remotes.is_empty() {
         println!("No metadata remotes configured.");

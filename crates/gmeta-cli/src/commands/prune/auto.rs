@@ -3,8 +3,8 @@ use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 use time::{Duration, OffsetDateTime};
 
-use gmeta_core::db::Store;
-use gmeta_core::types::Target;
+use gmeta::db::Store;
+use gmeta::types::Target;
 
 /// Parsed auto-prune rules from project metadata.
 pub struct PruneRules {

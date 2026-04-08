@@ -1,8 +1,8 @@
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
-use gmeta_core::types::{Target, TargetType};
-use gmeta_core::Session;
+use gmeta::types::{Target, TargetType};
+use gmeta::Session;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";

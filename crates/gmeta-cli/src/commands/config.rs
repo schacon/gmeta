@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::types::{validate_key, MetaValue, Target};
+use gmeta::types::{validate_key, MetaValue, Target};
 
 const CONFIG_PREFIX: &str = "meta:";
 
@@ -40,13 +40,13 @@ fn project_target() -> Target {
     Target::project()
 }
 
-fn run_set(handle: &gmeta_core::SessionTargetHandle<'_>, key: &str, value: &str) -> Result<()> {
+fn run_set(handle: &gmeta::SessionTargetHandle<'_>, key: &str, value: &str) -> Result<()> {
     let meta_value = MetaValue::String(value.to_string());
     handle.set(key, meta_value)?;
     Ok(())
 }
 
-fn run_get(handle: &gmeta_core::SessionTargetHandle<'_>, key: &str) -> Result<()> {
+fn run_get(handle: &gmeta::SessionTargetHandle<'_>, key: &str) -> Result<()> {
     if let Some(meta_value) = handle.get_value(key)? {
         match meta_value {
             MetaValue::String(s) => println!("{s}"),
@@ -56,7 +56,7 @@ fn run_get(handle: &gmeta_core::SessionTargetHandle<'_>, key: &str) -> Result<()
     Ok(())
 }
 
-fn run_list(handle: &gmeta_core::SessionTargetHandle<'_>) -> Result<()> {
+fn run_list(handle: &gmeta::SessionTargetHandle<'_>) -> Result<()> {
     let entries = handle.get_all_values(Some("meta"))?;
     for (key, value) in entries {
         let display = match value {
@@ -68,7 +68,7 @@ fn run_list(handle: &gmeta_core::SessionTargetHandle<'_>) -> Result<()> {
     Ok(())
 }
 
-fn run_unset(handle: &gmeta_core::SessionTargetHandle<'_>, key: &str) -> Result<()> {
+fn run_unset(handle: &gmeta::SessionTargetHandle<'_>, key: &str) -> Result<()> {
     let removed = handle.remove(key)?;
     if !removed {
         eprintln!("key '{key}' not found");

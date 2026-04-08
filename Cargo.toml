@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gmeta-core", "crates/gmeta-cli", "crates/gmeta-bench"]
+members = ["crates/gmeta", "crates/gmeta-cli", "crates/gmeta-bench"]
 resolver = "2"
 
 [workspace.dependencies]

@@ -2,8 +2,8 @@ use anyhow::Result;
 use dialoguer::{Confirm, Input, Select};
 
 use crate::context::CommandContext;
-use gmeta_core::prune::{parse_size, read_prune_rules};
-use gmeta_core::types::{MetaValue, Target};
+use gmeta::prune::{parse_size, read_prune_rules};
+use gmeta::types::{MetaValue, Target};
 
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;

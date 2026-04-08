@@ -3,17 +3,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::context::CommandContext;
 use anyhow::Result;
 use gix::prelude::ObjectIdExt;
-use gmeta_core::db::Store;
-use gmeta_core::list_value::{encode_entries, parse_timestamp_from_entry_name};
-use gmeta_core::materialize::{find_remote_refs, MaterializeStrategy};
-use gmeta_core::tree::format::parse_tree;
-use gmeta_core::tree::merge::{
+use gmeta::db::Store;
+use gmeta::list_value::{encode_entries, parse_timestamp_from_entry_name};
+use gmeta::materialize::{find_remote_refs, MaterializeStrategy};
+use gmeta::tree::format::parse_tree;
+use gmeta::tree::merge::{
     merge_list_tombstones, merge_set_member_tombstones, merge_tombstones, three_way_merge,
     two_way_merge_no_common_ancestor, ConflictDecision,
 };
-use gmeta_core::tree::model::{Key, ParsedTree, Tombstone, TreeValue};
-use gmeta_core::types::TargetType;
-use gmeta_core::ListEntry;
+use gmeta::tree::model::{Key, ParsedTree, Tombstone, TreeValue};
+use gmeta::types::TargetType;
+use gmeta::ListEntry;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlannedDbChange {

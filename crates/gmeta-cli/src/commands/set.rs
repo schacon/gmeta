@@ -3,8 +3,8 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::types::{MetaValue, Target, ValueType, GIT_REF_THRESHOLD};
-use gmeta_core::ListEntry;
+use gmeta::types::{MetaValue, Target, ValueType, GIT_REF_THRESHOLD};
+use gmeta::ListEntry;
 
 fn print_result(action: &str, key: &str, target: &Target, json: bool) {
     let target_str = match target.value() {

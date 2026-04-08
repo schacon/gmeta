@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use gmeta_core::Session;
+use gmeta::Session;
 
 /// CLI command context: a gmeta [`Session`] with optional timestamp override.
 ///

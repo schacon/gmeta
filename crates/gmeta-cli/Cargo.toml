@@ -12,7 +12,7 @@ bench = ["dep:gmeta-bench"]
 
 [dependencies]
 gmeta-bench = { path = "../gmeta-bench", optional = true }
-gmeta-core = { path = "../gmeta-core", features = ["internal"] }
+gmeta = { path = "../gmeta", features = ["internal"] }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.11"

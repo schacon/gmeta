@@ -4,7 +4,7 @@ mod helpers;
 
 use std::collections::BTreeSet;
 
-use gmeta_core::*;
+use gmeta::*;
 use helpers::*;
 
 #[test]

@@ -1,8 +1,8 @@
 use anyhow::Result;
 
 use crate::context::CommandContext;
-use gmeta_core::prune::{parse_since_to_cutoff_ms, read_prune_rules};
-use gmeta_core::types::Target;
+use gmeta::prune::{parse_since_to_cutoff_ms, read_prune_rules};
+use gmeta::types::Target;
 
 pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;

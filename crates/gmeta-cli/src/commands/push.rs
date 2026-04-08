@@ -73,7 +73,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     }
 
     eprintln!("Pushing README to {remote_name}...");
-    let result = gmeta_core::git_utils::run_git(repo, &["push", &remote_name, &push_refspec]);
+    let result = gmeta::git_utils::run_git(repo, &["push", &remote_name, &push_refspec]);
 
     match result {
         Ok(_) => {

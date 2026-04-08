@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use gmeta_core::Session;
+use gmeta::Session;
 
 /// Create an isolated git repository with an initial commit, returning
 /// the temp directory (owns the lifetime) and the gix repository handle.

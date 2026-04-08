@@ -1625,12 +1625,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "gmeta"
+version = "0.1.0"
+dependencies = [
+ "gix",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
+]
+
+[[package]]
 name = "gmeta-bench"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "gix",
- "gmeta-core",
+ "gmeta",
  "serde_json",
  "time",
 ]
@@ -1645,8 +1659,8 @@ dependencies = [
  "dialoguer",
  "gix",
  "gix-testtools",
+ "gmeta",
  "gmeta-bench",
- "gmeta-core",
  "notify",
  "predicates",
  "rusqlite",
@@ -1656,20 +1670,6 @@ dependencies = [
  "tempfile",
  "time",
  "uuid",
-]
-
-[[package]]
-name = "gmeta-core"
-version = "0.1.0"
-dependencies = [
- "gix",
- "rusqlite",
- "serde",
- "serde_json",
- "sha1",
- "tempfile",
- "thiserror 2.0.18",
- "time",
 ]
 
 [[package]]

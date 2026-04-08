@@ -4,9 +4,9 @@ use gix::prelude::ObjectIdExt;
 use serde_json::{json, Map, Value};
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
-use gmeta_core::tree_paths;
-use gmeta_core::types::{Target, TargetType, ValueType};
+use gmeta::db::Store;
+use gmeta::tree_paths;
+use gmeta::types::{Target, TargetType, ValueType};
 
 const NODE_VALUE_KEY: &str = "__value";
 const SET_VALUE_DIR: &str = "__set";
@@ -113,7 +113,7 @@ pub fn run(
 /// Hydrate promised entries by looking up their blob OIDs in the tip tree
 /// and fetching any that aren't already local. Returns the number hydrated.
 fn hydrate_promised_entries(
-    session: &gmeta_core::Session,
+    session: &gmeta::Session,
     target_type: &TargetType,
     entries: &[(String, String)], // (target_value, key)
 ) -> Result<usize> {
@@ -150,9 +150,7 @@ fn hydrate_promised_entries(
 
         // Try __value (string) first
         if let Ok(path) = tree_paths::tree_path(&parsed_target, key) {
-            if let Some(oid) =
-                gmeta_core::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
-            {
+            if let Some(oid) = gmeta::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)? {
                 pending.push(PendingEntry {
                     idx,
                     oids: vec![oid],
@@ -165,7 +163,7 @@ fn hydrate_promised_entries(
         // Try __list directory
         if let Ok(path) = tree_paths::list_dir_path(&parsed_target, key) {
             if let Some(dir_oid) =
-                gmeta_core::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
+                gmeta::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
             {
                 // dir_oid is a tree — collect all blob entries in it
                 let list_tree = dir_oid.attach(repo).object()?.into_tree();
@@ -199,7 +197,7 @@ fn hydrate_promised_entries(
         if let Ok(key_path) = tree_paths::key_tree_path(&parsed_target, key) {
             let set_path = format!("{key_path}/{SET_VALUE_DIR}");
             if let Some(dir_oid) =
-                gmeta_core::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &set_path)?
+                gmeta::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &set_path)?
             {
                 let set_tree = dir_oid.attach(repo).object()?.into_tree();
                 let oids: Vec<_> = set_tree
@@ -259,13 +257,13 @@ fn hydrate_promised_entries(
     }
 
     if !missing.is_empty() {
-        let remote_name = gmeta_core::git_utils::resolve_meta_remote(repo, None)?;
+        let remote_name = gmeta::git_utils::resolve_meta_remote(repo, None)?;
         eprintln!(
             "Fetching {} blob{} from remote...",
             missing.len(),
             if missing.len() == 1 { "" } else { "s" }
         );
-        gmeta_core::git_utils::fetch_blob_oids(repo, &remote_name, &missing)?;
+        gmeta::git_utils::fetch_blob_oids(repo, &remote_name, &missing)?;
     }
 
     // Now read blobs and update DB
