@@ -51,7 +51,19 @@ impl Session {
     /// Open a session for a known repository.
     ///
     /// Use this when you already have a `gix::Repository` handle (e.g. from
-    /// `gix::open()` or `gix::init()`).
+    /// a host application like GitButler that manages its own repo lifetime).
+    ///
+    /// If you need to keep using the repository after creating a session,
+    /// pass `repo.clone()` — `gix::Repository` is cheaply cloneable since
+    /// its object database and ref store are behind `Arc`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let repo = gix::open(".")?;
+    /// let session = Session::open(repo.clone())?;
+    /// // `repo` is still usable here
+    /// ```
     pub fn open(repo: gix::Repository) -> crate::error::Result<Self> {
         Self::from_repo(repo)
     }
@@ -81,9 +93,7 @@ impl Session {
         let email = crate::git_utils::get_email(&repo)?;
         let name = crate::git_utils::get_name(&repo)?;
         let namespace = crate::git_utils::get_namespace(&repo)?;
-        let store_repo =
-            gix::open(repo.git_dir()).map_err(|e| crate::error::Error::Other(format!("{e}")))?;
-        let store = crate::db::Store::open_with_repo(&db_path, store_repo)?;
+        let store = crate::db::Store::open_with_repo(&db_path, repo.clone())?;
 
         Ok(Self {
             repo,

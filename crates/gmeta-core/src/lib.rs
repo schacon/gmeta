@@ -40,6 +40,17 @@
 //! # Ok::<(), gmeta_core::Error>(())
 //! ```
 //!
+//! If you already have a [`gix::Repository`] (e.g. in a host application like
+//! GitButler), clone it cheaply and pass it in:
+//!
+//! ```no_run
+//! # use gmeta_core::Session;
+//! let repo = gix::open(".")?;
+//! let session = Session::open(repo.clone())?;
+//! // `repo` is still fully usable here
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
 //! ## Data Exchange
 //!
 //! Metadata is stored locally in SQLite for fast reads/writes, and exchanged
