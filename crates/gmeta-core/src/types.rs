@@ -1,10 +1,13 @@
+use std::fmt;
+use std::str::FromStr;
+
 use sha1::{Digest, Sha1};
 
 use crate::error::{Error, Result};
 
 /// The kind of object a metadata entry is attached to.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TargetType {
     Commit,
     ChangeId,
@@ -13,18 +16,16 @@ pub enum TargetType {
     Project,
 }
 
-impl TargetType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            TargetType::Commit => "commit",
-            TargetType::ChangeId => "change-id",
-            TargetType::Branch => "branch",
-            TargetType::Path => "path",
-            TargetType::Project => "project",
-        }
+impl fmt::Display for TargetType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
+}
 
-    pub fn from_str(s: &str) -> Result<Self> {
+impl FromStr for TargetType {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "commit" => Ok(TargetType::Commit),
             "change-id" => Ok(TargetType::ChangeId),
@@ -32,6 +33,19 @@ impl TargetType {
             "path" => Ok(TargetType::Path),
             "project" => Ok(TargetType::Project),
             _ => Err(Error::UnknownTargetType(s.to_string())),
+        }
+    }
+}
+
+impl TargetType {
+    /// Returns the wire-format string for this target type.
+    pub fn as_str(&self) -> &str {
+        match self {
+            TargetType::Commit => "commit",
+            TargetType::ChangeId => "change-id",
+            TargetType::Branch => "branch",
+            TargetType::Path => "path",
+            TargetType::Project => "project",
         }
     }
 
@@ -54,6 +68,15 @@ pub struct Target {
     pub value: Option<String>,
 }
 
+impl fmt::Display for Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.value {
+            Some(v) => write!(f, "{}:{}", self.target_type, v),
+            None => write!(f, "{}", self.target_type),
+        }
+    }
+}
+
 impl Target {
     pub fn parse(s: &str) -> Result<Self> {
         if s == "project" {
@@ -67,7 +90,7 @@ impl Target {
             Error::InvalidTarget("target must be in type:value format (e.g. commit:abc123)".into())
         })?;
 
-        let target_type = TargetType::from_str(type_str)?;
+        let target_type = type_str.parse::<TargetType>()?;
 
         if target_type == TargetType::Project {
             return Ok(Target {
@@ -234,28 +257,39 @@ impl Target {
 
 /// The storage type of a metadata value.
 #[non_exhaustive]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ValueType {
     String,
     List,
     Set,
 }
 
-impl ValueType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            ValueType::String => "string",
-            ValueType::List => "list",
-            ValueType::Set => "set",
-        }
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
+}
 
-    pub fn from_str(s: &str) -> Result<Self> {
+impl FromStr for ValueType {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
             "string" => Ok(ValueType::String),
             "list" => Ok(ValueType::List),
             "set" => Ok(ValueType::Set),
             _ => Err(Error::UnknownValueType(s.to_string())),
+        }
+    }
+}
+
+impl ValueType {
+    /// Returns the wire-format string for this value type.
+    pub fn as_str(&self) -> &str {
+        match self {
+            ValueType::String => "string",
+            ValueType::List => "list",
+            ValueType::Set => "set",
         }
     }
 }
@@ -274,6 +308,16 @@ pub enum MetaValue {
     List(Vec<crate::list_value::ListEntry>),
     /// An unordered set of unique string values.
     Set(std::collections::BTreeSet<String>),
+}
+
+impl fmt::Display for MetaValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MetaValue::String(s) => write!(f, "{}", s),
+            MetaValue::List(entries) => write!(f, "[{} entries]", entries.len()),
+            MetaValue::Set(members) => write!(f, "{{{} members}}", members.len()),
+        }
+    }
 }
 
 impl MetaValue {
@@ -509,10 +553,10 @@ mod tests {
 
     #[test]
     fn test_value_type_roundtrip() {
-        assert_eq!(ValueType::from_str("string").unwrap(), ValueType::String);
-        assert_eq!(ValueType::from_str("list").unwrap(), ValueType::List);
-        assert_eq!(ValueType::from_str("set").unwrap(), ValueType::Set);
-        assert!(ValueType::from_str("hash").is_err());
+        assert_eq!("string".parse::<ValueType>().unwrap(), ValueType::String);
+        assert_eq!("list".parse::<ValueType>().unwrap(), ValueType::List);
+        assert_eq!("set".parse::<ValueType>().unwrap(), ValueType::Set);
+        assert!("hash".parse::<ValueType>().is_err());
     }
 
     #[test]

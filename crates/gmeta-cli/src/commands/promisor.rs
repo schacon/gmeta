@@ -68,7 +68,7 @@ pub fn run() -> Result<()> {
                         skipped_deletes += 1;
                         continue;
                     }
-                    let tt = TargetType::from_str(&change.target_type)?;
+                    let tt = change.target_type.parse::<TargetType>()?;
                     if ctx.session.store().insert_promised(
                         &tt,
                         &change.target_value,
@@ -102,7 +102,7 @@ pub fn run() -> Result<()> {
                 let mut commit_skipped = 0;
 
                 for (target_type, target_value, key) in &keys {
-                    let tt = TargetType::from_str(target_type)?;
+                    let tt = target_type.parse::<TargetType>()?;
                     if ctx.session.store().insert_promised(
                         &tt,
                         target_value,

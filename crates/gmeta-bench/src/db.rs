@@ -33,7 +33,7 @@ pub fn run() -> Result<()> {
 
     for (target_type_str, target_value, key) in &keys {
         let t0 = Instant::now();
-        let target_type = match TargetType::from_str(target_type_str) {
+        let target_type = match target_type_str.parse::<TargetType>() {
             Ok(tt) => tt,
             Err(_) => {
                 errors += 1;

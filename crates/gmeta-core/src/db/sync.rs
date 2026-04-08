@@ -45,7 +45,7 @@ impl Store {
                 last_timestamp,
                 is_git_ref,
             ) = row?;
-            let vt = ValueType::from_str(&value_type_str)?;
+            let vt = value_type_str.parse::<ValueType>()?;
             match vt {
                 ValueType::List => {
                     let encoded = encode_list_entries_by_metadata_id(
@@ -163,7 +163,7 @@ impl Store {
         now: i64,
     ) -> Result<()> {
         for (k, tree_val) in values {
-            let tt = TargetType::from_str(&k.target_type)?;
+            let tt = k.target_type.parse::<TargetType>()?;
             match tree_val {
                 TreeValue::String(s) => {
                     if s.len() > GIT_REF_THRESHOLD {
@@ -280,7 +280,7 @@ impl Store {
             if values.contains_key(key) {
                 continue;
             }
-            let tt = TargetType::from_str(&key.target_type)?;
+            let tt = key.target_type.parse::<TargetType>()?;
             self.apply_tombstone(
                 &tt,
                 &key.target_value,

@@ -263,7 +263,7 @@ impl Store {
 
         match result {
             Some((metadata_id, _value, ref vt, _is_git_ref))
-                if ValueType::from_str(vt)? == ValueType::List =>
+                if vt.parse::<ValueType>()? == ValueType::List =>
             {
                 Ok(Some(MetadataValue {
                     value: encode_list_entries_by_metadata_id(
@@ -276,7 +276,7 @@ impl Store {
                 }))
             }
             Some((metadata_id, _value, ref vt, _is_git_ref))
-                if ValueType::from_str(vt)? == ValueType::Set =>
+                if vt.parse::<ValueType>()? == ValueType::Set =>
             {
                 Ok(Some(MetadataValue {
                     value: encode_set_values_by_metadata_id(&self.conn, metadata_id)?,
@@ -288,7 +288,7 @@ impl Store {
                 let resolved = resolve_blob(self.repo.as_ref(), &value, is_git_ref)?;
                 Ok(Some(MetadataValue {
                     value: resolved,
-                    value_type: ValueType::from_str(&vt)?,
+                    value_type: vt.parse::<ValueType>()?,
                     is_git_ref,
                 }))
             }
@@ -400,7 +400,7 @@ impl Store {
         for row in rows {
             let (metadata_id, target_value, key, value, value_type_str, is_git_ref, is_promised) =
                 row?;
-            let vt = ValueType::from_str(&value_type_str)?;
+            let vt = value_type_str.parse::<ValueType>()?;
             if is_promised {
                 results.push(MetadataRecord {
                     target_value,

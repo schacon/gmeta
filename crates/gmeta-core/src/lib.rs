@@ -1,8 +1,4 @@
-#![allow(
-    clippy::type_complexity,
-    clippy::too_many_arguments,
-    clippy::should_implement_trait
-)]
+#![allow(clippy::type_complexity, clippy::too_many_arguments)]
 
 /// Typed error types for all gmeta-core operations.
 pub mod error;

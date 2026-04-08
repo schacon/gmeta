@@ -39,7 +39,7 @@ pub fn run(
     let ctx = CommandContext::open(timestamp)?;
     ctx.session.resolve_target(&mut target)?;
 
-    let value_type = ValueType::from_str(value_type_str)?;
+    let value_type = value_type_str.parse::<ValueType>()?;
 
     let from_file = file.is_some();
     let raw_value = match (value, file) {

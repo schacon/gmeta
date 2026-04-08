@@ -465,7 +465,7 @@ fn print_verbose_tree_info(entries: &ParsedTree) -> Result<()> {
     );
     for (mk, val) in &entries.values {
         let target =
-            format_target_for_display(&TargetType::from_str(&mk.target_type)?, &mk.target_value);
+            format_target_for_display(&mk.target_type.parse::<TargetType>()?, &mk.target_value);
         let val_desc = match val {
             TreeValue::String(s) => {
                 if s.len() > 50 {
@@ -482,7 +482,7 @@ fn print_verbose_tree_info(entries: &ParsedTree) -> Result<()> {
     }
     for (mk, tomb) in &entries.tombstones {
         let target =
-            format_target_for_display(&TargetType::from_str(&mk.target_type)?, &mk.target_value);
+            format_target_for_display(&mk.target_type.parse::<TargetType>()?, &mk.target_value);
         eprintln!(
             "  {} {} -> tombstone [ts={}, by={}]",
             target, mk.key, tomb.timestamp, tomb.email
@@ -581,7 +581,7 @@ fn collect_db_changes_from_tree(
     let mut planned = Vec::new();
 
     for (mk, tree_val) in values {
-        let tt = TargetType::from_str(&mk.target_type)?;
+        let tt = mk.target_type.parse::<TargetType>()?;
         match tree_val {
             TreeValue::String(s) => {
                 let json_val = serde_json::to_string(s)?;
