@@ -30,6 +30,28 @@ impl<'a> SessionTargetHandle<'a> {
         self.session.store().get_value(&self.target, key)
     }
 
+    /// Set a metadata value with convenience conversion.
+    ///
+    /// Accepts anything that converts to [`MetaValue`]: `&str`, `String`,
+    /// `Vec<ListEntry>`, `BTreeSet<String>`, or `MetaValue` directly.
+    ///
+    /// ```ignore
+    /// handle.set("key", "hello")?;                    // string
+    /// handle.set("key", MetaValue::String("hello".into()))?; // explicit
+    /// ```
+    ///
+    /// Uses the session's email and timestamp automatically.
+    pub fn set(&self, key: &str, value: impl Into<MetaValue>) -> Result<()> {
+        let meta_value = value.into();
+        self.session.store().set_value(
+            &self.target,
+            key,
+            &meta_value,
+            self.session.email(),
+            self.session.now(),
+        )
+    }
+
     /// Set a metadata value.
     ///
     /// Uses the session's email and timestamp automatically.

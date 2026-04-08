@@ -332,6 +332,30 @@ impl MetaValue {
     }
 }
 
+impl From<&str> for MetaValue {
+    fn from(s: &str) -> Self {
+        MetaValue::String(s.to_string())
+    }
+}
+
+impl From<String> for MetaValue {
+    fn from(s: String) -> Self {
+        MetaValue::String(s)
+    }
+}
+
+impl From<Vec<crate::list_value::ListEntry>> for MetaValue {
+    fn from(entries: Vec<crate::list_value::ListEntry>) -> Self {
+        MetaValue::List(entries)
+    }
+}
+
+impl From<std::collections::BTreeSet<String>> for MetaValue {
+    fn from(members: std::collections::BTreeSet<String>) -> Self {
+        MetaValue::Set(members)
+    }
+}
+
 /// Size threshold (in bytes) above which file values are stored as git blob references.
 pub const GIT_REF_THRESHOLD: usize = 1024;
 
