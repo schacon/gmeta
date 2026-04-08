@@ -8,7 +8,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.session.repo();
 
-    let remote_name = gmeta_core::git_utils::resolve_meta_remote(ctx.session.repo(), remote)?;
+    let remote_name = ctx.session.resolve_remote(remote)?;
 
     // Gather project info from git config
     let config = repo.config_snapshot();
@@ -168,7 +168,7 @@ const MAX_RETRIES: u32 = 5;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let resolved_remote = gmeta_core::git_utils::resolve_meta_remote(ctx.session.repo(), remote)?;
+    let resolved_remote = ctx.session.resolve_remote(remote)?;
 
     if verbose {
         let ns = ctx.session.namespace();

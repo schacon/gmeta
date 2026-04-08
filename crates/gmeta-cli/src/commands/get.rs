@@ -5,7 +5,6 @@ use serde_json::{json, Map, Value};
 
 use crate::context::CommandContext;
 use gmeta_core::db::Store;
-use gmeta_core::list_value::list_values_from_json;
 use gmeta_core::types::{self, Target, TargetType, ValueType};
 
 const NODE_VALUE_KEY: &str = "__value";
@@ -408,7 +407,7 @@ fn print_value_only(value: &str, value_type: &ValueType) -> Result<()> {
             println!("{}", s);
         }
         ValueType::List => {
-            for item in list_values_from_json(value)? {
+            for item in extract_list_values(value)? {
                 println!("{}", item);
             }
         }
@@ -432,7 +431,7 @@ fn format_value_compact(value: &str, value_type: &ValueType) -> Result<String> {
             Ok(s)
         }
         ValueType::List => {
-            let list = list_values_from_json(value)?;
+            let list = extract_list_values(value)?;
             Ok(list.join(", "))
         }
         ValueType::Set => {
@@ -494,7 +493,7 @@ fn parse_stored_value(value: &str, value_type: &ValueType) -> Result<Value> {
             Ok(Value::String(s))
         }
         ValueType::List => {
-            let list = list_values_from_json(value)?;
+            let list = extract_list_values(value)?;
             Ok(Value::Array(list.into_iter().map(Value::String).collect()))
         }
         ValueType::Set => {
@@ -504,6 +503,26 @@ fn parse_stored_value(value: &str, value_type: &ValueType) -> Result<Value> {
         }
         _ => anyhow::bail!("unsupported value type"),
     }
+}
+
+/// Extract string values from a stored list JSON blob.
+///
+/// Handles both the current object format (`[{"value":"a","timestamp":1}]`)
+/// and the legacy plain-string format (`["a","b"]`).
+fn extract_list_values(raw: &str) -> Result<Vec<String>> {
+    let items: Vec<Value> = serde_json::from_str(raw)?;
+    items
+        .into_iter()
+        .map(|item| match item {
+            Value::String(s) => Ok(s),
+            Value::Object(ref map) => map
+                .get("value")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .ok_or_else(|| anyhow::anyhow!("list entry missing 'value' field")),
+            other => anyhow::bail!("unexpected list entry type: {other:?}"),
+        })
+        .collect()
 }
 
 fn insert_nested(map: &mut Map<String, Value>, keys: &[&str], value: Value) {

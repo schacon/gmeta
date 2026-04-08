@@ -11,7 +11,6 @@ use time::{Duration, OffsetDateTime};
 
 use crate::context::CommandContext;
 use gmeta_core::db::Store;
-use gmeta_core::list_value::list_values_from_json;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -336,9 +335,7 @@ fn format_value_oneline(
             s
         }
         ValueType::List => {
-            if let Ok(items) = list_values_from_json(value) {
-                format!("[list: {} items]", items.len())
-            } else if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(value) {
+            if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(value) {
                 format!("[list: {} items]", arr.len())
             } else {
                 "[list]".to_string()

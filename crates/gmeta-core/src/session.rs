@@ -165,6 +165,30 @@ impl Session {
         target.resolve(&self.repo)
     }
 
+    /// Resolve which metadata remote to use.
+    ///
+    /// If `remote` is `Some`, validates that it is a configured meta remote.
+    /// If `None`, returns the first configured meta remote.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name to validate; if `None`, the first
+    ///   configured metadata remote is returned
+    ///
+    /// # Returns
+    ///
+    /// The name of the resolved meta remote.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoRemotes`](crate::error::Error::NoRemotes) if no
+    /// meta remotes are configured, or
+    /// [`Error::RemoteNotFound`](crate::error::Error::RemoteNotFound) if the
+    /// specified name is not a meta remote.
+    pub fn resolve_remote(&self, remote: Option<&str>) -> crate::error::Result<String> {
+        crate::git_utils::resolve_meta_remote(&self.repo, remote)
+    }
+
     /// Index metadata keys from commit history for blobless clone support.
     ///
     /// Walks commits from `tip_oid` backward (optionally stopping at `old_tip`)
