@@ -195,8 +195,7 @@ impl Store {
                     let member_id = crate::types::set_member_id(member);
                     let member_timestamp = existing_members
                         .get(&member_id)
-                        .map(|(_, ts)| *ts)
-                        .unwrap_or(timestamp);
+                        .map_or(timestamp, |(_, ts)| *ts);
                     self.conn.execute(
                         "INSERT INTO set_values (metadata_id, member_id, value, timestamp)
                          VALUES (?1, ?2, ?3, ?4)
@@ -410,7 +409,7 @@ impl Store {
 
         let mut stmt = self.conn.prepare(sql)?;
         let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+            params_vec.iter().map(std::convert::AsRef::as_ref).collect();
         let rows = stmt.query_map(params_refs.as_slice(), |row| {
             Ok((
                 row.get::<_, i64>(0)?,

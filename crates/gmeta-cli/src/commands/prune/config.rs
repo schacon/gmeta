@@ -96,8 +96,7 @@ pub fn run() -> Result<()> {
         let default = existing
             .as_ref()
             .and_then(|r| r.max_size)
-            .map(format_size)
-            .unwrap_or_else(|| "10m".to_string());
+            .map_or_else(|| "10m".to_string(), format_size);
         let val = Input::<String>::new()
             .with_prompt("Max size")
             .default(default)
@@ -133,8 +132,7 @@ pub fn run() -> Result<()> {
         let default = existing
             .as_ref()
             .and_then(|r| r.min_size)
-            .map(format_size)
-            .unwrap_or_else(|| "1k".to_string());
+            .map_or_else(|| "1k".to_string(), format_size);
         let val = Input::<String>::new()
             .with_prompt("Min size")
             .default(default)

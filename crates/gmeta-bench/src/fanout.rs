@@ -228,7 +228,7 @@ fn pack_size_bytes(repo_path: &std::path::Path) -> Result<u64> {
         for entry in std::fs::read_dir(&pack_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map(|e| e == "pack").unwrap_or(false) {
+            if path.extension().is_some_and(|e| e == "pack") {
                 total += entry.metadata()?.len();
             }
         }
@@ -565,7 +565,7 @@ fn print_report(results: &[SchemeResult], n_base: usize) {
         DIM,
         RESET,
         CYAN,
-        results.first().map(|r| r.diff_count).unwrap_or(0),
+        results.first().map_or(0, |r| r.diff_count),
         RESET
     );
     for r in results {

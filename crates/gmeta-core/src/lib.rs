@@ -1,3 +1,66 @@
+//! # gmeta-core
+//!
+//! A library for storing and exchanging structured metadata in Git repositories.
+//! This is the reference implementation of the [gmeta spec](https://schacon.github.io/gmeta/).
+//!
+//! ## Core Concepts
+//!
+//! gmeta attaches key-value metadata to **targets** in a Git project:
+//!
+//! - **Commits** — attach agent info, review status, provenance to specific commits
+//! - **Paths** — attach code ownership, agent rules to directories or files
+//! - **Branches** — attach review comments, CI status to branches
+//! - **Change IDs** — attach metadata to logical changesets (for tools like Jujutsu)
+//! - **Project** — global project-wide metadata (configuration, ownership)
+//!
+//! Values can be **strings** (single values), **lists** (ordered, append-friendly),
+//! or **sets** (unordered, unique members).
+//!
+//! ## Quick Start
+//!
+//! ```no_run
+//! use gmeta_core::{Session, Target, MetaValue};
+//!
+//! // Open a session for the current git repository
+//! let session = Session::discover()?;
+//!
+//! // Write metadata
+//! let commit = session.target(&Target::commit("abc123")?);
+//! commit.set("agent:model", "claude-4.6")?;
+//! commit.set("review:status", "approved")?;
+//!
+//! // Read metadata
+//! if let Some(model) = commit.get_value("agent:model")? {
+//!     println!("Model: {model}");
+//! }
+//!
+//! // Sync with remote
+//! session.serialize()?;
+//! session.push_once(None)?;
+//! # Ok::<(), gmeta_core::Error>(())
+//! ```
+//!
+//! ## Data Exchange
+//!
+//! Metadata is stored locally in SQLite for fast reads/writes, and exchanged
+//! via Git's object format and transfer protocols:
+//!
+//! - [`Session::serialize()`] writes local metadata to a Git tree and commit
+//! - [`Session::materialize()`] reads remote metadata and merges it locally
+//! - [`Session::pull()`] fetches + materializes in one step
+//! - [`Session::push_once()`] serializes + pushes to the remote
+//!
+//! The exchange format uses Git trees with a deterministic path layout, enabling
+//! standard Git merge strategies. See the [spec](https://schacon.github.io/gmeta/)
+//! for the full format description.
+//!
+//! ## Blobless Clone Support
+//!
+//! For large metadata histories (e.g., AI transcripts), gmeta supports Git's
+//! partial/blobless clone feature. Only tree objects are fetched initially;
+//! blob data is fetched on demand when accessed. The [`Session::pull()`] method
+//! automatically indexes historical keys for lazy loading.
+
 /// Typed error types for all gmeta-core operations.
 pub mod error;
 

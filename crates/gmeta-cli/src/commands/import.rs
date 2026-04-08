@@ -1137,7 +1137,7 @@ fn parse_git_ai_note(text: &str) -> Result<GitAiNote> {
     let git_ai_version = json
         .get("git_ai_version")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
 
     let mut models: Vec<String> = Vec::new();
     if let Some(prompts) = json.get("prompts").and_then(|v| v.as_object()) {

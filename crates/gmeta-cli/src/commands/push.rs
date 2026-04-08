@@ -14,13 +14,11 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     let config = repo.config_snapshot();
     let origin_url = config
         .string("remote.origin.url")
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map_or_else(|| "unknown".to_string(), |s| s.to_string());
     let meta_url_key = format!("remote.{}.url", remote_name);
     let meta_url = config
         .string(&meta_url_key)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| "unknown".to_string());
+        .map_or_else(|| "unknown".to_string(), |s| s.to_string());
     let ns = ctx.session.namespace();
 
     let readme_content = generate_readme(&origin_url, &meta_url, ns);

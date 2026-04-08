@@ -121,7 +121,7 @@ fn run_dry_run(ctx: &CommandContext, remote: Option<&str>, verbose: bool) -> Res
             .find_reference(&local_ref_name)
             .ok()
             .and_then(|r| r.into_fully_peeled_id().ok())
-            .map(|id| id.detach());
+            .map(gix::Id::detach);
 
         if verbose {
             match &local_commit_oid {

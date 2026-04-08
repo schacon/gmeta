@@ -378,7 +378,11 @@ fn print_plain(
             }
         })
         .collect();
-    let max_width = labels.iter().map(|l| l.len()).max().unwrap_or(0);
+    let max_width = labels
+        .iter()
+        .map(std::string::String::len)
+        .max()
+        .unwrap_or(0);
 
     for (label, (_, _, value, value_type)) in labels.iter().zip(entries.iter()) {
         let display_value = format_value_compact(value, value_type)?;
@@ -516,7 +520,7 @@ fn extract_list_values(raw: &str) -> Result<Vec<String>> {
             Value::Object(ref map) => map
                 .get("value")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .ok_or_else(|| anyhow::anyhow!("list entry missing 'value' field")),
             other => anyhow::bail!("unexpected list entry type: {other:?}"),
         })

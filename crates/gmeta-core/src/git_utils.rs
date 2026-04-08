@@ -340,8 +340,7 @@ fn gix_config_string(repo: &gix::Repository, key: &str, default: &str) -> String
     let config = repo.config_snapshot();
     config
         .string(key)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| default.to_string())
+        .map_or_else(|| default.to_string(), |s| s.to_string())
 }
 
 /// Discover the Git repository from the current directory.

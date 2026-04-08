@@ -60,7 +60,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         .find_reference(&ref_name)
         .ok()
         .and_then(|r| r.into_fully_peeled_id().ok())
-        .map(|id| id.detach())
+        .map(gix::Id::detach)
     {
         Some(oid) => oid,
         None => {

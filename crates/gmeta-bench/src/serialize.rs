@@ -169,7 +169,7 @@ fn do_serialize(repo: &gix::Repository, db: &Store, ref_name: &str) -> Result<()
         .find_reference(ref_name)
         .ok()
         .and_then(|r| r.into_fully_peeled_id().ok())
-        .map(|id| id.detach());
+        .map(gix::Id::detach);
     let parents: Vec<gix::ObjectId> = parent.into_iter().collect();
 
     let commit = gix::objs::Commit {
@@ -222,7 +222,7 @@ fn build_bench_tree(
         if e.is_git_ref {
             let oid = gix::ObjectId::from_hex(e.value.as_bytes())?;
             let blob = oid.attach(repo).object()?.into_blob();
-            files.insert(full_path, blob.data.to_vec());
+            files.insert(full_path, blob.data.clone());
         } else {
             let raw_value: String =
                 serde_json::from_str(&e.value).unwrap_or_else(|_| e.value.clone());

@@ -375,7 +375,7 @@ fn collect_blobs(
             let blob = repo
                 .find_blob(entry.object_id())
                 .map_err(|e| Error::Other(format!("{e}")))?;
-            paths.insert(full_path, blob.data.to_vec());
+            paths.insert(full_path, blob.data.clone());
         } else if entry.mode().is_tree() {
             collect_blobs(repo, entry.object_id(), &full_path, paths)?;
         }

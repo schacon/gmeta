@@ -34,6 +34,7 @@ const MAX_COMMIT_CHANGES: usize = 1000;
 ///
 /// Contains all the information needed by a CLI or other consumer
 /// to report what happened, without performing any I/O itself.
+#[must_use]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SerializeOutput {
     /// Number of metadata changes serialized (total entries across all destinations).
@@ -80,7 +81,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
                 .into_commit()
                 .tree_id()
                 .ok()
-                .map(|t| t.detach())
+                .map(gix::Id::detach)
         });
 
     // Determine incremental vs full mode and collect entries + changes
@@ -268,7 +269,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     all_dests.extend(dest_set_tombstones.keys().cloned());
     all_dests.extend(dest_list_tombstones.keys().cloned());
 
-    let total_changes: usize = dest_metadata.values().map(|v| v.len()).sum();
+    let total_changes: usize = dest_metadata.values().map(std::vec::Vec::len).sum();
 
     let name = session.name();
     let email = session.email();
@@ -310,7 +311,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
             .find_reference(&ref_name)
             .ok()
             .and_then(|r| r.into_fully_peeled_id().ok())
-            .map(|id| id.detach());
+            .map(gix::Id::detach);
 
         let parents: Vec<gix::ObjectId> = parent_oid.into_iter().collect();
         let commit_message = build_commit_message(&changes);
@@ -506,11 +507,11 @@ fn build_tree(
                         .object()
                         .map_err(|e| Error::Other(format!("{e}")))?
                         .into_blob();
-                    files.insert(full_path, blob.data.to_vec());
+                    files.insert(full_path, blob.data.clone());
                 } else {
                     let raw_value: String = match serde_json::from_str(&e.value) {
                         Ok(s) => s,
-                        Err(_) => e.value.to_string(),
+                        Err(_) => e.value.clone(),
                     };
                     files.insert(full_path, raw_value.into_bytes());
                 }
@@ -1036,7 +1037,7 @@ fn prune_tombstone_tree(
                 .into_blob();
             if let Ok(content) = std::str::from_utf8(&blob.data) {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
-                    if let Some(ts) = parsed.get("timestamp").and_then(|v| v.as_i64()) {
+                    if let Some(ts) = parsed.get("timestamp").and_then(serde_json::Value::as_i64) {
                         if ts < cutoff_ms {
                             continue; // Drop old tombstone
                         }

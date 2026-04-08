@@ -73,7 +73,7 @@ fn key_to_pattern(key: &str) -> String {
     while let Some(c) = chars.next() {
         if c.is_ascii_digit() {
             result.push_str("[n]");
-            while chars.peek().map(|d| d.is_ascii_digit()).unwrap_or(false) {
+            while chars.peek().is_some_and(char::is_ascii_digit) {
                 chars.next();
             }
         } else {

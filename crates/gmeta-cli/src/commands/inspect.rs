@@ -72,8 +72,7 @@ fn run_overview(db: &Store) -> Result<()> {
     for target_type in &all_types {
         let (hydrated_count, targets) = type_stats
             .get(target_type)
-            .map(|(k, t)| (*k, t.len()))
-            .unwrap_or((0, 0));
+            .map_or((0, 0), |(k, t)| (*k, t.len()));
         let promised_count = promised_map.get(target_type).copied().unwrap_or(0);
         let total = hydrated_count + promised_count;
         let targets_label = if targets <= 1 && target_type == "project" {

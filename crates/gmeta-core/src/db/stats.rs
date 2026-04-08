@@ -17,7 +17,7 @@ impl Store {
         )?;
         let lengths: Vec<usize> = stmt
             .query_map([], |row| row.get::<_, i64>(0))?
-            .filter_map(|r| r.ok())
+            .filter_map(std::result::Result::ok)
             .map(|n| n as usize)
             .collect();
 

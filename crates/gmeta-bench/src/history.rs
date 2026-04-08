@@ -516,7 +516,7 @@ pub fn run(n_commits: usize) -> Result<()> {
         if let Ok(entries) = std::fs::read_dir(&pack_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map(|e| e == "pack").unwrap_or(false) {
+                if path.extension().is_some_and(|e| e == "pack") {
                     pack_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
                 }
             }

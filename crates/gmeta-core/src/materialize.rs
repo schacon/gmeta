@@ -37,6 +37,7 @@ pub enum MaterializeStrategy {
 }
 
 /// Result of materializing a single remote ref.
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct MaterializeRefResult {
     /// The ref that was materialized.
@@ -50,6 +51,7 @@ pub struct MaterializeRefResult {
 }
 
 /// Result of a materialize operation.
+#[must_use]
 #[derive(Debug, Clone)]
 pub struct MaterializeOutput {
     /// Results per remote ref.
@@ -110,7 +112,7 @@ pub fn run(session: &Session, remote: Option<&str>, now: i64) -> Result<Material
             .find_reference(&local_ref_name)
             .ok()
             .and_then(|r| r.into_fully_peeled_id().ok())
-            .map(|id| id.detach());
+            .map(gix::Id::detach);
 
         // Check if we can fast-forward: local is None, or local is an
         // ancestor of remote (no local-only commits to preserve).
