@@ -5,7 +5,9 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::Result;
 use crate::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
 use crate::tree::model::{Key, Tombstone, TreeValue};
-use crate::types::{set_member_id, ValueType, GIT_REF_THRESHOLD};
+use crate::types::{set_member_id, TargetType, ValueType, GIT_REF_THRESHOLD};
+
+use super::types::Operation;
 
 use super::{encode_list_entries_by_metadata_id, encode_set_values_by_metadata_id, Store};
 
@@ -37,7 +39,7 @@ impl Store {
         for row in rows {
             let (
                 metadata_id,
-                target_type,
+                target_type_str,
                 target_value,
                 key,
                 value,
@@ -45,6 +47,7 @@ impl Store {
                 last_timestamp,
                 is_git_ref,
             ) = row?;
+            let target_type = target_type_str.parse::<TargetType>()?;
             let vt = value_type_str.parse::<ValueType>()?;
             match vt {
                 ValueType::List => {
@@ -105,19 +108,34 @@ impl Store {
         )?;
 
         let rows = stmt.query_map(params![since], |row| {
-            Ok(ModifiedEntry {
-                target_type: row.get(0)?,
-                target_value: row.get(1)?,
-                key: row.get(2)?,
-                operation: row.get(3)?,
-                value: row.get(4)?,
-                value_type: row.get(5)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+            ))
         })?;
 
         let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (target_type_str, target_value, key, operation_str, value, value_type_str) = row?;
+            let target_type = target_type_str.parse::<TargetType>()?;
+            let operation = operation_str.parse::<Operation>()?;
+            let value_type = if value_type_str.is_empty() {
+                None
+            } else {
+                Some(value_type_str.parse::<ValueType>()?)
+            };
+            results.push(ModifiedEntry {
+                target_type,
+                target_value,
+                key,
+                operation,
+                value,
+                value_type,
+            });
         }
         Ok(results)
     }
@@ -161,7 +179,7 @@ impl Store {
         now: i64,
     ) -> Result<()> {
         for (k, tree_val) in values {
-            let tt = &k.target_type;
+            let target = k.to_target();
             match tree_val {
                 TreeValue::String(s) => {
                     if s.len() > GIT_REF_THRESHOLD {
@@ -172,12 +190,11 @@ impl Store {
                                     crate::error::Error::Other(format!("failed to write blob: {e}"))
                                 })?
                                 .to_string();
-                            let existing = self.get(tt, &k.target_value, &k.key)?;
+                            let existing = self.get(&target, &k.key)?;
                             if existing.as_ref().map(|e| e.value.as_str()) != Some(&blob_oid) {
                                 self.set_with_git_ref(
                                     None,
-                                    tt,
-                                    &k.target_value,
+                                    &target,
                                     &k.key,
                                     &blob_oid,
                                     &ValueType::String,
@@ -189,17 +206,9 @@ impl Store {
                         }
                     } else {
                         let json_val = serde_json::to_string(s)?;
-                        let existing = self.get(tt, &k.target_value, &k.key)?;
+                        let existing = self.get(&target, &k.key)?;
                         if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
-                            self.set(
-                                tt,
-                                &k.target_value,
-                                &k.key,
-                                &json_val,
-                                &ValueType::String,
-                                email,
-                                now,
-                            )?;
+                            self.set(&target, &k.key, &json_val, &ValueType::String, email, now)?;
                         }
                     }
                 }
@@ -227,17 +236,9 @@ impl Store {
                         });
                     }
                     let json_val = encode_entries(&items)?;
-                    let existing = self.get(tt, &k.target_value, &k.key)?;
+                    let existing = self.get(&target, &k.key)?;
                     if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
-                        self.set(
-                            tt,
-                            &k.target_value,
-                            &k.key,
-                            &json_val,
-                            &ValueType::List,
-                            email,
-                            now,
-                        )?;
+                        self.set(&target, &k.key, &json_val, &ValueType::List, email, now)?;
                     }
                 }
                 TreeValue::Set(set_members) => {
@@ -258,17 +259,9 @@ impl Store {
                         .collect();
                     visible.sort();
                     let json_val = serde_json::to_string(&visible)?;
-                    let existing = self.get(tt, &k.target_value, &k.key)?;
+                    let existing = self.get(&target, &k.key)?;
                     if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
-                        self.set(
-                            tt,
-                            &k.target_value,
-                            &k.key,
-                            &json_val,
-                            &ValueType::Set,
-                            email,
-                            now,
-                        )?;
+                        self.set(&target, &k.key, &json_val, &ValueType::Set, email, now)?;
                     }
                 }
             }
@@ -278,13 +271,8 @@ impl Store {
             if values.contains_key(key) {
                 continue;
             }
-            self.apply_tombstone(
-                &key.target_type,
-                &key.target_value,
-                &key.key,
-                &tombstone.email,
-                tombstone.timestamp,
-            )?;
+            let target = key.to_target();
+            self.apply_tombstone(&target, &key.key, &tombstone.email, tombstone.timestamp)?;
         }
 
         Ok(())

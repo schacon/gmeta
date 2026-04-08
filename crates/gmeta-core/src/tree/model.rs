@@ -29,15 +29,9 @@ impl Key {
     #[must_use]
     pub fn to_target(&self) -> Target {
         if self.target_type == TargetType::Project {
-            Target {
-                target_type: TargetType::Project,
-                value: None,
-            }
+            Target::project()
         } else {
-            Target {
-                target_type: self.target_type.clone(),
-                value: Some(self.target_value.clone()),
-            }
+            Target::from_parts(self.target_type.clone(), Some(self.target_value.clone()))
         }
     }
 }

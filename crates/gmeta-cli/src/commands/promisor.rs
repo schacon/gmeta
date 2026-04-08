@@ -69,9 +69,13 @@ pub fn run() -> Result<()> {
                         continue;
                     }
                     let tt = change.target_type.parse::<TargetType>()?;
+                    let target = if tt == TargetType::Project {
+                        gmeta_core::types::Target::project()
+                    } else {
+                        gmeta_core::types::Target::from_parts(tt, Some(change.target_value.clone()))
+                    };
                     if ctx.session.store().insert_promised(
-                        &tt,
-                        &change.target_value,
+                        &target,
                         &change.key,
                         &ValueType::String,
                     )? {
@@ -103,12 +107,16 @@ pub fn run() -> Result<()> {
 
                 for (target_type, target_value, key) in &keys {
                     let tt = target_type.parse::<TargetType>()?;
-                    if ctx.session.store().insert_promised(
-                        &tt,
-                        target_value,
-                        key,
-                        &ValueType::String,
-                    )? {
+                    let target = if tt == TargetType::Project {
+                        gmeta_core::types::Target::project()
+                    } else {
+                        gmeta_core::types::Target::from_parts(tt, Some(target_value.clone()))
+                    };
+                    if ctx
+                        .session
+                        .store()
+                        .insert_promised(&target, key, &ValueType::String)?
+                    {
                         commit_inserted += 1;
                         inserted += 1;
                     } else {

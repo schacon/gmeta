@@ -164,11 +164,12 @@ fn run_promisor_list(db: &Store, target_type: Option<&str>) -> Result<()> {
 /// List keys for a specific target type, optionally fuzzy-filtered.
 fn run_list(db: &Store, target_type: &str, term: Option<&str>) -> Result<()> {
     let all = db.get_all_metadata()?;
+    let target_type_parsed = target_type.parse::<gmeta_core::TargetType>()?;
 
     // Filter to target type
     let mut entries: Vec<&gmeta_core::db::types::SerializableEntry> = all
         .iter()
-        .filter(|e| e.target_type == target_type)
+        .filter(|e| e.target_type == target_type_parsed)
         .collect();
 
     if entries.is_empty() {

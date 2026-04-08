@@ -210,9 +210,11 @@ fn import_checkpoints_from_commits(
 
                 // Skip if already imported
                 if let Some(db) = db {
-                    if let Ok(Some(_mv)) =
-                        db.get(&TargetType::Commit, &commit_sha, "agent:checkpoint-id")
-                    {
+                    let commit_target = gmeta_core::types::Target::from_parts(
+                        TargetType::Commit,
+                        Some(commit_sha.clone()),
+                    );
+                    if let Ok(Some(_mv)) = db.get(&commit_target, "agent:checkpoint-id") {
                         skipped += 1;
                         continue;
                     }
@@ -802,12 +804,19 @@ fn set_value(
     }
 
     if let Some(db) = db {
+        let target = if *target_type == TargetType::Project {
+            gmeta_core::types::Target::project()
+        } else {
+            gmeta_core::types::Target::from_parts(
+                target_type.clone(),
+                Some(target_value.to_string()),
+            )
+        };
         if use_git_ref {
             let blob_oid: gix::ObjectId = repo.write_blob(value.as_bytes())?.into();
             db.set_with_git_ref(
                 None,
-                target_type,
-                target_value,
+                &target,
                 key,
                 &blob_oid.to_string(),
                 value_type,
@@ -816,15 +825,7 @@ fn set_value(
                 true,
             )?;
         } else {
-            db.set(
-                target_type,
-                target_value,
-                key,
-                value,
-                value_type,
-                email,
-                timestamp,
-            )?;
+            db.set(&target, key, value, value_type, email, timestamp)?;
         }
     }
     Ok(1)
@@ -1005,10 +1006,11 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 
             // Check whether we already have data for this commit
             if let Some(db) = db {
-                if db
-                    .get(&TargetType::Commit, &commit_sha, "agent.blame")?
-                    .is_some()
-                {
+                let commit_target = gmeta_core::types::Target::from_parts(
+                    TargetType::Commit,
+                    Some(commit_sha.clone()),
+                );
+                if db.get(&commit_target, "agent.blame")?.is_some() {
                     skipped_exists += 1;
                     continue;
                 }
@@ -1026,6 +1028,10 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
             );
 
             if let Some(db) = db {
+                let commit_target = gmeta_core::types::Target::from_parts(
+                    TargetType::Commit,
+                    Some(commit_sha.clone()),
+                );
                 // agent.blame -- store as git blob ref if large
                 let (blame_val, is_ref) = if parsed.blame.len() > GIT_REF_THRESHOLD {
                     let oid: gix::ObjectId = repo.write_blob(parsed.blame.as_bytes())?.into();
@@ -1035,8 +1041,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                 };
                 db.set_with_git_ref(
                     None,
-                    &TargetType::Commit,
-                    &commit_sha,
+                    &commit_target,
                     "agent.blame",
                     &blame_val,
                     &ValueType::String,
@@ -1046,8 +1051,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                 )?;
 
                 db.set(
-                    &TargetType::Commit,
-                    &commit_sha,
+                    &commit_target,
                     "agent.git-ai.schema-version",
                     &json_string(&parsed.schema_version),
                     &ValueType::String,
@@ -1057,8 +1061,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 
                 if let Some(ref ver) = parsed.git_ai_version {
                     db.set(
-                        &TargetType::Commit,
-                        &commit_sha,
+                        &commit_target,
                         "agent.git-ai.version",
                         &json_string(ver),
                         &ValueType::String,
@@ -1069,8 +1072,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 
                 if parsed.model != "unknown" {
                     db.set(
-                        &TargetType::Commit,
-                        &commit_sha,
+                        &commit_target,
                         "agent.model",
                         &json_string(&parsed.model),
                         &ValueType::String,

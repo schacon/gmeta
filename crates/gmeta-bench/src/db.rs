@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
-use gmeta_core::types::TargetType;
+use gmeta_core::types::{Target, TargetType};
 use gmeta_core::Session;
 
 const RESET: &str = "\x1b[0m";
@@ -40,7 +40,12 @@ pub fn run() -> Result<()> {
                 continue;
             }
         };
-        match db.get(&target_type, target_value, key) {
+        let target = if target_type == TargetType::Project {
+            Target::project()
+        } else {
+            Target::from_parts(target_type, Some(target_value.clone()))
+        };
+        match db.get(&target, key) {
             Ok(Some(mv)) => {
                 let elapsed = t0.elapsed();
                 let bytes = mv.value.len();

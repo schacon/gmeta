@@ -61,6 +61,11 @@ pub(crate) mod tree;
 #[cfg(feature = "internal")]
 pub mod tree;
 
+#[cfg(not(feature = "internal"))]
+pub(crate) mod tree_paths;
+#[cfg(feature = "internal")]
+pub mod tree_paths;
+
 // Public API re-exports: these are visible regardless of feature flags.
 // The `pub use` makes specific types public even when the source module
 // is `pub(crate)`.

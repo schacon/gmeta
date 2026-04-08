@@ -29,44 +29,18 @@ impl Store {
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type = &target.target_type;
-        let target_value = target.value_str();
         match value {
             MetaValue::String(s) => {
                 let json = serde_json::to_string(s)?;
-                self.set(
-                    target_type,
-                    target_value,
-                    key,
-                    &json,
-                    &ValueType::String,
-                    email,
-                    timestamp,
-                )
+                self.set(target, key, &json, &ValueType::String, email, timestamp)
             }
             MetaValue::List(entries) => {
                 let json = encode_entries(entries)?;
-                self.set(
-                    target_type,
-                    target_value,
-                    key,
-                    &json,
-                    &ValueType::List,
-                    email,
-                    timestamp,
-                )
+                self.set(target, key, &json, &ValueType::List, email, timestamp)
             }
             MetaValue::Set(members) => {
                 let json = serde_json::to_string(&members.iter().collect::<Vec<_>>())?;
-                self.set(
-                    target_type,
-                    target_value,
-                    key,
-                    &json,
-                    &ValueType::Set,
-                    email,
-                    timestamp,
-                )
+                self.set(target, key, &json, &ValueType::Set, email, timestamp)
             }
         }
     }
@@ -85,7 +59,7 @@ impl Store {
     ///
     /// Returns an error if the database read or deserialization fails.
     pub fn get_value(&self, target: &Target, key: &str) -> Result<Option<MetaValue>> {
-        let result = self.get(&target.target_type, target.value_str(), key)?;
+        let result = self.get(target, key)?;
         match result {
             None => Ok(None),
             Some(entry) => match entry.value_type {
@@ -227,15 +201,7 @@ mod tests {
             1000,
         )
         .unwrap();
-        assert!(db
-            .remove(
-                &target.target_type,
-                target.value_str(),
-                "key",
-                "a@b.com",
-                2000
-            )
-            .unwrap());
+        assert!(db.remove(&target, "key", "a@b.com", 2000).unwrap());
         assert_eq!(db.get_value(&target, "key").unwrap(), None);
     }
 
@@ -244,33 +210,9 @@ mod tests {
         let db = Store::open_in_memory().unwrap();
         let target = Target::parse("commit:abc123").unwrap();
 
-        db.list_push(
-            &target.target_type,
-            target.value_str(),
-            "tags",
-            "a",
-            "a@b.com",
-            1000,
-        )
-        .unwrap();
-        db.list_push(
-            &target.target_type,
-            target.value_str(),
-            "tags",
-            "b",
-            "a@b.com",
-            2000,
-        )
-        .unwrap();
-        db.list_pop(
-            &target.target_type,
-            target.value_str(),
-            "tags",
-            "b",
-            "a@b.com",
-            3000,
-        )
-        .unwrap();
+        db.list_push(&target, "tags", "a", "a@b.com", 1000).unwrap();
+        db.list_push(&target, "tags", "b", "a@b.com", 2000).unwrap();
+        db.list_pop(&target, "tags", "b", "a@b.com", 3000).unwrap();
 
         let result = db.get_value(&target, "tags").unwrap().unwrap();
         match result {
@@ -284,33 +226,12 @@ mod tests {
         let db = Store::open_in_memory().unwrap();
         let target = Target::parse("commit:abc123").unwrap();
 
-        db.set_add(
-            &target.target_type,
-            target.value_str(),
-            "owners",
-            "alice",
-            "a@b.com",
-            1000,
-        )
-        .unwrap();
-        db.set_add(
-            &target.target_type,
-            target.value_str(),
-            "owners",
-            "bob",
-            "a@b.com",
-            2000,
-        )
-        .unwrap();
-        db.set_remove(
-            &target.target_type,
-            target.value_str(),
-            "owners",
-            "bob",
-            "a@b.com",
-            3000,
-        )
-        .unwrap();
+        db.set_add(&target, "owners", "alice", "a@b.com", 1000)
+            .unwrap();
+        db.set_add(&target, "owners", "bob", "a@b.com", 2000)
+            .unwrap();
+        db.set_remove(&target, "owners", "bob", "a@b.com", 3000)
+            .unwrap();
 
         let result = db.get_value(&target, "owners").unwrap().unwrap();
         let mut expected = BTreeSet::new();

@@ -6,7 +6,7 @@ use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 
 use crate::context::CommandContext;
-use gmeta_core::types::TargetType;
+use gmeta_core::types::{Target, TargetType};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -47,7 +47,10 @@ pub fn run(
         let entries = ctx
             .session
             .store()
-            .get_all(&TargetType::Commit, &sha, None)
+            .get_all(
+                &Target::from_parts(TargetType::Commit, Some(sha.clone())),
+                None,
+            )
             .unwrap_or_default();
         // get_all returns (key, value, value_type, is_git_ref)
         // value is a JSON-encoded string for string types

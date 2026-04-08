@@ -7,6 +7,7 @@ use crate::error::{Error, Result};
 
 use super::model::{Key, ParsedTree, Tombstone, TreeValue};
 use crate::git_utils;
+use crate::tree_paths;
 use crate::types::{
     decode_key_path_segments, decode_path_target_segments, TargetType, LIST_VALUE_DIR,
     PATH_TARGET_SEPARATOR, SET_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_BLOB, TOMBSTONE_ROOT,
@@ -476,18 +477,18 @@ pub fn build_merged_tree(
 
         match tree_val {
             TreeValue::String(s) => {
-                let full_path = target.tree_path(&k.key)?;
+                let full_path = tree_paths::tree_path(&target, &k.key)?;
                 files.insert(full_path, s.as_bytes().to_vec());
             }
             TreeValue::List(list_entries) => {
-                let list_dir_path = target.list_dir_path(&k.key)?;
+                let list_dir_path = tree_paths::list_dir_path(&target, &k.key)?;
                 for (entry_name, content) in list_entries {
                     let full_path = format!("{}/{}", list_dir_path, entry_name);
                     files.insert(full_path, content.as_bytes().to_vec());
                 }
             }
             TreeValue::Set(set_members) => {
-                let set_dir_path = target.set_dir_path(&k.key)?;
+                let set_dir_path = tree_paths::set_dir_path(&target, &k.key)?;
                 for (member_id, content) in set_members {
                     let full_path = format!("{}/{}", set_dir_path, member_id);
                     files.insert(full_path, content.as_bytes().to_vec());
@@ -498,7 +499,7 @@ pub fn build_merged_tree(
 
     for (k, tombstone) in tombstones {
         let target = k.to_target();
-        let full_path = target.tombstone_path(&k.key)?;
+        let full_path = tree_paths::tombstone_path(&target, &k.key)?;
         let payload = serde_json::to_vec(&Tombstone {
             timestamp: tombstone.timestamp,
             email: tombstone.email.clone(),
@@ -508,13 +509,13 @@ pub fn build_merged_tree(
 
     for ((k, member_id), tombstone_value) in set_tombstones {
         let target = k.to_target();
-        let full_path = target.set_member_tombstone_path(&k.key, member_id)?;
+        let full_path = tree_paths::set_member_tombstone_path(&target, &k.key, member_id)?;
         files.insert(full_path, tombstone_value.as_bytes().to_vec());
     }
 
     for ((k, entry_name), tombstone) in list_tombstones {
         let target = k.to_target();
-        let full_path = target.list_entry_tombstone_path(&k.key, entry_name)?;
+        let full_path = tree_paths::list_entry_tombstone_path(&target, &k.key, entry_name)?;
         let payload = serde_json::to_vec(&Tombstone {
             timestamp: tombstone.timestamp,
             email: tombstone.email.clone(),

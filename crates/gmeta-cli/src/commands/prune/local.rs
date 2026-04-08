@@ -2,7 +2,7 @@ use anyhow::Result;
 
 use crate::context::CommandContext;
 use gmeta_core::prune::{parse_since_to_cutoff_ms, read_prune_rules};
-use gmeta_core::types::TargetType;
+use gmeta_core::types::Target;
 
 pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
@@ -22,7 +22,7 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
                 match ctx
                     .session
                     .store()
-                    .get(&TargetType::Project, "", "meta:prune:since")?
+                    .get(&Target::project(), "meta:prune:since")?
                 {
                     Some(entry) => {
                         let s: String = serde_json::from_str(&entry.value)?;

@@ -12,7 +12,7 @@ use crate::types::{MetaValue, Target, ValueType};
 /// ```ignore
 /// let session = Session::discover()?;
 /// let handle = session.target(&Target::parse("commit:abc123")?);
-/// handle.set_value("agent:model", &MetaValue::String("claude".into()))?;
+/// handle.set("agent:model", "claude")?;
 /// let val = handle.get_value("agent:model")?;
 /// ```
 pub struct SessionTargetHandle<'a> {
@@ -52,30 +52,13 @@ impl<'a> SessionTargetHandle<'a> {
         )
     }
 
-    /// Set a metadata value.
-    ///
-    /// Uses the session's email and timestamp automatically.
-    pub fn set_value(&self, key: &str, value: &MetaValue) -> Result<()> {
-        self.session.store.set_value(
-            &self.target,
-            key,
-            value,
-            self.session.email(),
-            self.session.now(),
-        )
-    }
-
     /// Remove a metadata key.
     ///
     /// Uses the session's email and timestamp automatically.
     pub fn remove(&self, key: &str) -> Result<bool> {
-        self.session.store.remove(
-            &self.target.target_type,
-            self.target.value_str(),
-            key,
-            self.session.email(),
-            self.session.now(),
-        )
+        self.session
+            .store
+            .remove(&self.target, key, self.session.email(), self.session.now())
     }
 
     /// Push a value onto a list.
@@ -83,8 +66,7 @@ impl<'a> SessionTargetHandle<'a> {
     /// Uses the session's email and timestamp automatically.
     pub fn list_push(&self, key: &str, value: &str) -> Result<()> {
         self.session.store.list_push(
-            &self.target.target_type,
-            self.target.value_str(),
+            &self.target,
             key,
             value,
             self.session.email(),
@@ -97,8 +79,7 @@ impl<'a> SessionTargetHandle<'a> {
     /// Uses the session's email and timestamp automatically.
     pub fn list_pop(&self, key: &str, value: &str) -> Result<()> {
         self.session.store.list_pop(
-            &self.target.target_type,
-            self.target.value_str(),
+            &self.target,
             key,
             value,
             self.session.email(),
@@ -111,8 +92,7 @@ impl<'a> SessionTargetHandle<'a> {
     /// Uses the session's email and timestamp automatically.
     pub fn list_remove(&self, key: &str, index: usize) -> Result<()> {
         self.session.store.list_remove(
-            &self.target.target_type,
-            self.target.value_str(),
+            &self.target,
             key,
             index,
             self.session.email(),
@@ -125,8 +105,7 @@ impl<'a> SessionTargetHandle<'a> {
     /// Uses the session's email and timestamp automatically.
     pub fn set_add(&self, key: &str, value: &str) -> Result<()> {
         self.session.store.set_add(
-            &self.target.target_type,
-            self.target.value_str(),
+            &self.target,
             key,
             value,
             self.session.email(),
@@ -139,8 +118,7 @@ impl<'a> SessionTargetHandle<'a> {
     /// Uses the session's email and timestamp automatically.
     pub fn set_remove(&self, key: &str, value: &str) -> Result<()> {
         self.session.store.set_remove(
-            &self.target.target_type,
-            self.target.value_str(),
+            &self.target,
             key,
             value,
             self.session.email(),
@@ -170,11 +148,7 @@ impl<'a> SessionTargetHandle<'a> {
     ///
     /// Returns an error if the database read or deserialization fails.
     pub fn get_all_values(&self, prefix: Option<&str>) -> Result<Vec<(String, MetaValue)>> {
-        let entries = self.session.store.get_all(
-            &self.target.target_type,
-            self.target.value_str(),
-            prefix,
-        )?;
+        let entries = self.session.store.get_all(&self.target, prefix)?;
         let mut result = Vec::with_capacity(entries.len());
         for entry in entries {
             let meta_value = match entry.value_type {
@@ -213,9 +187,7 @@ impl<'a> SessionTargetHandle<'a> {
     /// Returns an error if the key is missing, the value is not a list, or
     /// the database read fails.
     pub fn list_entries(&self, key: &str) -> Result<Vec<crate::list_value::ListEntry>> {
-        self.session
-            .store
-            .list_entries(&self.target.target_type, self.target.value_str(), key)
+        self.session.store.list_entries(&self.target, key)
     }
 
     /// Get authorship info (last author email and timestamp) for a key on this target.
@@ -233,8 +205,6 @@ impl<'a> SessionTargetHandle<'a> {
     ///
     /// Returns an error if the database read fails.
     pub fn get_authorship(&self, key: &str) -> Result<Option<crate::db::types::Authorship>> {
-        self.session
-            .store
-            .get_authorship(&self.target.target_type, self.target.value_str(), key)
+        self.session.store.get_authorship(&self.target, key)
     }
 }

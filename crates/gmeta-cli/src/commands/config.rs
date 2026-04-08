@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::types::{validate_key, MetaValue, Target, TargetType};
+use gmeta_core::types::{validate_key, MetaValue, Target};
 
 const CONFIG_PREFIX: &str = "meta:";
 
@@ -41,15 +41,12 @@ fn validate_config_key(key: &str) -> Result<()> {
 }
 
 fn project_target() -> Target {
-    Target {
-        target_type: TargetType::Project,
-        value: None,
-    }
+    Target::project()
 }
 
 fn run_set(handle: &gmeta_core::SessionTargetHandle<'_>, key: &str, value: &str) -> Result<()> {
     let meta_value = MetaValue::String(value.to_string());
-    handle.set_value(key, &meta_value)?;
+    handle.set(key, meta_value)?;
     Ok(())
 }
 

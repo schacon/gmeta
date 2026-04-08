@@ -3,7 +3,68 @@
 //! These structs replace anonymous tuples in the public API, making
 //! field access explicit and preventing mis-ordering bugs.
 
-use crate::types::ValueType;
+use std::fmt;
+use std::str::FromStr;
+
+use crate::error::Error;
+use crate::types::{TargetType, ValueType};
+
+/// The kind of mutation recorded in the metadata log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Operation {
+    /// A key was set or updated.
+    Set,
+    /// A key was removed.
+    Remove,
+    /// A value was pushed onto a list.
+    Push,
+    /// A value was popped from a list.
+    Pop,
+    /// A list entry was removed by index.
+    ListRemove,
+    /// A member was added to a set.
+    SetAdd,
+    /// A member was removed from a set.
+    SetRemove,
+}
+
+impl fmt::Display for Operation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Operation {
+    /// Returns the wire-format string for this operation.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Operation::Set => "set",
+            Operation::Remove => "rm",
+            Operation::Push => "push",
+            Operation::Pop => "pop",
+            Operation::ListRemove => "list_rm",
+            Operation::SetAdd => "set_add",
+            Operation::SetRemove => "set_rm",
+        }
+    }
+}
+
+impl FromStr for Operation {
+    type Err = Error;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "set" => Ok(Operation::Set),
+            "rm" => Ok(Operation::Remove),
+            "push" => Ok(Operation::Push),
+            "pop" => Ok(Operation::Pop),
+            "list_rm" => Ok(Operation::ListRemove),
+            "set_add" => Ok(Operation::SetAdd),
+            "set_rm" => Ok(Operation::SetRemove),
+            _ => Err(Error::Other(format!("unknown operation: {s}"))),
+        }
+    }
+}
 
 /// Result of looking up a single metadata value.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,8 +119,8 @@ pub struct Authorship {
 /// A tombstone record for a deleted metadata key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TombstoneRecord {
-    /// The target type string (e.g. `"commit"`).
-    pub target_type: String,
+    /// The target type.
+    pub target_type: TargetType,
     /// The target value (e.g. a commit SHA).
     pub target_value: String,
     /// The metadata key name.
@@ -73,8 +134,8 @@ pub struct TombstoneRecord {
 /// A tombstone record for a deleted set member.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetTombstoneRecord {
-    /// The target type string (e.g. `"commit"`).
-    pub target_type: String,
+    /// The target type.
+    pub target_type: TargetType,
     /// The target value (e.g. a commit SHA).
     pub target_value: String,
     /// The metadata key name.
@@ -92,8 +153,8 @@ pub struct SetTombstoneRecord {
 /// A tombstone record for a deleted list entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListTombstoneRecord {
-    /// The target type string (e.g. `"commit"`).
-    pub target_type: String,
+    /// The target type.
+    pub target_type: TargetType,
     /// The target value (e.g. a commit SHA).
     pub target_value: String,
     /// The metadata key name.
@@ -109,25 +170,25 @@ pub struct ListTombstoneRecord {
 /// An entry from the metadata mutation log (for incremental serialization).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModifiedEntry {
-    /// The target type string (e.g. `"commit"`).
-    pub target_type: String,
+    /// The target type.
+    pub target_type: TargetType,
     /// The target value (e.g. a commit SHA).
     pub target_value: String,
     /// The metadata key name.
     pub key: String,
-    /// The operation performed (e.g. `"set"`, `"rm"`).
-    pub operation: String,
+    /// The operation performed.
+    pub operation: Operation,
     /// The current value (empty string if deleted).
     pub value: String,
-    /// The current value type (empty string if deleted).
-    pub value_type: String,
+    /// The current value type (`None` if deleted).
+    pub value_type: Option<ValueType>,
 }
 
 /// A complete metadata record for serialization (includes target type and timestamp).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SerializableEntry {
-    /// The target type string (e.g. `"commit"`).
-    pub target_type: String,
+    /// The target type.
+    pub target_type: TargetType,
     /// The target value (e.g. a commit SHA).
     pub target_value: String,
     /// The metadata key name.

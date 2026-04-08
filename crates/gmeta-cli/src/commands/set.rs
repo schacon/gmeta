@@ -3,20 +3,20 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::types::{validate_key, MetaValue, Target, ValueType, GIT_REF_THRESHOLD};
+use gmeta_core::types::{MetaValue, Target, ValueType, GIT_REF_THRESHOLD};
 use gmeta_core::ListEntry;
 
 fn print_result(action: &str, key: &str, target: &Target, json: bool) {
-    let target_str = match &target.value {
-        Some(v) => format!("{} {}", target.type_str(), v),
-        None => target.type_str().to_string(),
+    let target_str = match target.value() {
+        Some(v) => format!("{} {}", target.target_type().as_str(), v),
+        None => target.target_type().as_str().to_string(),
     };
     if json {
         let json_obj = serde_json::json!({
             "action": action,
             "key": key,
-            "target_type": target.type_str(),
-            "target_value": target.value.as_deref().unwrap_or(""),
+            "target_type": target.target_type().as_str(),
+            "target_value": target.value().unwrap_or(""),
         });
         println!("{}", serde_json::to_string(&json_obj).unwrap_or_default());
     } else {
@@ -33,11 +33,8 @@ pub fn run(
     json: bool,
     timestamp: Option<i64>,
 ) -> Result<()> {
-    let mut target = Target::parse(target_str)?;
-    validate_key(key)?;
-
     let ctx = CommandContext::open(timestamp)?;
-    ctx.session.resolve_target(&mut target)?;
+    let target = ctx.session.resolve_target(&Target::parse(target_str)?)?;
 
     let value_type = value_type_str.parse::<ValueType>()?;
 
@@ -64,8 +61,7 @@ pub fn run(
         let blob_oid: gix::ObjectId = repo.write_blob(raw_value.as_bytes())?.into();
         ctx.session.store().set_with_git_ref(
             None,
-            &target.target_type,
-            target.value_str(),
+            &target,
             key,
             &blob_oid.to_string(),
             &value_type,
@@ -87,7 +83,7 @@ pub fn run(
             }
             _ => bail!("unsupported value type"),
         };
-        handle.set_value(key, &meta_value)?;
+        handle.set(key, meta_value)?;
     }
 
     print_result("set", key, &target, json);
@@ -101,11 +97,8 @@ pub fn run_add(
     json: bool,
     timestamp: Option<i64>,
 ) -> Result<()> {
-    let mut target = Target::parse(target_str)?;
-    validate_key(key)?;
-
     let ctx = CommandContext::open(timestamp)?;
-    ctx.session.resolve_target(&mut target)?;
+    let target = ctx.session.resolve_target(&Target::parse(target_str)?)?;
 
     ctx.session.target(&target).set_add(key, value)?;
     print_result("added", key, &target, json);
@@ -119,11 +112,8 @@ pub fn run_rm(
     json: bool,
     timestamp: Option<i64>,
 ) -> Result<()> {
-    let mut target = Target::parse(target_str)?;
-    validate_key(key)?;
-
     let ctx = CommandContext::open(timestamp)?;
-    ctx.session.resolve_target(&mut target)?;
+    let target = ctx.session.resolve_target(&Target::parse(target_str)?)?;
 
     ctx.session.target(&target).set_remove(key, value)?;
     print_result("removed", key, &target, json);

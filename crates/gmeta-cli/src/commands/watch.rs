@@ -10,7 +10,7 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use time::OffsetDateTime;
 
 use crate::context::CommandContext;
-use gmeta_core::types::{TargetType, ValueType};
+use gmeta_core::types::{Target, TargetType, ValueType};
 use gmeta_core::Session;
 
 // ANSI colors
@@ -106,7 +106,7 @@ pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
         match rx.recv_timeout(Duration::from_secs(1)) {
             Ok(Ok(event)) => {
                 for path in &event.paths {
-                    if path.extension().map(|e| e == "jsonl").unwrap_or(false)
+                    if path.extension().is_some_and(|e| e == "jsonl")
                         && path.starts_with(&transcripts_dir)
                     {
                         state.handle_transcript_change(path)?;
@@ -189,7 +189,7 @@ impl WatchState {
         for entry in std::fs::read_dir(&self.transcripts_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().map(|e| e == "jsonl").unwrap_or(false) && path.is_file() {
+            if path.extension().is_some_and(|e| e == "jsonl") && path.is_file() {
                 let size = entry.metadata()?.len();
                 self.file_positions.insert(path, size);
             }
@@ -342,8 +342,7 @@ impl WatchState {
         self.agent_idle = true;
         let idle_secs = self
             .last_transcript_activity
-            .map(|t| t.elapsed().as_secs())
-            .unwrap_or(0);
+            .map_or(0, |t| t.elapsed().as_secs());
 
         eprintln!(
             "\n{}{}[idle]{} Agent stopped ({}s) -- committing...",
@@ -485,9 +484,10 @@ impl WatchState {
                             .or_insert(ts);
                         let branch_id = format!("{}@{}", branch_name, first_seen);
                         let value = serde_json::to_string(&branch_id)?;
+                        let cid_target =
+                            Target::from_parts(TargetType::ChangeId, Some(cid.clone()));
                         db.set(
-                            &TargetType::ChangeId,
-                            cid,
+                            &cid_target,
                             "branch:id",
                             &value,
                             &ValueType::String,
@@ -508,8 +508,7 @@ impl WatchState {
                             for prompt in prompts {
                                 db.list_push_with_repo(
                                     Some(session.repo()),
-                                    &TargetType::ChangeId,
-                                    cid,
+                                    &cid_target,
                                     "agent:prompts",
                                     &prompt,
                                     email,
@@ -607,10 +606,10 @@ impl WatchState {
         let db = session.store();
         let email = session.email();
 
+        let branch_target = Target::from_parts(TargetType::Branch, Some(branch_id.clone()));
         db.list_push_with_repo(
             Some(session.repo()),
-            &TargetType::Branch,
-            &branch_id,
+            &branch_target,
             "agent:transcripts",
             &transcript_content,
             email,
@@ -646,7 +645,9 @@ fn get_change_id(workdir: &Path, show_id: &str) -> Option<String> {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).ok()?;
-    json["changeId"].as_str().map(|s| s.to_string())
+    json["changeId"]
+        .as_str()
+        .map(std::string::ToString::to_string)
 }
 
 /// Extract text strings from a message content value.

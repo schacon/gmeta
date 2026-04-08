@@ -13,7 +13,8 @@ use std::io::Write;
 use std::time::Instant;
 
 use gmeta_core::db::Store;
-use gmeta_core::types::{TargetType, ValueType};
+use gmeta_core::tree_paths;
+use gmeta_core::types::{Target, TargetType, ValueType};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -211,13 +212,13 @@ fn build_bench_tree(
         if e.value_type != ValueType::String {
             continue;
         }
-        let target = if e.target_type == "project" {
+        let target = if e.target_type == TargetType::Project {
             Target::parse("project")?
         } else {
             Target::parse(&format!("{}:{}", e.target_type, e.target_value))?
         };
 
-        let full_path = target.tree_path(&e.key)?;
+        let full_path = tree_paths::tree_path(&target, &e.key)?;
         if e.is_git_ref {
             let oid = gix::ObjectId::from_hex(e.value.as_bytes())?;
             let blob = oid.attach(repo).object()?.into_blob();
@@ -304,9 +305,9 @@ pub fn run(rounds: usize) -> Result<()> {
             let value = fake_value(&mut rng, 10, 200);
             let json_value = serde_json::to_string(&value)?;
 
+            let target = Target::from_parts(TargetType::Commit, Some(sha));
             db.set(
-                &TargetType::Commit,
-                &sha,
+                &target,
                 &key,
                 &json_value,
                 &ValueType::String,

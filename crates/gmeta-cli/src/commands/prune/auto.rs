@@ -4,7 +4,7 @@ use gix::prelude::ObjectIdExt;
 use time::{Duration, OffsetDateTime};
 
 use gmeta_core::db::Store;
-use gmeta_core::types::TargetType;
+use gmeta_core::types::Target;
 
 /// Parsed auto-prune rules from project metadata.
 pub struct PruneRules {
@@ -54,7 +54,7 @@ pub fn read_prune_rules(db: &Store) -> Result<Option<PruneRules>> {
 }
 
 fn read_config_string(db: &Store, key: &str) -> Result<Option<String>> {
-    match db.get(&TargetType::Project, "", key)? {
+    match db.get(&Target::project(), key)? {
         Some(entry) => {
             let s: String = serde_json::from_str(&entry.value)?;
             Ok(Some(s))

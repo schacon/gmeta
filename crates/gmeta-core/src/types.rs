@@ -64,8 +64,8 @@ impl TargetType {
 /// A resolved metadata target consisting of a type and an optional value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Target {
-    pub target_type: TargetType,
-    pub value: Option<String>,
+    target_type: TargetType,
+    value: Option<String>,
 }
 
 impl fmt::Display for Target {
@@ -78,6 +78,22 @@ impl fmt::Display for Target {
 }
 
 impl Target {
+    /// Create a target from raw parts.
+    ///
+    /// This is a low-level constructor used when the target type and value are
+    /// already known (e.g., when reconstructing targets from database rows or
+    /// parsed tree entries). For user-facing construction, prefer the named
+    /// constructors ([`commit()`](Self::commit), [`project()`](Self::project), etc.)
+    /// or [`parse()`](Self::parse).
+    ///
+    /// # Parameters
+    /// - `target_type`: the kind of target
+    /// - `value`: the target value, or `None` for project targets
+    #[must_use]
+    pub fn from_parts(target_type: TargetType, value: Option<String>) -> Self {
+        Target { target_type, value }
+    }
+
     /// Create a commit target from a SHA (full or partial).
     ///
     /// # Parameters
@@ -179,147 +195,36 @@ impl Target {
         })
     }
 
-    pub fn type_str(&self) -> &str {
-        self.target_type.as_str()
+    /// The type of this target (commit, branch, path, etc.).
+    #[must_use]
+    pub fn target_type(&self) -> &TargetType {
+        &self.target_type
     }
 
-    pub fn value_str(&self) -> &str {
-        self.value.as_deref().unwrap_or("")
+    /// The target's value, if any.
+    ///
+    /// Returns `None` for project targets, `Some(sha)` for commit targets, etc.
+    #[must_use]
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
     }
 
     /// If this is a commit target with a partial SHA, expand it to 40 chars
-    /// using the given Git repository.
-    pub fn resolve(&mut self, repo: &gix::Repository) -> Result<()> {
+    /// using the given Git repository. Returns a new target with the expanded SHA,
+    /// or a clone of this target if no resolution is needed.
+    pub fn resolve(&self, repo: &gix::Repository) -> Result<Target> {
         if self.target_type == TargetType::Commit {
             if let Some(ref v) = self.value {
                 if v.len() < 40 {
                     let full = crate::git_utils::resolve_commit_sha(repo, v)?;
-                    self.value = Some(full);
+                    return Ok(Target {
+                        target_type: self.target_type.clone(),
+                        value: Some(full),
+                    });
                 }
             }
         }
-        Ok(())
-    }
-
-    /// Build the common tree path prefix for any key.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn key_tree_path(&self, key: &str) -> Result<String> {
-        build_key_tree_path(self, key)
-    }
-
-    /// Build the full tree path for a string value.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn tree_path(&self, key: &str) -> Result<String> {
-        let key_path = build_key_tree_path(self, key)?;
-        Ok(format!("{}/{}", key_path, STRING_VALUE_BLOB))
-    }
-
-    /// Build the list directory path for a key.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn list_dir_path(&self, key: &str) -> Result<String> {
-        let key_path = build_key_tree_path(self, key)?;
-        Ok(format!("{}/{}", key_path, LIST_VALUE_DIR))
-    }
-
-    /// Build the set directory path for a key.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn set_dir_path(&self, key: &str) -> Result<String> {
-        let key_path = build_key_tree_path(self, key)?;
-        Ok(format!("{}/{}", key_path, SET_VALUE_DIR))
-    }
-
-    /// Build the tombstone blob path for a key.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn tombstone_path(&self, key: &str) -> Result<String> {
-        validate_key(key)?;
-        let base = self.tree_base_path();
-        let segments = key_to_path_segments(key).join("/");
-        Ok(format!(
-            "{}/{}/{}/{}",
-            base, TOMBSTONE_ROOT, segments, TOMBSTONE_BLOB
-        ))
-    }
-
-    /// Build the tombstone path for a specific list entry.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    /// - `entry`: the list entry name
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn list_entry_tombstone_path(&self, key: &str, entry: &str) -> Result<String> {
-        let key_path = build_key_tree_path(self, key)?;
-        Ok(format!(
-            "{}/{}/{}/{}",
-            key_path, LIST_VALUE_DIR, TOMBSTONE_ROOT, entry
-        ))
-    }
-
-    /// Build the tombstone path for a specific set member.
-    ///
-    /// # Parameters
-    /// - `key`: the metadata key name
-    /// - `member`: the set member ID
-    ///
-    /// # Errors
-    /// Returns an error if the key is invalid.
-    pub fn set_member_tombstone_path(&self, key: &str, member: &str) -> Result<String> {
-        let key_path = build_key_tree_path(self, key)?;
-        Ok(format!("{}/{}/{}", key_path, TOMBSTONE_ROOT, member))
-    }
-
-    /// Build the tree base path for serialization.
-    ///
-    /// Scheme per target type:
-    ///   commit    → commit/{first2_of_sha}/{full_sha}
-    ///   path      → path/{escaped_path_segments...}/__target__
-    ///   others    → type/{first2_of_sha1(target_value)}/{full_target_value}
-    ///   project   → project
-    pub fn tree_base_path(&self) -> String {
-        match self.target_type {
-            TargetType::Project => "project".to_string(),
-            TargetType::Commit => {
-                let v = self.value.as_deref().unwrap_or("");
-                let first2 = &v[..2];
-                format!("{}/{}/{}", self.type_str(), first2, v)
-            }
-            TargetType::Path => {
-                let v = self.value.as_deref().unwrap_or("");
-                let encoded = encode_path_target_value(v);
-                format!("{}/{}/{}", self.type_str(), encoded, PATH_TARGET_SEPARATOR)
-            }
-            _ => {
-                let v = self.value.as_deref().unwrap_or("");
-                let first2 = value_shard_prefix(v);
-                format!("{}/{}/{}", self.type_str(), first2, v)
-            }
-        }
+        Ok(self.clone())
     }
 }
 
@@ -425,50 +330,29 @@ impl From<std::collections::BTreeSet<String>> for MetaValue {
 }
 
 /// Size threshold (in bytes) above which file values are stored as git blob references.
+#[cfg(not(feature = "internal"))]
+pub(crate) const GIT_REF_THRESHOLD: usize = 1024;
+/// Size threshold (in bytes) above which file values are stored as git blob references.
+#[cfg(feature = "internal")]
 pub const GIT_REF_THRESHOLD: usize = 1024;
 
 /// Reserved filename for string terminal values.
-pub const STRING_VALUE_BLOB: &str = "__value";
+pub(crate) const STRING_VALUE_BLOB: &str = "__value";
 
 /// Reserved directory name for list terminal values.
-pub const LIST_VALUE_DIR: &str = "__list";
+pub(crate) const LIST_VALUE_DIR: &str = "__list";
 
 /// Reserved directory name for set terminal values.
-pub const SET_VALUE_DIR: &str = "__set";
+pub(crate) const SET_VALUE_DIR: &str = "__set";
 
 /// Reserved directory for tombstone entries.
-pub const TOMBSTONE_ROOT: &str = "__tombstones";
+pub(crate) const TOMBSTONE_ROOT: &str = "__tombstones";
 
 /// Reserved filename for tombstone blobs.
 pub(crate) const TOMBSTONE_BLOB: &str = "__deleted";
 
 /// Reserved separator between a serialized path target and its key path.
-pub const PATH_TARGET_SEPARATOR: &str = "__target__";
-
-/// Compute a stable 2-char hex shard prefix from the SHA-1 of the target value.
-fn value_shard_prefix(value: &str) -> String {
-    let mut hasher = Sha1::new();
-    hasher.update(value.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
-    hash[..2].to_string()
-}
-
-fn escape_path_target_segment(segment: &str) -> String {
-    if segment.starts_with('~') || segment.starts_with("__") {
-        format!("~{}", segment)
-    } else {
-        segment.to_string()
-    }
-}
-
-/// Encode a path target value by escaping reserved segments for safe tree storage.
-pub(crate) fn encode_path_target_value(value: &str) -> String {
-    value
-        .split('/')
-        .map(escape_path_target_segment)
-        .collect::<Vec<_>>()
-        .join("/")
-}
+pub(crate) const PATH_TARGET_SEPARATOR: &str = "__target__";
 
 /// Decode escaped path target segments back into a slash-separated path string.
 pub(crate) fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
@@ -494,7 +378,7 @@ pub(crate) fn decode_path_target_segments(segments: &[&str]) -> Result<String> {
 }
 
 /// Compute a deterministic set member ID by hashing the value as a git blob.
-pub fn set_member_id(value: &str) -> String {
+pub(crate) fn set_member_id(value: &str) -> String {
     let header = format!("blob {}\0", value.len());
     let mut hasher = Sha1::new();
     hasher.update(header.as_bytes());
@@ -534,7 +418,26 @@ fn validate_key_segment(segment: &str) -> Result<()> {
 }
 
 /// Validate that a metadata key can be serialized into the Git tree layout.
+///
+/// Called automatically by Store mutation methods. Library consumers do not
+/// need to call this directly unless validating keys before passing them to
+/// other systems.
+#[cfg(not(feature = "internal"))]
+pub(crate) fn validate_key(key: &str) -> Result<()> {
+    validate_key_inner(key)
+}
+
+/// Validate that a metadata key can be serialized into the Git tree layout.
+///
+/// Called automatically by Store mutation methods. Library consumers do not
+/// need to call this directly unless validating keys before passing them to
+/// other systems.
+#[cfg(feature = "internal")]
 pub fn validate_key(key: &str) -> Result<()> {
+    validate_key_inner(key)
+}
+
+fn validate_key_inner(key: &str) -> Result<()> {
     if key.is_empty() {
         return Err(Error::InvalidKey("key cannot be empty".into()));
     }
@@ -542,12 +445,6 @@ pub fn validate_key(key: &str) -> Result<()> {
         validate_key_segment(segment)?;
     }
     Ok(())
-}
-
-/// Build the full tree path segments for a key under a target.
-/// Key is split by ':' into subtree segments.
-pub(crate) fn key_to_path_segments(key: &str) -> Vec<String> {
-    key.split(':').map(|s| s.to_string()).collect()
 }
 
 /// Decode raw key path segments back into `:`-namespaced key form.
@@ -565,14 +462,6 @@ pub(crate) fn decode_key_path_segments(segments: &[&str]) -> Result<String> {
     Ok(decoded.join(":"))
 }
 
-/// Build the common tree path prefix for any key.
-fn build_key_tree_path(target: &Target, key: &str) -> Result<String> {
-    validate_key(key)?;
-    let base = target.tree_base_path();
-    let segments = key_to_path_segments(key).join("/");
-    Ok(format!("{}/{}", base, segments))
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -581,23 +470,23 @@ mod tests {
     #[test]
     fn test_parse_commit_target() {
         let t = Target::parse("commit:abc123").unwrap();
-        assert_eq!(t.target_type, TargetType::Commit);
-        assert_eq!(t.value, Some("abc123".to_string()));
+        assert_eq!(t.target_type(), &TargetType::Commit);
+        assert_eq!(t.value(), Some("abc123"));
     }
 
     #[test]
     fn test_parse_project_target() {
         let t = Target::parse("project").unwrap();
-        assert_eq!(t.target_type, TargetType::Project);
-        assert_eq!(t.value, None);
+        assert_eq!(t.target_type(), &TargetType::Project);
+        assert_eq!(t.value(), None);
     }
 
     #[test]
     fn test_parse_path_target_with_colon_in_value() {
         // Only the first colon splits type from value
         let t = Target::parse("path:src/foo.rs").unwrap();
-        assert_eq!(t.target_type, TargetType::Path);
-        assert_eq!(t.value, Some("src/foo.rs".to_string()));
+        assert_eq!(t.target_type(), &TargetType::Path);
+        assert_eq!(t.value(), Some("src/foo.rs"));
     }
 
     #[test]
@@ -613,37 +502,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tree_base_path_commit() {
-        let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        assert_eq!(
-            t.tree_base_path(),
-            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae"
-        );
-    }
-
-    #[test]
-    fn test_tree_base_path_project() {
-        let t = Target::parse("project").unwrap();
-        assert_eq!(t.tree_base_path(), "project");
-    }
-
-    #[test]
-    fn test_tree_path() {
-        let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        let path = t.tree_path("agent:model").unwrap();
-        assert_eq!(
-            path,
-            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/agent/model/__value"
-        );
-    }
-
-    #[test]
-    fn test_key_to_path_segments() {
-        let segments = key_to_path_segments("agent:model:version");
-        assert_eq!(segments, vec!["agent", "model", "version"]);
-    }
-
-    #[test]
     fn test_value_type_roundtrip() {
         assert_eq!("string".parse::<ValueType>().unwrap(), ValueType::String);
         assert_eq!("list".parse::<ValueType>().unwrap(), ValueType::List);
@@ -654,33 +512,8 @@ mod tests {
     #[test]
     fn test_parse_branch_target() {
         let t = Target::parse("branch:sc-branch-1-deadbeef").unwrap();
-        assert_eq!(t.target_type, TargetType::Branch);
-        assert_eq!(t.value, Some("sc-branch-1-deadbeef".to_string()));
-    }
-
-    #[test]
-    fn test_tree_base_path_branch() {
-        let t = Target::parse("branch:sc-branch-1-deadbeef").unwrap();
-        let expected_prefix = super::value_shard_prefix("sc-branch-1-deadbeef");
-        assert_eq!(
-            t.tree_base_path(),
-            format!("branch/{}/sc-branch-1-deadbeef", expected_prefix)
-        );
-    }
-
-    #[test]
-    fn test_tree_base_path_path_uses_raw_segments() {
-        let t = Target::parse("path:src/main.rs").unwrap();
-        assert_eq!(t.tree_base_path(), "path/src/main.rs/__target__");
-    }
-
-    #[test]
-    fn test_tree_base_path_path_escapes_reserved_segments() {
-        let t = Target::parse("path:src/__generated/file.rs").unwrap();
-        assert_eq!(
-            t.tree_base_path(),
-            "path/src/~__generated/file.rs/__target__"
-        );
+        assert_eq!(t.target_type(), &TargetType::Branch);
+        assert_eq!(t.value(), Some("sc-branch-1-deadbeef"));
     }
 
     #[test]
@@ -714,26 +547,6 @@ mod tests {
     #[test]
     fn test_validate_key_accepts_normal_segments() {
         assert!(super::validate_key("agent:model:version").is_ok());
-    }
-
-    #[test]
-    fn test_list_dir_path() {
-        let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        let path = t.list_dir_path("agent:chat").unwrap();
-        assert_eq!(
-            path,
-            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/agent/chat/__list"
-        );
-    }
-
-    #[test]
-    fn test_tombstone_path() {
-        let t = Target::parse("commit:13a7d29cde8f8557b54fd6474f547a56822180ae").unwrap();
-        let path = t.tombstone_path("agent:chat").unwrap();
-        assert_eq!(
-            path,
-            "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/__tombstones/agent/chat/__deleted"
-        );
     }
 
     #[test]
@@ -782,8 +595,8 @@ mod tests {
     #[test]
     fn test_target_commit_constructor() {
         let t = Target::commit("abc123").unwrap();
-        assert_eq!(t.target_type, TargetType::Commit);
-        assert_eq!(t.value, Some("abc123".to_string()));
+        assert_eq!(t.target_type(), &TargetType::Commit);
+        assert_eq!(t.value(), Some("abc123"));
     }
 
     #[test]
@@ -795,29 +608,29 @@ mod tests {
     #[test]
     fn test_target_project_constructor() {
         let t = Target::project();
-        assert_eq!(t.target_type, TargetType::Project);
-        assert_eq!(t.value, None);
+        assert_eq!(t.target_type(), &TargetType::Project);
+        assert_eq!(t.value(), None);
     }
 
     #[test]
     fn test_target_path_constructor() {
         let t = Target::path("src/main.rs");
-        assert_eq!(t.target_type, TargetType::Path);
-        assert_eq!(t.value, Some("src/main.rs".to_string()));
+        assert_eq!(t.target_type(), &TargetType::Path);
+        assert_eq!(t.value(), Some("src/main.rs"));
     }
 
     #[test]
     fn test_target_branch_constructor() {
         let t = Target::branch("feature-x");
-        assert_eq!(t.target_type, TargetType::Branch);
-        assert_eq!(t.value, Some("feature-x".to_string()));
+        assert_eq!(t.target_type(), &TargetType::Branch);
+        assert_eq!(t.value(), Some("feature-x"));
     }
 
     #[test]
     fn test_target_change_id_constructor() {
         let t = Target::change_id("jj-change-abc");
-        assert_eq!(t.target_type, TargetType::ChangeId);
-        assert_eq!(t.value, Some("jj-change-abc".to_string()));
+        assert_eq!(t.target_type(), &TargetType::ChangeId);
+        assert_eq!(t.value(), Some("jj-change-abc"));
     }
 
     #[test]

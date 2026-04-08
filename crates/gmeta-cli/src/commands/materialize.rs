@@ -579,10 +579,11 @@ fn collect_db_changes_from_tree(
     let mut planned = Vec::new();
 
     for (mk, tree_val) in values {
+        let target = mk.to_target();
         match tree_val {
             TreeValue::String(s) => {
                 let json_val = serde_json::to_string(s)?;
-                let existing = db.get(&mk.target_type, &mk.target_value, &mk.key)?;
+                let existing = db.get(&target, &mk.key)?;
                 if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: mk.target_type.clone(),
@@ -617,7 +618,7 @@ fn collect_db_changes_from_tree(
                     });
                 }
                 let json_val = encode_entries(&items)?;
-                let existing = db.get(&mk.target_type, &mk.target_value, &mk.key)?;
+                let existing = db.get(&target, &mk.key)?;
                 if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: mk.target_type.clone(),
@@ -651,7 +652,7 @@ fn collect_db_changes_from_tree(
                     .collect();
                 visible.sort();
                 let json_val = serde_json::to_string(&visible)?;
-                let existing = db.get(&mk.target_type, &mk.target_value, &mk.key)?;
+                let existing = db.get(&target, &mk.key)?;
                 if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: mk.target_type.clone(),

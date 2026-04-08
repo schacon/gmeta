@@ -5,7 +5,7 @@
 
 use crate::db::Store;
 use crate::error::{Error, Result};
-use crate::types::{TargetType, ValueType};
+use crate::types::{Target, ValueType};
 
 /// Prefix for local-only metadata keys that are never serialized.
 pub const META_LOCAL_PREFIX: &str = "meta:local:";
@@ -59,7 +59,7 @@ pub fn parse_filter_rules(db: &Store) -> Result<Vec<FilterRule>> {
     let mut rules = Vec::new();
 
     // meta:local:filter rules first (higher priority)
-    if let Some(entry) = db.get(&TargetType::Project, "", "meta:local:filter")? {
+    if let Some(entry) = db.get(&Target::project(), "meta:local:filter")? {
         if entry.value_type == ValueType::Set {
             let members: Vec<String> = serde_json::from_str(&entry.value)?;
             for member in members {
@@ -69,7 +69,7 @@ pub fn parse_filter_rules(db: &Store) -> Result<Vec<FilterRule>> {
     }
 
     // Then meta:filter rules (shared/corporate)
-    if let Some(entry) = db.get(&TargetType::Project, "", "meta:filter")? {
+    if let Some(entry) = db.get(&Target::project(), "meta:filter")? {
         if entry.value_type == ValueType::Set {
             let members: Vec<String> = serde_json::from_str(&entry.value)?;
             for member in members {

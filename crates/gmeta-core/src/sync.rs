@@ -6,8 +6,8 @@ use gix::prelude::ObjectIdExt;
 use crate::db::Store;
 use crate::error::{Error, Result};
 use crate::types::{
-    TargetType, ValueType, LIST_VALUE_DIR, PATH_TARGET_SEPARATOR, SET_VALUE_DIR, STRING_VALUE_BLOB,
-    TOMBSTONE_ROOT,
+    Target, TargetType, ValueType, LIST_VALUE_DIR, PATH_TARGET_SEPARATOR, SET_VALUE_DIR,
+    STRING_VALUE_BLOB, TOMBSTONE_ROOT,
 };
 
 /// A parsed change from a gmeta serialize commit message.
@@ -132,12 +132,12 @@ pub fn insert_promisor_entries(
                         continue;
                     }
                     let target_type = change.target_type.parse::<TargetType>()?;
-                    if store.insert_promised(
-                        &target_type,
-                        &change.target_value,
-                        &change.key,
-                        &ValueType::String,
-                    )? {
+                    let target = if target_type == TargetType::Project {
+                        Target::project()
+                    } else {
+                        Target::from_parts(target_type, Some(change.target_value.clone()))
+                    };
+                    if store.insert_promised(&target, &change.key, &ValueType::String)? {
                         count += 1;
                     }
                 }
@@ -153,12 +153,12 @@ pub fn insert_promisor_entries(
                     let keys = extract_keys_from_tree(repo, tree_id)?;
                     for (target_type_str, target_value, key) in &keys {
                         let target_type = target_type_str.parse::<TargetType>()?;
-                        if store.insert_promised(
-                            &target_type,
-                            target_value,
-                            key,
-                            &ValueType::String,
-                        )? {
+                        let target = if target_type == TargetType::Project {
+                            Target::project()
+                        } else {
+                            Target::from_parts(target_type, Some(target_value.clone()))
+                        };
+                        if store.insert_promised(&target, key, &ValueType::String)? {
                             count += 1;
                         }
                     }

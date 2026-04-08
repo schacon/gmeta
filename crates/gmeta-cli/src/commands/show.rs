@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use time::OffsetDateTime;
 
 use crate::context::CommandContext;
-use gmeta_core::types::{TargetType, ValueType};
+use gmeta_core::types::{Target, TargetType, ValueType};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -125,7 +125,10 @@ pub fn run(commit_ref: &str) -> Result<()> {
     let commit_entries = ctx
         .session
         .store()
-        .get_all(&TargetType::Commit, &sha, None)
+        .get_all(
+            &Target::from_parts(TargetType::Commit, Some(sha.clone())),
+            None,
+        )
         .unwrap_or_default();
     for entry in &commit_entries {
         let display = format_meta_value(&entry.value, &entry.value_type);
@@ -137,7 +140,10 @@ pub fn run(commit_ref: &str) -> Result<()> {
         let cid_entries = ctx
             .session
             .store()
-            .get_all(&TargetType::ChangeId, cid, None)
+            .get_all(
+                &Target::from_parts(TargetType::ChangeId, Some(cid.clone())),
+                None,
+            )
             .unwrap_or_default();
         for entry in &cid_entries {
             let display = format_meta_value(&entry.value, &entry.value_type);

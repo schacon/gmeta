@@ -326,14 +326,18 @@ fn escape_like_pattern(input: &str) -> String {
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
-    use crate::types::{TargetType, ValueType};
+    use crate::types::{Target, TargetType, ValueType};
+
+    fn commit_target(sha: &str) -> Target {
+        Target::parse(&format!("commit:{sha}")).unwrap()
+    }
 
     #[test]
     fn test_set_and_get() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "agent:model",
             "\"claude-4.6\"",
             &ValueType::String,
@@ -341,9 +345,7 @@ mod tests {
             1000,
         )
         .unwrap();
-        let result = db
-            .get(&TargetType::Commit, "abc123", "agent:model")
-            .unwrap();
+        let result = db.get(&target, "agent:model").unwrap();
         assert_eq!(
             result,
             Some(types::MetadataValue {
@@ -357,9 +359,9 @@ mod tests {
     #[test]
     fn test_set_upsert() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"v1\"",
             &ValueType::String,
@@ -368,8 +370,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"v2\"",
             &ValueType::String,
@@ -377,7 +378,7 @@ mod tests {
             2000,
         )
         .unwrap();
-        let result = db.get(&TargetType::Commit, "abc123", "key").unwrap();
+        let result = db.get(&target, "key").unwrap();
         assert_eq!(
             result,
             Some(types::MetadataValue {
@@ -391,9 +392,9 @@ mod tests {
     #[test]
     fn test_get_all_with_prefix() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "agent:model",
             "\"claude\"",
             &ValueType::String,
@@ -402,8 +403,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "agent:provider",
             "\"anthropic\"",
             &ValueType::String,
@@ -412,8 +412,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "other",
             "\"val\"",
             &ValueType::String,
@@ -422,18 +421,16 @@ mod tests {
         )
         .unwrap();
 
-        let results = db
-            .get_all(&TargetType::Commit, "abc123", Some("agent"))
-            .unwrap();
+        let results = db.get_all(&target, Some("agent")).unwrap();
         assert_eq!(results.len(), 2);
     }
 
     #[test]
     fn test_get_all_with_prefix_escapes_like_wildcards() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "a%:literal",
             "\"match\"",
             &ValueType::String,
@@ -442,8 +439,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "abc:anything",
             "\"should-not-match\"",
             &ValueType::String,
@@ -452,8 +448,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "a_:literal",
             "\"underscore-match\"",
             &ValueType::String,
@@ -462,8 +457,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "ab:anything",
             "\"underscore-should-not-match\"",
             &ValueType::String,
@@ -472,15 +466,11 @@ mod tests {
         )
         .unwrap();
 
-        let percent_results = db
-            .get_all(&TargetType::Commit, "abc123", Some("a%"))
-            .unwrap();
+        let percent_results = db.get_all(&target, Some("a%")).unwrap();
         let percent_keys: Vec<String> = percent_results.into_iter().map(|r| r.key).collect();
         assert_eq!(percent_keys, vec!["a%:literal".to_string()]);
 
-        let underscore_results = db
-            .get_all(&TargetType::Commit, "abc123", Some("a_"))
-            .unwrap();
+        let underscore_results = db.get_all(&target, Some("a_")).unwrap();
         let underscore_keys: Vec<String> = underscore_results.into_iter().map(|r| r.key).collect();
         assert_eq!(underscore_keys, vec!["a_:literal".to_string()]);
     }
@@ -488,9 +478,9 @@ mod tests {
     #[test]
     fn test_get_all_with_prefix_escapes_backslash() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             r"agent\name:model",
             "\"match\"",
             &ValueType::String,
@@ -499,8 +489,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "agentxname:model",
             "\"should-not-match\"",
             &ValueType::String,
@@ -509,9 +498,7 @@ mod tests {
         )
         .unwrap();
 
-        let results = db
-            .get_all(&TargetType::Commit, "abc123", Some(r"agent\name"))
-            .unwrap();
+        let results = db.get_all(&target, Some(r"agent\name")).unwrap();
         let keys: Vec<String> = results.into_iter().map(|r| r.key).collect();
         assert_eq!(keys, vec![r"agent\name:model".to_string()]);
     }
@@ -519,9 +506,13 @@ mod tests {
     #[test]
     fn test_get_all_with_target_prefix_for_paths() {
         let db = Store::open_in_memory().unwrap();
+        let src_git = Target::path("src/git");
+        let src_metrics = Target::path("src/metrics");
+        let src_obs = Target::path("src/observability");
+        let srcx_metrics = Target::path("srcx/metrics");
+
         db.set(
-            &TargetType::Path,
-            "src/git",
+            &src_git,
             "owner",
             "\"schacon\"",
             &ValueType::String,
@@ -530,8 +521,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Path,
-            "src/metrics",
+            &src_metrics,
             "owner",
             "\"kiril\"",
             &ValueType::String,
@@ -540,8 +530,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Path,
-            "src/observability",
+            &src_obs,
             "owner",
             "\"caleb\"",
             &ValueType::String,
@@ -550,8 +539,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Path,
-            "srcx/metrics",
+            &srcx_metrics,
             "owner",
             "\"should-not-match\"",
             &ValueType::String,
@@ -560,8 +548,9 @@ mod tests {
         )
         .unwrap();
 
+        let src_target = Target::path("src");
         let results = db
-            .get_all_with_target_prefix(&TargetType::Path, "src", true, Some("owner"))
+            .get_all_with_target_prefix(&src_target, true, Some("owner"))
             .unwrap();
         let rows: Vec<(String, String)> = results
             .into_iter()
@@ -580,9 +569,9 @@ mod tests {
     #[test]
     fn test_rm() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"val\"",
             &ValueType::String,
@@ -590,18 +579,16 @@ mod tests {
             1000,
         )
         .unwrap();
-        assert!(db
-            .remove(&TargetType::Commit, "abc123", "key", "a@b.com", 2000)
-            .unwrap());
-        assert_eq!(db.get(&TargetType::Commit, "abc123", "key").unwrap(), None);
+        assert!(db.remove(&target, "key", "a@b.com", 2000).unwrap());
+        assert_eq!(db.get(&target, "key").unwrap(), None);
     }
 
     #[test]
     fn test_rm_creates_tombstone() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"val\"",
             &ValueType::String,
@@ -609,16 +596,14 @@ mod tests {
             1000,
         )
         .unwrap();
-        assert!(db
-            .remove(&TargetType::Commit, "abc123", "key", "a@b.com", 2000)
-            .unwrap());
+        assert!(db.remove(&target, "key", "a@b.com", 2000).unwrap());
 
         let tombstones = db.get_all_tombstones().unwrap();
         assert_eq!(tombstones.len(), 1);
         assert_eq!(
             tombstones[0],
             types::TombstoneRecord {
-                target_type: "commit".to_string(),
+                target_type: TargetType::Commit,
                 target_value: "abc123".to_string(),
                 key: "key".to_string(),
                 timestamp: 2000,
@@ -630,9 +615,9 @@ mod tests {
     #[test]
     fn test_set_clears_tombstone() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"v1\"",
             &ValueType::String,
@@ -640,14 +625,11 @@ mod tests {
             1000,
         )
         .unwrap();
-        assert!(db
-            .remove(&TargetType::Commit, "abc123", "key", "a@b.com", 2000)
-            .unwrap());
+        assert!(db.remove(&target, "key", "a@b.com", 2000).unwrap());
         assert_eq!(db.get_all_tombstones().unwrap().len(), 1);
 
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"v2\"",
             &ValueType::String,
@@ -657,7 +639,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(db.get_all_tombstones().unwrap().len(), 0);
-        let result = db.get(&TargetType::Commit, "abc123", "key").unwrap();
+        let result = db.get(&target, "key").unwrap();
         assert_eq!(
             result,
             Some(types::MetadataValue {
@@ -671,28 +653,12 @@ mod tests {
     #[test]
     fn test_list_push() {
         let db = Store::open_in_memory().unwrap();
-        db.list_push(
-            &TargetType::Commit,
-            "abc123",
-            "tags",
-            "first",
-            "a@b.com",
-            1000,
-        )
-        .unwrap();
-        db.list_push(
-            &TargetType::Commit,
-            "abc123",
-            "tags",
-            "second",
-            "a@b.com",
-            2000,
-        )
-        .unwrap();
-        let entry = db
-            .get(&TargetType::Commit, "abc123", "tags")
-            .unwrap()
+        let target = commit_target("abc123");
+        db.list_push(&target, "tags", "first", "a@b.com", 1000)
             .unwrap();
+        db.list_push(&target, "tags", "second", "a@b.com", 2000)
+            .unwrap();
+        let entry = db.get(&target, "tags").unwrap().unwrap();
         assert_eq!(entry.value_type, ValueType::List);
         let list = crate::list_value::list_values_from_json(&entry.value).unwrap();
         assert_eq!(list, vec!["first", "second"]);
@@ -701,9 +667,9 @@ mod tests {
     #[test]
     fn test_set_list_stores_rows_in_list_values_table() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "tags",
             r#"[{"value":"a","timestamp":1000},{"value":"b","timestamp":1001}]"#,
             &ValueType::List,
@@ -730,10 +696,7 @@ mod tests {
             .unwrap();
         assert_eq!(list_rows, 2);
 
-        let entry = db
-            .get(&TargetType::Commit, "abc123", "tags")
-            .unwrap()
-            .unwrap();
+        let entry = db.get(&target, "tags").unwrap().unwrap();
         assert_eq!(entry.value_type, ValueType::List);
         let list = crate::list_value::list_values_from_json(&entry.value).unwrap();
         assert_eq!(list, vec!["a", "b"]);
@@ -742,9 +705,9 @@ mod tests {
     #[test]
     fn test_set_list_replaces_existing_list_rows() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "tags",
             r#"[{"value":"a","timestamp":1000},{"value":"b","timestamp":1001}]"#,
             &ValueType::List,
@@ -753,8 +716,7 @@ mod tests {
         )
         .unwrap();
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "tags",
             r#"[{"value":"c","timestamp":3000}]"#,
             &ValueType::List,
@@ -781,10 +743,7 @@ mod tests {
             .unwrap();
         assert_eq!(list_rows, 1);
 
-        let entry = db
-            .get(&TargetType::Commit, "abc123", "tags")
-            .unwrap()
-            .unwrap();
+        let entry = db.get(&target, "tags").unwrap().unwrap();
         let list = crate::list_value::list_values_from_json(&entry.value).unwrap();
         assert_eq!(list, vec!["c"]);
     }
@@ -792,9 +751,9 @@ mod tests {
     #[test]
     fn test_list_push_converts_string() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"original\"",
             &ValueType::String,
@@ -802,19 +761,9 @@ mod tests {
             1000,
         )
         .unwrap();
-        db.list_push(
-            &TargetType::Commit,
-            "abc123",
-            "key",
-            "appended",
-            "a@b.com",
-            2000,
-        )
-        .unwrap();
-        let entry = db
-            .get(&TargetType::Commit, "abc123", "key")
-            .unwrap()
+        db.list_push(&target, "key", "appended", "a@b.com", 2000)
             .unwrap();
+        let entry = db.get(&target, "key").unwrap().unwrap();
         assert_eq!(entry.value_type, ValueType::List);
         let list = crate::list_value::list_values_from_json(&entry.value).unwrap();
         assert_eq!(list, vec!["original", "appended"]);
@@ -823,16 +772,11 @@ mod tests {
     #[test]
     fn test_list_pop() {
         let db = Store::open_in_memory().unwrap();
-        db.list_push(&TargetType::Commit, "abc123", "tags", "a", "a@b.com", 1000)
-            .unwrap();
-        db.list_push(&TargetType::Commit, "abc123", "tags", "b", "a@b.com", 2000)
-            .unwrap();
-        db.list_pop(&TargetType::Commit, "abc123", "tags", "b", "a@b.com", 3000)
-            .unwrap();
-        let entry = db
-            .get(&TargetType::Commit, "abc123", "tags")
-            .unwrap()
-            .unwrap();
+        let target = commit_target("abc123");
+        db.list_push(&target, "tags", "a", "a@b.com", 1000).unwrap();
+        db.list_push(&target, "tags", "b", "a@b.com", 2000).unwrap();
+        db.list_pop(&target, "tags", "b", "a@b.com", 3000).unwrap();
+        let entry = db.get(&target, "tags").unwrap().unwrap();
         let list = crate::list_value::list_values_from_json(&entry.value).unwrap();
         assert_eq!(list, vec!["a"]);
     }
@@ -840,10 +784,9 @@ mod tests {
     #[test]
     fn test_apply_tombstone_removes_list_values_rows() {
         let db = Store::open_in_memory().unwrap();
-        db.list_push(&TargetType::Commit, "abc123", "tags", "a", "a@b.com", 1000)
-            .unwrap();
-        db.list_push(&TargetType::Commit, "abc123", "tags", "b", "a@b.com", 2000)
-            .unwrap();
+        let target = commit_target("abc123");
+        db.list_push(&target, "tags", "a", "a@b.com", 1000).unwrap();
+        db.list_push(&target, "tags", "b", "a@b.com", 2000).unwrap();
 
         let metadata_id: i64 = db
             .conn
@@ -863,14 +806,8 @@ mod tests {
             .unwrap();
         assert_eq!(before_count, 2);
 
-        db.apply_tombstone(
-            &TargetType::Commit,
-            "abc123",
-            "tags",
-            "user@example.com",
-            3000,
-        )
-        .unwrap();
+        db.apply_tombstone(&target, "tags", "user@example.com", 3000)
+            .unwrap();
 
         let after_count: i64 = db
             .conn
@@ -881,15 +818,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after_count, 0);
-        assert_eq!(db.get(&TargetType::Commit, "abc123", "tags").unwrap(), None);
+        assert_eq!(db.get(&target, "tags").unwrap(), None);
     }
 
     #[test]
     fn test_authorship() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"val\"",
             &ValueType::String,
@@ -897,10 +834,7 @@ mod tests {
             42000,
         )
         .unwrap();
-        let auth = db
-            .get_authorship(&TargetType::Commit, "abc123", "key")
-            .unwrap()
-            .unwrap();
+        let auth = db.get_authorship(&target, "key").unwrap().unwrap();
         assert_eq!(auth.email, "user@example.com");
         assert_eq!(auth.timestamp, 42000);
     }
@@ -916,11 +850,11 @@ mod tests {
     #[test]
     fn test_last_timestamp_stored_and_returned() {
         let db = Store::open_in_memory().unwrap();
+        let target = commit_target("abc123");
 
         // set stores the timestamp
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"val\"",
             &ValueType::String,
@@ -934,8 +868,7 @@ mod tests {
 
         // upsert updates the timestamp
         db.set(
-            &TargetType::Commit,
-            "abc123",
+            &target,
             "key",
             "\"val2\"",
             &ValueType::String,
@@ -947,38 +880,17 @@ mod tests {
         assert_eq!(entries[0].last_timestamp, 9000);
 
         // list_push stores the timestamp
-        db.list_push(
-            &TargetType::Commit,
-            "abc123",
-            "tags",
-            "first",
-            "a@b.com",
-            11000,
-        )
-        .unwrap();
+        db.list_push(&target, "tags", "first", "a@b.com", 11000)
+            .unwrap();
         let entries = db.get_all_metadata().unwrap();
         let tags = entries.iter().find(|e| e.key == "tags").unwrap();
         assert_eq!(tags.last_timestamp, 11000);
 
         // list_pop updates the timestamp
-        db.list_push(
-            &TargetType::Commit,
-            "abc123",
-            "tags",
-            "second",
-            "a@b.com",
-            12000,
-        )
-        .unwrap();
-        db.list_pop(
-            &TargetType::Commit,
-            "abc123",
-            "tags",
-            "second",
-            "a@b.com",
-            13000,
-        )
-        .unwrap();
+        db.list_push(&target, "tags", "second", "a@b.com", 12000)
+            .unwrap();
+        db.list_pop(&target, "tags", "second", "a@b.com", 13000)
+            .unwrap();
         let entries = db.get_all_metadata().unwrap();
         let tags = entries.iter().find(|e| e.key == "tags").unwrap();
         assert_eq!(tags.last_timestamp, 13000);

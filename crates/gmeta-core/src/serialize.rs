@@ -14,7 +14,7 @@ use gix::prelude::ObjectIdExt;
 use gix::refs::transaction::PreviousValue;
 
 use crate::db::types::{
-    ListTombstoneRecord, SerializableEntry, SetTombstoneRecord, TombstoneRecord,
+    ListTombstoneRecord, Operation, SerializableEntry, SetTombstoneRecord, TombstoneRecord,
 };
 use crate::db::Store;
 use crate::error::{Error, Result};
@@ -24,6 +24,7 @@ use crate::session::Session;
 use crate::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
 use crate::tree::format::{build_dir, build_tree_from_paths, insert_path, TreeDir};
 use crate::tree::model::Tombstone;
+use crate::tree_paths;
 use crate::types::{Target, TargetType, ValueType};
 
 /// Maximum number of individual change lines included in a commit message.
@@ -103,9 +104,9 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
         let changes: Vec<(char, String, String)> = modified
             .iter()
             .map(|entry| {
-                let op_char = match entry.operation.as_str() {
-                    "rm" => 'D',
-                    "set" => {
+                let op_char = match entry.operation {
+                    Operation::Remove => 'D',
+                    Operation::Set => {
                         if existing_tree_oid.is_some() {
                             'M'
                         } else {
@@ -114,7 +115,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
                     }
                     _ => 'M',
                 };
-                let target_label = if entry.target_type == "project" {
+                let target_label = if entry.target_type == TargetType::Project {
                     "project".to_string()
                 } else {
                     format!("{}:{}", entry.target_type, entry.target_value)
@@ -126,12 +127,12 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
         // Compute dirty target base paths from modified entries
         let mut dirty_bases: BTreeSet<String> = BTreeSet::new();
         for entry in &modified {
-            let target = if entry.target_type == "project" {
+            let target = if entry.target_type == TargetType::Project {
                 Target::parse("project")?
             } else {
                 Target::parse(&format!("{}:{}", entry.target_type, entry.target_value))?
             };
-            dirty_bases.insert(target.tree_base_path());
+            dirty_bases.insert(tree_paths::tree_base_path(&target));
         }
 
         let metadata = session.store.get_all_metadata()?;
@@ -157,7 +158,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
         let changes: Vec<(char, String, String)> = metadata
             .iter()
             .map(|e| {
-                let target_label = if e.target_type == "project" {
+                let target_label = if e.target_type == TargetType::Project {
                     "project".to_string()
                 } else {
                     format!("{}:{}", e.target_type, e.target_value)
@@ -187,7 +188,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     // Apply prune-since cutoff to filter old entries before building the tree
     let prune_since = session
         .store
-        .get(&TargetType::Project, "", "meta:prune:since")?
+        .get(&Target::project(), "meta:prune:since")?
         .and_then(|e| serde_json::from_str::<String>(&e.value).ok());
     let prune_rules = prune::read_prune_rules(&session.store)?;
     let prune_cutoff_ms = prune_since
@@ -199,7 +200,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
         metadata_entries
             .into_iter()
             .filter(|e| {
-                if e.target_type != "project" && e.last_timestamp < cutoff {
+                if e.target_type != TargetType::Project && e.last_timestamp < cutoff {
                     pruned_count += 1;
                     false
                 } else {
@@ -481,7 +482,7 @@ fn build_tree(
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
     for e in metadata_entries {
-        let target = if e.target_type == "project" {
+        let target = if e.target_type == TargetType::Project {
             Target::parse("project")?
         } else {
             Target::parse(&format!("{}:{}", e.target_type, e.target_value))?
@@ -489,14 +490,14 @@ fn build_tree(
 
         // Skip entries for clean targets -- their subtrees will be reused
         if let Some(dirty) = dirty_target_bases {
-            if !dirty.contains(&target.tree_base_path()) {
+            if !dirty.contains(&tree_paths::tree_base_path(&target)) {
                 continue;
             }
         }
 
         match e.value_type {
             ValueType::String => {
-                let full_path = target.tree_path(&e.key)?;
+                let full_path = tree_paths::tree_path(&target, &e.key)?;
                 if e.is_git_ref {
                     let oid = gix::ObjectId::from_hex(e.value.as_bytes())
                         .map_err(|e| Error::Other(format!("{e}")))?;
@@ -517,7 +518,7 @@ fn build_tree(
             ValueType::List => {
                 let list_entries =
                     parse_entries(&e.value).map_err(|e| Error::InvalidValue(format!("{e}")))?;
-                let list_dir_path = target.list_dir_path(&e.key)?;
+                let list_dir_path = tree_paths::list_dir_path(&target, &e.key)?;
                 for entry in list_entries {
                     let entry_name = make_entry_name(&entry);
                     let full_path = format!("{list_dir_path}/{entry_name}");
@@ -527,7 +528,7 @@ fn build_tree(
             ValueType::Set => {
                 let members: Vec<String> = serde_json::from_str(&e.value)
                     .map_err(|e| Error::InvalidValue(format!("failed to decode set value: {e}")))?;
-                let set_dir_path = target.set_dir_path(&e.key)?;
+                let set_dir_path = tree_paths::set_dir_path(&target, &e.key)?;
                 for member in members {
                     let member_id = crate::types::set_member_id(&member);
                     let full_path = format!("{set_dir_path}/{member_id}");
@@ -538,19 +539,19 @@ fn build_tree(
     }
 
     for record in tombstone_entries {
-        let target = if record.target_type == "project" {
+        let target = if record.target_type == TargetType::Project {
             Target::parse("project")?
         } else {
             Target::parse(&format!("{}:{}", record.target_type, record.target_value))?
         };
 
         if let Some(dirty) = dirty_target_bases {
-            if !dirty.contains(&target.tree_base_path()) {
+            if !dirty.contains(&tree_paths::tree_base_path(&target)) {
                 continue;
             }
         }
 
-        let full_path = target.tombstone_path(&record.key)?;
+        let full_path = tree_paths::tombstone_path(&target, &record.key)?;
         let payload = serde_json::to_vec(&Tombstone {
             timestamp: record.timestamp,
             email: record.email.clone(),
@@ -559,36 +560,38 @@ fn build_tree(
     }
 
     for record in set_tombstone_entries {
-        let target = if record.target_type == "project" {
+        let target = if record.target_type == TargetType::Project {
             Target::parse("project")?
         } else {
             Target::parse(&format!("{}:{}", record.target_type, record.target_value))?
         };
 
         if let Some(dirty) = dirty_target_bases {
-            if !dirty.contains(&target.tree_base_path()) {
+            if !dirty.contains(&tree_paths::tree_base_path(&target)) {
                 continue;
             }
         }
 
-        let full_path = target.set_member_tombstone_path(&record.key, &record.member_id)?;
+        let full_path =
+            tree_paths::set_member_tombstone_path(&target, &record.key, &record.member_id)?;
         files.insert(full_path, record.value.as_bytes().to_vec());
     }
 
     for record in list_tombstone_entries {
-        let target = if record.target_type == "project" {
+        let target = if record.target_type == TargetType::Project {
             Target::parse("project")?
         } else {
             Target::parse(&format!("{}:{}", record.target_type, record.target_value))?
         };
 
         if let Some(dirty) = dirty_target_bases {
-            if !dirty.contains(&target.tree_base_path()) {
+            if !dirty.contains(&tree_paths::tree_base_path(&target)) {
                 continue;
             }
         }
 
-        let full_path = target.list_entry_tombstone_path(&record.key, &record.entry_name)?;
+        let full_path =
+            tree_paths::list_entry_tombstone_path(&target, &record.key, &record.entry_name)?;
         let payload = serde_json::to_vec(&Tombstone {
             timestamp: record.timestamp,
             email: record.email.clone(),

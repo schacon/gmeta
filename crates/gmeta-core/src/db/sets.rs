@@ -3,20 +3,29 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::{Error, Result};
 
 use super::{encode_set_values_by_metadata_id, Store};
-use crate::types::TargetType;
+use crate::types::{validate_key, Target};
 
 impl Store {
     /// Remove a member from a set.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    /// - `value`: the member value to remove
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn set_remove(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
         let existing = {
             let mut stmt = self.conn.prepare(
@@ -88,16 +97,25 @@ impl Store {
     }
 
     /// Add a member to a set.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    /// - `value`: the member value to add
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn set_add(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
         let existing = {
             let mut stmt = self.conn.prepare(

@@ -3,20 +3,27 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::Result;
 
 use super::Store;
-use crate::types::TargetType;
+use crate::types::{Target, TargetType};
 
 impl Store {
     /// Apply a tombstone from exchange data:
     /// remove current value (if any), record tombstone, and log the operation.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key to tombstone
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn apply_tombstone(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
 
         let metadata_id = self
@@ -76,18 +83,32 @@ impl Store {
         )?;
 
         let rows = stmt.query_map([], |row| {
-            Ok(TombstoneRecord {
-                target_type: row.get(0)?,
-                target_value: row.get(1)?,
-                key: row.get(2)?,
-                timestamp: row.get(3)?,
-                email: row.get(4)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
         })?;
 
         let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (target_type_str, target_value, key, timestamp, email) = row?;
+            let target_type = target_type_str.parse::<TargetType>().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            results.push(TombstoneRecord {
+                target_type,
+                target_value,
+                key,
+                timestamp,
+                email,
+            });
         }
         Ok(results)
     }
@@ -103,20 +124,36 @@ impl Store {
         )?;
 
         let rows = stmt.query_map([], |row| {
-            Ok(SetTombstoneRecord {
-                target_type: row.get(0)?,
-                target_value: row.get(1)?,
-                key: row.get(2)?,
-                member_id: row.get(3)?,
-                value: row.get(4)?,
-                timestamp: row.get(5)?,
-                email: row.get(6)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)?,
+                row.get::<_, String>(6)?,
+            ))
         })?;
 
         let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (target_type_str, target_value, key, member_id, value, timestamp, email) = row?;
+            let target_type = target_type_str.parse::<TargetType>().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            results.push(SetTombstoneRecord {
+                target_type,
+                target_value,
+                key,
+                member_id,
+                value,
+                timestamp,
+                email,
+            });
         }
         Ok(results)
     }
@@ -131,18 +168,33 @@ impl Store {
              ORDER BY target_type, target_value, key, entry_id",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok(ListTombstoneRecord {
-                target_type: row.get(0)?,
-                target_value: row.get(1)?,
-                key: row.get(2)?,
-                entry_name: row.get(3)?,
-                timestamp: row.get(4)?,
-                email: row.get(5)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+            ))
         })?;
         let mut results = Vec::new();
         for row in rows {
-            results.push(row?);
+            let (target_type_str, target_value, key, entry_name, timestamp, email) = row?;
+            let target_type = target_type_str.parse::<TargetType>().map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            results.push(ListTombstoneRecord {
+                target_type,
+                target_value,
+                key,
+                entry_name,
+                timestamp,
+                email,
+            });
         }
         Ok(results)
     }

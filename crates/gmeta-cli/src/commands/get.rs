@@ -5,9 +5,12 @@ use serde_json::{json, Map, Value};
 
 use crate::context::CommandContext;
 use gmeta_core::db::Store;
-use gmeta_core::types::{self, Target, TargetType, ValueType};
+use gmeta_core::tree_paths;
+use gmeta_core::types::{Target, TargetType, ValueType};
 
 const NODE_VALUE_KEY: &str = "__value";
+const SET_VALUE_DIR: &str = "__set";
+const TOMBSTONE_ROOT: &str = "__tombstones";
 
 pub fn run(
     target_str: &str,
@@ -15,43 +18,42 @@ pub fn run(
     json_output: bool,
     with_authorship: bool,
 ) -> Result<()> {
-    let mut target = Target::parse(target_str)?;
-
     let ctx = CommandContext::open(None)?;
-    ctx.session.resolve_target(&mut target)?;
+    let target = ctx.session.resolve_target(&Target::parse(target_str)?)?;
     let repo = ctx.session.repo();
 
-    let include_target_subtree = target.target_type == TargetType::Path;
-    let mut entries = ctx.session.store().get_all_with_target_prefix(
-        &target.target_type,
-        target.value_str(),
-        include_target_subtree,
-        key,
-    )?;
+    let include_target_subtree = *target.target_type() == TargetType::Path;
+    let mut entries =
+        ctx.session
+            .store()
+            .get_all_with_target_prefix(&target, include_target_subtree, key)?;
 
     // If no exact match, try prefix expansion for non-commit types
     // (commits are already resolved by git, but change-ids/branches may be partial)
-    if entries.is_empty() && target.target_type != TargetType::Path {
+    if entries.is_empty() && *target.target_type() != TargetType::Path {
         let matches = ctx.session.store().find_target_values_by_prefix(
-            &target.target_type,
-            target.value_str(),
+            target.target_type(),
+            target.value().unwrap_or(""),
             2,
         )?;
         if matches.len() == 1 {
             let expanded = &matches[0];
-            entries = ctx.session.store().get_all_with_target_prefix(
-                &target.target_type,
-                expanded,
-                false,
-                key,
-            )?;
+            let expanded_target =
+                Target::from_parts(target.target_type().clone(), Some(expanded.clone()));
+            entries =
+                ctx.session
+                    .store()
+                    .get_all_with_target_prefix(&expanded_target, false, key)?;
             if !entries.is_empty() {
-                eprintln!("expanded to {}:{}", target.type_str(), expanded);
+                eprintln!("expanded to {}:{}", target.target_type().as_str(), expanded);
             }
         } else if matches.len() > 1 {
-            eprintln!("ambiguous prefix '{}', matches:", target.value_str());
+            eprintln!(
+                "ambiguous prefix '{}', matches:",
+                target.value().unwrap_or("")
+            );
             for m in &matches {
-                eprintln!("  {}:{}", target.type_str(), m);
+                eprintln!("  {}:{}", target.target_type().as_str(), m);
             }
             return Ok(());
         }
@@ -69,12 +71,11 @@ pub fn run(
         .collect();
 
     if !promised.is_empty() {
-        let hydrated = hydrate_promised_entries(&ctx.session, &target.target_type, &promised)?;
+        let hydrated = hydrate_promised_entries(&ctx.session, target.target_type(), &promised)?;
         if hydrated > 0 {
             // Re-query to get the now-resolved values
             entries = ctx.session.store().get_all_with_target_prefix(
-                &target.target_type,
-                target.value_str(),
+                &target,
                 include_target_subtree,
                 key,
             )?;
@@ -149,7 +150,7 @@ fn hydrate_promised_entries(
         };
 
         // Try __value (string) first
-        if let Ok(path) = parsed_target.tree_path(key) {
+        if let Ok(path) = tree_paths::tree_path(&parsed_target, key) {
             if let Some(oid) =
                 gmeta_core::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
             {
@@ -163,7 +164,7 @@ fn hydrate_promised_entries(
         }
 
         // Try __list directory
-        if let Ok(path) = parsed_target.list_dir_path(key) {
+        if let Ok(path) = tree_paths::list_dir_path(&parsed_target, key) {
             if let Some(dir_oid) =
                 gmeta_core::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
             {
@@ -174,7 +175,7 @@ fn hydrate_promised_entries(
                     .filter_map(|e| {
                         let e = e.ok()?;
                         let name = e.filename().to_str().ok()?;
-                        if name.starts_with("__") || name == types::TOMBSTONE_ROOT {
+                        if name.starts_with("__") || name == TOMBSTONE_ROOT {
                             return None;
                         }
                         if e.mode().is_blob() {
@@ -196,8 +197,8 @@ fn hydrate_promised_entries(
         }
 
         // Try __set directory
-        if let Ok(key_path) = parsed_target.key_tree_path(key) {
-            let set_path = format!("{}/{}", key_path, types::SET_VALUE_DIR);
+        if let Ok(key_path) = tree_paths::key_tree_path(&parsed_target, key) {
+            let set_path = format!("{}/{}", key_path, SET_VALUE_DIR);
             if let Some(dir_oid) =
                 gmeta_core::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &set_path)?
             {
@@ -207,7 +208,7 @@ fn hydrate_promised_entries(
                     .filter_map(|e| {
                         let e = e.ok()?;
                         let name = e.filename().to_str().ok()?;
-                        if name.starts_with("__") || name == types::TOMBSTONE_ROOT {
+                        if name.starts_with("__") || name == TOMBSTONE_ROOT {
                             return None;
                         }
                         if e.mode().is_blob() {
@@ -234,7 +235,12 @@ fn hydrate_promised_entries(
     // Clean up entries that no longer exist in the tip
     for idx in &not_found {
         let (target_value, key) = &entries[*idx];
-        db.delete_promised(target_type, target_value, key)?;
+        let entry_target = if *target_type == TargetType::Project {
+            Target::project()
+        } else {
+            Target::from_parts(target_type.clone(), Some(target_value.clone()))
+        };
+        db.delete_promised(&entry_target, key)?;
     }
 
     if pending.is_empty() {
@@ -267,6 +273,11 @@ fn hydrate_promised_entries(
     let mut hydrated = 0;
     for entry in &pending {
         let (target_value, key) = &entries[entry.idx];
+        let entry_target = if *target_type == TargetType::Project {
+            Target::project()
+        } else {
+            Target::from_parts(target_type.clone(), Some(target_value.clone()))
+        };
 
         match entry.value_type {
             ValueType::String => {
@@ -280,14 +291,7 @@ fn hydrate_promised_entries(
                     Err(_) => continue,
                 };
                 let json_value = serde_json::to_string(content)?;
-                db.resolve_promised(
-                    target_type,
-                    target_value,
-                    key,
-                    &json_value,
-                    &ValueType::String,
-                    false,
-                )?;
+                db.resolve_promised(&entry_target, key, &json_value, &ValueType::String, false)?;
                 hydrated += 1;
             }
             ValueType::List => {
@@ -302,14 +306,7 @@ fn hydrate_promised_entries(
                     }
                 }
                 let json_value = serde_json::to_string(&list_entries)?;
-                db.resolve_promised(
-                    target_type,
-                    target_value,
-                    key,
-                    &json_value,
-                    &ValueType::List,
-                    false,
-                )?;
+                db.resolve_promised(&entry_target, key, &json_value, &ValueType::List, false)?;
                 hydrated += 1;
             }
             ValueType::Set => {
@@ -325,14 +322,7 @@ fn hydrate_promised_entries(
                 }
                 set_members.sort();
                 let json_value = serde_json::to_string(&set_members)?;
-                db.resolve_promised(
-                    target_type,
-                    target_value,
-                    key,
-                    &json_value,
-                    &ValueType::Set,
-                    false,
-                )?;
+                db.resolve_promised(&entry_target, key, &json_value, &ValueType::Set, false)?;
                 hydrated += 1;
             }
             _ => anyhow::bail!("unsupported value type"),
@@ -381,7 +371,7 @@ fn print_plain(
     let labels: Vec<String> = entries
         .iter()
         .map(|(tv, k, _, _)| {
-            if target.target_type == TargetType::Path {
+            if *target.target_type() == TargetType::Path {
                 format!("{};{}", tv, k)
             } else {
                 k.clone()
@@ -455,7 +445,15 @@ fn print_json(
         let parsed_value = parse_stored_value(value, value_type)?;
 
         let leaf_value = if with_authorship {
-            let authorship = db.get_authorship(&target.target_type, entry_target_value, key)?;
+            let entry_target = Target::from_parts(
+                target.target_type().clone(),
+                if entry_target_value.is_empty() {
+                    None
+                } else {
+                    Some(entry_target_value.clone())
+                },
+            );
+            let authorship = db.get_authorship(&entry_target, key)?;
             let (author, timestamp) = match authorship {
                 Some(a) => (a.email, a.timestamp),
                 None => ("unknown".to_string(), 0),
@@ -469,7 +467,7 @@ fn print_json(
             parsed_value
         };
 
-        if target.target_type == TargetType::Path {
+        if *target.target_type() == TargetType::Path {
             insert_nested(
                 &mut root,
                 &[entry_target_value.as_str(), key.as_str()],

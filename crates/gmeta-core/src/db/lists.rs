@@ -7,43 +7,51 @@ use super::{
     load_list_rows_by_metadata_id_tx, Store,
 };
 use crate::list_value::{encode_entries, ensure_unique_timestamp, ListEntry};
-use crate::types::TargetType;
+use crate::types::{validate_key, Target};
 
 impl Store {
     /// Push a value onto a list. If the key is currently a string, convert to list first.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    /// - `value`: the value to push
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn list_push(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        self.list_push_with_repo(
-            None,
-            target_type,
-            target_value,
-            key,
-            value,
-            email,
-            timestamp,
-        )
+        self.list_push_with_repo(None, target, key, value, email, timestamp)
     }
 
     /// Push a value onto a list, storing large items as git blob refs.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// # Parameters
+    ///
+    /// - `repo`: optional git repository for storing large items as blob refs
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    /// - `value`: the value to push
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn list_push_with_repo(
         &self,
         repo: Option<&gix::Repository>,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
         let existing = {
             let mut stmt = self.conn.prepare(
@@ -144,16 +152,25 @@ impl Store {
     }
 
     /// Pop a value from a list.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    /// - `value`: the value to pop (removed by matching)
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn list_pop(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
         let existing = {
             let mut stmt = self.conn.prepare(
@@ -225,18 +242,20 @@ impl Store {
     }
 
     /// Get list entries for display (resolved values with timestamps).
-    pub fn list_entries(
-        &self,
-        target_type: &TargetType,
-        target_value: &str,
-        key: &str,
-    ) -> Result<Vec<ListEntry>> {
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    pub fn list_entries(&self, target: &Target, key: &str) -> Result<Vec<ListEntry>> {
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let metadata_id = self
             .conn
             .query_row(
                 "SELECT rowid, value_type FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
-                params![target_type.as_str(), target_value, key],
+                params![target_type_str, target_value, key],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()?;
@@ -258,16 +277,25 @@ impl Store {
     }
 
     /// Remove a list entry by index, creating a list tombstone for serialization.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key name
+    /// - `index`: the zero-based index of the entry to remove
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     pub fn list_remove(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         index: usize,
         email: &str,
         timestamp: i64,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
         let existing = {
             let mut stmt = self.conn.prepare(

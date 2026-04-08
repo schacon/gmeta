@@ -301,13 +301,10 @@ fn materialize_merge(
     if let Some(base_values) = &legacy_base_values {
         for key in base_values.keys() {
             if !merged_values.contains_key(key) && !merged_tombstones.contains_key(key) {
-                session.store.apply_tombstone(
-                    &key.target_type,
-                    &key.target_value,
-                    &key.key,
-                    email,
-                    now,
-                )?;
+                let target = key.to_target();
+                session
+                    .store
+                    .apply_tombstone(&target, &key.key, email, now)?;
             }
         }
     }
@@ -481,13 +478,10 @@ fn apply_legacy_deletes(
 ) -> Result<()> {
     for key in local_values.keys() {
         if !remote_entries.values.contains_key(key) {
-            session.store.apply_tombstone(
-                &key.target_type,
-                &key.target_value,
-                &key.key,
-                email,
-                now,
-            )?;
+            let target = key.to_target();
+            session
+                .store
+                .apply_tombstone(&target, &key.key, email, now)?;
         }
     }
     Ok(())

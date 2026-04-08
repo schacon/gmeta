@@ -8,15 +8,23 @@ use super::{
     Store,
 };
 use crate::list_value::parse_entries;
-use crate::types::{TargetType, ValueType};
+use crate::types::{validate_key, Target, ValueType};
 
 impl Store {
     /// Set a value (upsert). JSON-encodes the value for storage.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target (commit, branch, path, etc.)
+    /// - `key`: the metadata key name
+    /// - `value`: the JSON-encoded value to store
+    /// - `value_type`: the type of value (string, list, set)
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
     #[allow(clippy::too_many_arguments)]
     pub fn set(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         value_type: &ValueType,
@@ -24,27 +32,29 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         self.set_with_git_ref(
-            None,
-            target_type,
-            target_value,
-            key,
-            value,
-            value_type,
-            email,
-            timestamp,
-            false,
+            None, target, key, value, value_type, email, timestamp, false,
         )
     }
 
     /// Set a value (upsert) with optional git ref flag.
     /// When is_git_ref is true, value contains a git blob SHA instead of the actual content.
     /// For list values, repo is used to store large items as git blob refs.
+    ///
+    /// # Parameters
+    ///
+    /// - `repo`: optional git repository for storing large list items as blob refs
+    /// - `target`: the metadata target (commit, branch, path, etc.)
+    /// - `key`: the metadata key name
+    /// - `value`: the JSON-encoded value (or git blob SHA when `is_git_ref` is true)
+    /// - `value_type`: the type of value (string, list, set)
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
+    /// - `is_git_ref`: whether the value is a git blob SHA reference
     #[allow(clippy::too_many_arguments)]
     pub fn set_with_git_ref(
         &self,
         repo: Option<&gix::Repository>,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
         value: &str,
         value_type: &ValueType,
@@ -52,7 +62,9 @@ impl Store {
         timestamp: i64,
         is_git_ref: bool,
     ) -> Result<()> {
-        let target_type_str = target_type.as_str();
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let value_type_str = value_type.as_str();
 
         // Validate that string values are proper JSON strings (not raw objects/arrays)
@@ -237,23 +249,25 @@ impl Store {
 
     /// Get a single value by exact key.
     ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target to query
+    /// - `key`: the metadata key name
+    ///
     /// # Returns
     ///
     /// `Some(MetadataValue)` if found, `None` if not.
-    pub fn get(
-        &self,
-        target_type: &TargetType,
-        target_value: &str,
-        key: &str,
-    ) -> Result<Option<super::types::MetadataValue>> {
+    pub fn get(&self, target: &Target, key: &str) -> Result<Option<super::types::MetadataValue>> {
         use super::types::MetadataValue;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let mut stmt = self.conn.prepare(
             "SELECT rowid, value, value_type, is_git_ref FROM metadata
              WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
         )?;
 
         let result = stmt
-            .query_row(params![target_type.as_str(), target_value, key], |row| {
+            .query_row(params![target_type_str, target_value, key], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
@@ -302,15 +316,19 @@ impl Store {
     ///
     /// Promised entries are excluded. Use `get_all_with_target_prefix` directly
     /// if you need to see them.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target to query
+    /// - `key_prefix`: optional key prefix to filter by
     pub fn get_all(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key_prefix: Option<&str>,
     ) -> Result<Vec<super::types::MetadataEntry>> {
         use super::types::MetadataEntry;
         Ok(self
-            .get_all_with_target_prefix(target_type, target_value, false, key_prefix)?
+            .get_all_with_target_prefix(target, false, key_prefix)?
             .into_iter()
             .filter(|r| !r.is_promised)
             .map(|r| MetadataEntry {
@@ -323,15 +341,22 @@ impl Store {
     }
 
     /// Get all key/value pairs for a target or subtree, optionally filtered by key prefix.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target to query
+    /// - `include_target_subtree`: if true, also match targets whose value starts with
+    ///   the given target's value followed by `/`
+    /// - `key_prefix`: optional key prefix to filter by
     pub fn get_all_with_target_prefix(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         include_target_subtree: bool,
         key_prefix: Option<&str>,
     ) -> Result<Vec<super::types::MetadataRecord>> {
         use super::types::MetadataRecord;
-        let target_type_str = target_type.as_str();
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let escaped_target = escape_like_pattern(target_value);
         let target_like = format!("{}/%", escaped_target);
 
@@ -458,13 +483,19 @@ impl Store {
     }
 
     /// Get authorship info for a key from the log (most recent entry).
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target to query
+    /// - `key`: the metadata key name
     pub fn get_authorship(
         &self,
-        target_type: &TargetType,
-        target_value: &str,
+        target: &Target,
         key: &str,
     ) -> Result<Option<super::types::Authorship>> {
         use super::types::Authorship;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let mut stmt = self.conn.prepare(
             "SELECT email, timestamp FROM metadata_log
              WHERE target_type = ?1 AND target_value = ?2 AND key = ?3
@@ -472,7 +503,7 @@ impl Store {
         )?;
 
         let result = stmt
-            .query_row(params![target_type.as_str(), target_value, key], |row| {
+            .query_row(params![target_type_str, target_value, key], |row| {
                 Ok(Authorship {
                     email: row.get::<_, String>(0)?,
                     timestamp: row.get::<_, i64>(1)?,
@@ -484,15 +515,21 @@ impl Store {
     }
 
     /// Remove a key.
-    pub fn remove(
-        &self,
-        target_type: &TargetType,
-        target_value: &str,
-        key: &str,
-        email: &str,
-        timestamp: i64,
-    ) -> Result<bool> {
-        let target_type_str = target_type.as_str();
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the metadata target
+    /// - `key`: the metadata key to remove
+    /// - `email`: the email of the user performing the operation
+    /// - `timestamp`: the operation timestamp (milliseconds since epoch)
+    ///
+    /// # Returns
+    ///
+    /// `true` if a key was actually removed, `false` if it didn't exist.
+    pub fn remove(&self, target: &Target, key: &str, email: &str, timestamp: i64) -> Result<bool> {
+        validate_key(key)?;
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
         let sp = self.savepoint()?;
 
         let metadata_id = self

@@ -3,7 +3,7 @@ use dialoguer::{Confirm, Input, Select};
 
 use crate::context::CommandContext;
 use gmeta_core::prune::{parse_size, read_prune_rules};
-use gmeta_core::types::{MetaValue, Target, TargetType};
+use gmeta_core::types::{MetaValue, Target};
 
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
@@ -199,17 +199,12 @@ pub fn run() -> Result<()> {
 }
 
 fn project_target() -> Target {
-    Target {
-        target_type: TargetType::Project,
-        value: None,
-    }
+    Target::project()
 }
 
 fn set_config(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
     let meta_value = MetaValue::String(value.to_string());
-    ctx.session
-        .target(&project_target())
-        .set_value(key, &meta_value)?;
+    ctx.session.target(&project_target()).set(key, meta_value)?;
     Ok(())
 }
 

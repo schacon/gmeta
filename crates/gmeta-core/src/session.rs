@@ -161,7 +161,13 @@ impl Session {
     }
 
     /// Resolve a target's partial commit SHA using this session's repository.
-    pub fn resolve_target(&self, target: &mut crate::types::Target) -> crate::error::Result<()> {
+    ///
+    /// Returns a new target with the full SHA if the target was a partial commit,
+    /// or a clone of the original target otherwise.
+    pub fn resolve_target(
+        &self,
+        target: &crate::types::Target,
+    ) -> crate::error::Result<crate::types::Target> {
         target.resolve(&self.repo)
     }
 

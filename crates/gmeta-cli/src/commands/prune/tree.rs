@@ -13,7 +13,7 @@ use crate::context::CommandContext;
 use gmeta_core::prune::parse_since_to_cutoff_ms;
 use gmeta_core::serialize::{build_filtered_tree, count_prune_stats};
 use gmeta_core::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
-use gmeta_core::types::TargetType;
+use gmeta_core::types::{Target, TargetType};
 
 pub fn run(dry_run: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
@@ -23,7 +23,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     let since = match ctx
         .session
         .store()
-        .get(&TargetType::Project, "", "meta:prune:since")?
+        .get(&Target::project(), "meta:prune:since")?
     {
         Some(entry) => {
             let s: String = serde_json::from_str(&entry.value)?;
@@ -106,7 +106,7 @@ pub fn run(dry_run: bool) -> Result<()> {
             if !is_main_dest(&e.key) {
                 return false;
             }
-            if e.target_type != "project" && e.last_timestamp < cutoff_ms {
+            if e.target_type != TargetType::Project && e.last_timestamp < cutoff_ms {
                 pruned_meta += 1;
                 return false;
             }
@@ -120,7 +120,7 @@ pub fn run(dry_run: bool) -> Result<()> {
             if !is_main_dest(&r.key) {
                 return false;
             }
-            if r.target_type != "project" && r.timestamp < cutoff_ms {
+            if r.target_type != TargetType::Project && r.timestamp < cutoff_ms {
                 pruned_tombs += 1;
                 return false;
             }
@@ -130,13 +130,15 @@ pub fn run(dry_run: bool) -> Result<()> {
     let set_tombstones: Vec<_> = all_set_tombstones
         .into_iter()
         .filter(|r| {
-            (r.target_type == "project" || r.timestamp >= cutoff_ms) && is_main_dest(&r.key)
+            (r.target_type == TargetType::Project || r.timestamp >= cutoff_ms)
+                && is_main_dest(&r.key)
         })
         .collect();
     let list_tombstones: Vec<_> = all_list_tombstones
         .into_iter()
         .filter(|r| {
-            (r.target_type == "project" || r.timestamp >= cutoff_ms) && is_main_dest(&r.key)
+            (r.target_type == TargetType::Project || r.timestamp >= cutoff_ms)
+                && is_main_dest(&r.key)
         })
         .collect();
 
