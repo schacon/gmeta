@@ -16,7 +16,7 @@ pub fn run_push(target_str: &str, key: &str, value: &str) -> Result<()> {
         key,
         value,
         ctx.session.email(),
-        ctx.timestamp,
+        ctx.session.now(),
     )?;
 
     Ok(())
@@ -57,7 +57,7 @@ pub fn run_rm(target_str: &str, key: &str, index: Option<usize>) -> Result<()> {
                 key,
                 idx,
                 ctx.session.email(),
-                ctx.timestamp,
+                ctx.session.now(),
             )?;
         }
     }
@@ -78,7 +78,7 @@ pub fn run_pop(target_str: &str, key: &str, value: &str) -> Result<()> {
         key,
         value,
         ctx.session.email(),
-        ctx.timestamp,
+        ctx.session.now(),
     )?;
 
     Ok(())

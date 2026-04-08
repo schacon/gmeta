@@ -146,4 +146,25 @@ impl Session {
     pub fn serialize(&self) -> crate::error::Result<crate::serialize::SerializeOutput> {
         crate::serialize::run(self)
     }
+
+    /// Materialize remote metadata into the local store.
+    ///
+    /// For each matching remote ref, determines the merge strategy and
+    /// applies changes. Updates tracking refs and materialization timestamp.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name filter. If `None`, all remotes are
+    ///   materialized.
+    /// - `now`: the current timestamp in milliseconds since the Unix epoch,
+    ///   used for database writes and the `last_materialized` marker.
+    ///
+    /// See [`crate::materialize::run()`] for full details.
+    pub fn materialize(
+        &self,
+        remote: Option<&str>,
+        now: i64,
+    ) -> crate::error::Result<crate::materialize::MaterializeOutput> {
+        crate::materialize::run(self, remote, now)
+    }
 }
