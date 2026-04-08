@@ -66,8 +66,8 @@ impl Store {
     }
 
     /// Get all tombstones for serialization.
-    /// Returns (target_type, target_value, key, timestamp, email).
-    pub fn get_all_tombstones(&self) -> Result<Vec<(String, String, String, i64, String)>> {
+    pub fn get_all_tombstones(&self) -> Result<Vec<super::types::TombstoneRecord>> {
+        use super::types::TombstoneRecord;
         let mut stmt = self.conn.prepare(
             "SELECT target_type, target_value, key, timestamp, email
              FROM tombstones
@@ -76,13 +76,13 @@ impl Store {
         )?;
 
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-            ))
+            Ok(TombstoneRecord {
+                target_type: row.get(0)?,
+                target_value: row.get(1)?,
+                key: row.get(2)?,
+                timestamp: row.get(3)?,
+                email: row.get(4)?,
+            })
         })?;
 
         let mut results = Vec::new();
@@ -93,10 +93,8 @@ impl Store {
     }
 
     /// Get all set member tombstones for serialization.
-    /// Returns (target_type, target_value, key, member_id, value, timestamp, email).
-    pub fn get_all_set_tombstones(
-        &self,
-    ) -> Result<Vec<(String, String, String, String, String, i64, String)>> {
+    pub fn get_all_set_tombstones(&self) -> Result<Vec<super::types::SetTombstoneRecord>> {
+        use super::types::SetTombstoneRecord;
         let mut stmt = self.conn.prepare(
             "SELECT target_type, target_value, key, entry_id, value, timestamp, email
              FROM tombstones
@@ -105,15 +103,15 @@ impl Store {
         )?;
 
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, String>(6)?,
-            ))
+            Ok(SetTombstoneRecord {
+                target_type: row.get(0)?,
+                target_value: row.get(1)?,
+                key: row.get(2)?,
+                member_id: row.get(3)?,
+                value: row.get(4)?,
+                timestamp: row.get(5)?,
+                email: row.get(6)?,
+            })
         })?;
 
         let mut results = Vec::new();
@@ -124,10 +122,8 @@ impl Store {
     }
 
     /// Get all list entry tombstones for serialization.
-    /// Returns (target_type, target_value, key, entry_name, timestamp, email).
-    pub fn get_all_list_tombstones(
-        &self,
-    ) -> Result<Vec<(String, String, String, String, i64, String)>> {
+    pub fn get_all_list_tombstones(&self) -> Result<Vec<super::types::ListTombstoneRecord>> {
+        use super::types::ListTombstoneRecord;
         let mut stmt = self.conn.prepare(
             "SELECT target_type, target_value, key, entry_id, timestamp, email
              FROM tombstones
@@ -135,14 +131,14 @@ impl Store {
              ORDER BY target_type, target_value, key, entry_id",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)?,
-                row.get::<_, String>(5)?,
-            ))
+            Ok(ListTombstoneRecord {
+                target_type: row.get(0)?,
+                target_value: row.get(1)?,
+                key: row.get(2)?,
+                entry_name: row.get(3)?,
+                timestamp: row.get(4)?,
+                email: row.get(5)?,
+            })
         })?;
         let mut results = Vec::new();
         for row in rows {

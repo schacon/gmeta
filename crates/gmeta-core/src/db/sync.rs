@@ -92,10 +92,8 @@ impl Store {
     }
 
     /// Get entries modified since a given timestamp (for incremental serialization).
-    pub fn get_modified_since(
-        &self,
-        since: i64,
-    ) -> Result<Vec<(String, String, String, String, String, String)>> {
+    pub fn get_modified_since(&self, since: i64) -> Result<Vec<super::types::ModifiedEntry>> {
+        use super::types::ModifiedEntry;
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT ml.target_type, ml.target_value, ml.key, ml.operation,
                     COALESCE(m.value, ''), COALESCE(m.value_type, '')
@@ -107,14 +105,14 @@ impl Store {
         )?;
 
         let rows = stmt.query_map(params![since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-            ))
+            Ok(ModifiedEntry {
+                target_type: row.get(0)?,
+                target_value: row.get(1)?,
+                key: row.get(2)?,
+                operation: row.get(3)?,
+                value: row.get(4)?,
+                value_type: row.get(5)?,
+            })
         })?;
 
         let mut results = Vec::new();
