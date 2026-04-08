@@ -8,7 +8,7 @@ use gmeta_core::types::{TargetType, ValueType};
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
 
     let tracking_ref = format!("refs/{}/remotes/main", ns);
     let tip_oid = match repo.find_reference(&tracking_ref) {
@@ -70,7 +70,7 @@ pub fn run() -> Result<()> {
                     }
                     let tt = TargetType::from_str(target_type)?;
                     if ctx
-                        .db
+                        .store()
                         .insert_promised(&tt, target_value, key, &ValueType::String)?
                     {
                         commit_inserted += 1;
@@ -102,7 +102,7 @@ pub fn run() -> Result<()> {
                 for (target_type, target_value, key) in &keys {
                     let tt = TargetType::from_str(target_type)?;
                     if ctx
-                        .db
+                        .store()
                         .insert_promised(&tt, target_value, key, &ValueType::String)?
                     {
                         commit_inserted += 1;

@@ -123,7 +123,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
 
     // Metadata on commit:<sha>
     let commit_entries = ctx
-        .db
+        .store()
         .get_all(&TargetType::Commit, &sha, None)
         .unwrap_or_default();
     for entry in &commit_entries {
@@ -134,7 +134,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
     // Metadata on change-id:<cid>
     if let Some(ref cid) = change_id {
         let cid_entries = ctx
-            .db
+            .store()
             .get_all(&TargetType::ChangeId, cid, None)
             .unwrap_or_default();
         for entry in &cid_entries {

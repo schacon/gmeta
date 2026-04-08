@@ -7,7 +7,7 @@ use crate::context::CommandContext;
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
 
-    let rows = ctx.db.stats_by_target_type_and_key()?;
+    let rows = ctx.store().stats_by_target_type_and_key()?;
 
     if rows.is_empty() {
         println!("no metadata stored");
@@ -15,14 +15,14 @@ pub fn run() -> Result<()> {
     }
 
     // Show storage counts and size histogram at the top
-    let (sqlite_count, git_ref_count) = ctx.db.stats_storage_counts()?;
+    let (sqlite_count, git_ref_count) = ctx.store().stats_storage_counts()?;
     println!(
         "{} values in sqlite, {} values as git refs",
         sqlite_count, git_ref_count
     );
     println!();
 
-    let (buckets, _) = ctx.db.stats_value_size_histogram()?;
+    let (buckets, _) = ctx.store().stats_value_size_histogram()?;
     let max_count = buckets.iter().map(|(_, c)| *c).max().unwrap_or(1).max(1);
     let bar_width = 30usize;
     println!("value sizes (inline):");

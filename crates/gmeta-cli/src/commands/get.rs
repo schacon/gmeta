@@ -4,10 +4,10 @@ use gix::prelude::ObjectIdExt;
 use serde_json::{json, Map, Value};
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
 use gmeta_core::git_utils;
 use gmeta_core::list_value::list_values_from_json;
 use gmeta_core::types::{self, Target, TargetType, ValueType};
+use gmeta_core::Store;
 
 const NODE_VALUE_KEY: &str = "__value";
 
@@ -24,7 +24,7 @@ pub fn run(
     let repo = ctx.repo();
 
     let include_target_subtree = target.target_type == TargetType::Path;
-    let mut entries = ctx.db.get_all_with_target_prefix(
+    let mut entries = ctx.store().get_all_with_target_prefix(
         &target.target_type,
         target.value_str(),
         include_target_subtree,
@@ -35,13 +35,16 @@ pub fn run(
     // (commits are already resolved by git, but change-ids/branches may be partial)
     if entries.is_empty() && target.target_type != TargetType::Path {
         let matches =
-            ctx.db
+            ctx.store()
                 .find_target_values_by_prefix(&target.target_type, target.value_str(), 2)?;
         if matches.len() == 1 {
             let expanded = &matches[0];
-            entries =
-                ctx.db
-                    .get_all_with_target_prefix(&target.target_type, expanded, false, key)?;
+            entries = ctx.store().get_all_with_target_prefix(
+                &target.target_type,
+                expanded,
+                false,
+                key,
+            )?;
             if !entries.is_empty() {
                 eprintln!("expanded to {}:{}", target.type_str(), expanded);
             }
@@ -66,10 +69,10 @@ pub fn run(
         .collect();
 
     if !promised.is_empty() {
-        let hydrated = hydrate_promised_entries(repo, &ctx.db, &target.target_type, &promised)?;
+        let hydrated = hydrate_promised_entries(repo, ctx.store(), &target.target_type, &promised)?;
         if hydrated > 0 {
             // Re-query to get the now-resolved values
-            entries = ctx.db.get_all_with_target_prefix(
+            entries = ctx.store().get_all_with_target_prefix(
                 &target.target_type,
                 target.value_str(),
                 include_target_subtree,
@@ -98,7 +101,7 @@ pub fn run(
     }
 
     if json_output {
-        print_json(&ctx.db, &target, &resolved, with_authorship)?;
+        print_json(ctx.store(), &target, &resolved, with_authorship)?;
     } else {
         print_plain(&target, &resolved, key.is_some() && resolved.len() == 1)?;
     }

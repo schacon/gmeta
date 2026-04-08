@@ -17,9 +17,10 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
 
-        let metadata_id = tx
+        let metadata_id = self
+            .conn
             .query_row(
                 "SELECT rowid FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
@@ -28,25 +29,25 @@ impl Store {
             )
             .optional()?;
         if let Some(metadata_id) = metadata_id {
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM list_values WHERE metadata_id = ?1",
                 params![metadata_id],
             )?;
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM set_values WHERE metadata_id = ?1",
                 params![metadata_id],
             )?;
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM metadata WHERE rowid = ?1",
                 params![metadata_id],
             )?;
         }
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM tombstones WHERE tombstone_type = 'set_member' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
             params![target_type_str, target_value, key],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO tombstones (tombstone_type, target_type, target_value, key, entry_id, value, timestamp, email)
              VALUES ('metadata', ?1, ?2, ?3, '', '', ?4, ?5)
              ON CONFLICT(tombstone_type, target_type, target_value, key, entry_id) DO UPDATE
@@ -54,13 +55,13 @@ impl Store {
             params![target_type_str, target_value, key, timestamp, email],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
              VALUES (?1, ?2, ?3, '', '', 'rm', ?4, ?5)",
             params![target_type_str, target_value, key, email, timestamp],
         )?;
 
-        tx.commit()?;
+        sp.commit()?;
         Ok(())
     }
 

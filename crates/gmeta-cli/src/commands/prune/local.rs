@@ -14,12 +14,15 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
     } else {
         // Read the since value directly — for manual prune we only need the retention window,
         // not the triggers (max-keys/max-size).
-        let rules = read_prune_rules(&ctx.db)?;
+        let rules = read_prune_rules(ctx.store())?;
         let since = match rules {
             Some(ref r) => r.since.clone(),
             None => {
                 // Check if at least meta:prune:since is set (triggers may be absent)
-                match ctx.db.get(&TargetType::Project, "", "meta:prune:since")? {
+                match ctx
+                    .store()
+                    .get(&TargetType::Project, "", "meta:prune:since")?
+                {
                     Some(entry) => {
                         let s: String = serde_json::from_str(&entry.value)?;
                         s
@@ -65,15 +68,15 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
     eprintln!();
 
     // Count what will be pruned (never prune project target_type)
-    let metadata_count = ctx.db.count_metadata_before(cutoff_ms)?;
-    let list_values_count = ctx.db.count_list_values_before(cutoff_ms)?;
-    let tombstone_count = ctx.db.count_tombstones_before(cutoff_ms)?;
-    let set_tombstone_count = ctx.db.count_set_tombstones_before(cutoff_ms)?;
-    let log_count = ctx.db.count_log_entries_before(cutoff_ms)?;
+    let metadata_count = ctx.store().count_metadata_before(cutoff_ms)?;
+    let list_values_count = ctx.store().count_list_values_before(cutoff_ms)?;
+    let tombstone_count = ctx.store().count_tombstones_before(cutoff_ms)?;
+    let set_tombstone_count = ctx.store().count_set_tombstones_before(cutoff_ms)?;
+    let log_count = ctx.store().count_log_entries_before(cutoff_ms)?;
 
     // Count what will survive
-    let metadata_remaining = ctx.db.count_metadata_remaining(cutoff_ms)?;
-    let list_values_remaining = ctx.db.count_list_values_remaining(cutoff_ms)?;
+    let metadata_remaining = ctx.store().count_metadata_remaining(cutoff_ms)?;
+    let list_values_remaining = ctx.store().count_list_values_remaining(cutoff_ms)?;
 
     let total =
         metadata_count + list_values_count + tombstone_count + set_tombstone_count + log_count;
@@ -106,10 +109,10 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
     }
 
     // Delete via Store methods
-    ctx.db.prune_metadata_before(cutoff_ms)?;
-    ctx.db.prune_tombstones_before(cutoff_ms)?;
-    ctx.db.prune_set_tombstones_before(cutoff_ms)?;
-    ctx.db.prune_log_before(cutoff_ms)?;
+    ctx.store().prune_metadata_before(cutoff_ms)?;
+    ctx.store().prune_tombstones_before(cutoff_ms)?;
+    ctx.store().prune_set_tombstones_before(cutoff_ms)?;
+    ctx.store().prune_log_before(cutoff_ms)?;
 
     println!();
     println!("Pruned {} rows.", total);

@@ -4,14 +4,14 @@ use gix::prelude::ObjectIdExt;
 
 use crate::commands::{materialize, serialize};
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
 use gmeta_core::git_utils;
 use gmeta_core::types::{self, TargetType, ValueType};
+use gmeta_core::Store;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
 
     let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
     let remote_refspec = format!("refs/{}/main", ns);
@@ -41,8 +41,8 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
     // Check if we need to materialize even if no new commits were fetched
     // (e.g. remote add fetched but never materialized)
-    let needs_materialize =
-        ctx.db.get_last_materialized()?.is_none() || repo.find_reference(&ctx.local_ref()).is_err();
+    let needs_materialize = ctx.store().get_last_materialized()?.is_none()
+        || repo.find_reference(&ctx.local_ref()).is_err();
 
     // Count new commits
     match (old_tip, new_tip) {
@@ -86,7 +86,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         let walk_from = if needs_materialize { None } else { old_tip };
         let promisor_count = insert_promisor_entries(
             repo,
-            &ctx.db,
+            ctx.store(),
             new.into(),
             walk_from.map(|id| id.into()),
             verbose,

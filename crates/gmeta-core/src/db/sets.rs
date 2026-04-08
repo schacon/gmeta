@@ -17,9 +17,9 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
         let existing = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT rowid, value_type FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
             )?;
@@ -40,7 +40,7 @@ impl Store {
                 }
 
                 let member_id = crate::types::set_member_id(value);
-                let deleted = tx.execute(
+                let deleted = self.conn.execute(
                     "DELETE FROM set_values WHERE metadata_id = ?1 AND member_id = ?2",
                     params![metadata_id, member_id],
                 )?;
@@ -49,14 +49,14 @@ impl Store {
                     return Err(Error::ValueNotFound(format!("'{value}' not found in set")));
                 }
 
-                tx.execute(
+                self.conn.execute(
                     "UPDATE metadata
                      SET value = '[]', value_type = 'set', last_timestamp = ?1
                      WHERE rowid = ?2",
                     params![timestamp, metadata_id],
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO tombstones (tombstone_type, target_type, target_value, key, entry_id, value, timestamp, email)
                      VALUES ('set_member', ?1, ?2, ?3, ?4, ?5, ?6, ?7)
                      ON CONFLICT(tombstone_type, target_type, target_value, key, entry_id) DO UPDATE
@@ -64,21 +64,21 @@ impl Store {
                     params![target_type_str, target_value, key, member_id, value, timestamp, email],
                 )?;
 
-                let new_value = encode_set_values_by_metadata_id(&tx, metadata_id)?;
+                let new_value = encode_set_values_by_metadata_id(&self.conn, metadata_id)?;
 
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
                      VALUES (?1, ?2, ?3, ?4, 'set', 'set:rm', ?5, ?6)",
                     params![target_type_str, target_value, key, &new_value, email, timestamp],
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM tombstones
                      WHERE tombstone_type = 'metadata' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                 )?;
 
-                tx.commit()?;
+                sp.commit()?;
                 Ok(())
             }
             None => Err(Error::KeyNotFound {
@@ -98,9 +98,9 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
         let existing = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT rowid, value_type FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
             )?;
@@ -120,7 +120,7 @@ impl Store {
                     });
                 }
 
-                tx.execute(
+                self.conn.execute(
                     "UPDATE metadata
                      SET value = '[]', value_type = 'set', last_timestamp = ?1
                      WHERE rowid = ?2",
@@ -129,17 +129,17 @@ impl Store {
                 metadata_id
             }
             None => {
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata (target_type, target_value, key, value, value_type, last_timestamp)
                      VALUES (?1, ?2, ?3, '[]', 'set', ?4)",
                     params![target_type_str, target_value, key, timestamp],
                 )?;
-                tx.last_insert_rowid()
+                self.conn.last_insert_rowid()
             }
         };
 
         let member_id = crate::types::set_member_id(value);
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO set_values (metadata_id, member_id, value, timestamp)
              VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(metadata_id, member_id) DO UPDATE
@@ -147,26 +147,26 @@ impl Store {
             params![metadata_id, member_id, value, timestamp],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM tombstones WHERE tombstone_type = 'set_member' AND target_type = ?1 AND target_value = ?2 AND key = ?3 AND entry_id = ?4",
             params![target_type_str, target_value, key, member_id],
         )?;
 
-        let new_value = encode_set_values_by_metadata_id(&tx, metadata_id)?;
+        let new_value = encode_set_values_by_metadata_id(&self.conn, metadata_id)?;
 
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
              VALUES (?1, ?2, ?3, ?4, 'set', 'set:add', ?5, ?6)",
             params![target_type_str, target_value, key, &new_value, email, timestamp],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM tombstones
              WHERE tombstone_type = 'metadata' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
             params![target_type_str, target_value, key],
         )?;
 
-        tx.commit()?;
+        sp.commit()?;
         Ok(())
     }
 }

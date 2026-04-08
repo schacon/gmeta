@@ -58,14 +58,14 @@ pub fn run(
     if use_git_ref {
         let repo = ctx.repo();
         let blob_oid: gix::ObjectId = repo.write_blob(raw_value.as_bytes())?.into();
-        ctx.db.set_with_git_ref(
+        ctx.store().set_with_git_ref(
             None,
             &target.target_type,
             target.value_str(),
             key,
             &blob_oid.to_string(),
             &value_type,
-            &ctx.email,
+            ctx.email(),
             ctx.timestamp,
             true,
         )?;
@@ -83,13 +83,13 @@ pub fn run(
             _ => bail!("unsupported value type"),
         };
 
-        ctx.db.set(
+        ctx.store().set(
             &target.target_type,
             target.value_str(),
             key,
             &stored_value,
             &value_type,
-            &ctx.email,
+            ctx.email(),
             ctx.timestamp,
         )?;
     }
@@ -111,12 +111,12 @@ pub fn run_add(
     let ctx = CommandContext::open(timestamp)?;
     ctx.resolve_target(&mut target)?;
 
-    ctx.db.set_add(
+    ctx.store().set_add(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        &ctx.email,
+        ctx.email(),
         ctx.timestamp,
     )?;
     print_result("added", key, &target, json);
@@ -136,12 +136,12 @@ pub fn run_rm(
     let ctx = CommandContext::open(timestamp)?;
     ctx.resolve_target(&mut target)?;
 
-    ctx.db.set_remove(
+    ctx.store().set_remove(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        &ctx.email,
+        ctx.email(),
         ctx.timestamp,
     )?;
     print_result("removed", key, &target, json);

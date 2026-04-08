@@ -43,9 +43,9 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
         let existing = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT rowid, value, value_type FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
             )?;
@@ -63,37 +63,37 @@ impl Store {
         let (metadata_id, mut entries) = match existing {
             Some((metadata_id, current_val, current_type)) => {
                 if current_type == "list" {
-                    let entries = load_list_entries_by_metadata_id_tx(&tx, metadata_id)?;
+                    let entries = load_list_entries_by_metadata_id_tx(&self.conn, metadata_id)?;
                     (metadata_id, entries)
                 } else {
                     // Convert string to list
                     let current_str: String = serde_json::from_str(&current_val)?;
-                    tx.execute(
+                    self.conn.execute(
                         "UPDATE metadata
                          SET value = '[]', value_type = 'list', last_timestamp = ?1
                          WHERE rowid = ?2",
                         params![timestamp, metadata_id],
                     )?;
-                    tx.execute(
+                    self.conn.execute(
                         "DELETE FROM list_values WHERE metadata_id = ?1",
                         params![metadata_id],
                     )?;
-                    tx.execute(
+                    self.conn.execute(
                         "INSERT INTO list_values (metadata_id, value, timestamp)
                          VALUES (?1, ?2, 0)",
                         params![metadata_id, current_str],
                     )?;
-                    let entries = load_list_entries_by_metadata_id_tx(&tx, metadata_id)?;
+                    let entries = load_list_entries_by_metadata_id_tx(&self.conn, metadata_id)?;
                     (metadata_id, entries)
                 }
             }
             None => {
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata (target_type, target_value, key, value, value_type, last_timestamp)
                      VALUES (?1, ?2, ?3, '[]', 'list', ?4)",
                     params![target_type_str, target_value, key, timestamp],
                 )?;
-                let metadata_id = tx.last_insert_rowid();
+                let metadata_id = self.conn.last_insert_rowid();
                 (metadata_id, Vec::new())
             }
         };
@@ -104,7 +104,7 @@ impl Store {
             value: stored_value.clone(),
             timestamp: unique_timestamp,
         };
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO list_values (metadata_id, value, timestamp, is_git_ref)
              VALUES (?1, ?2, ?3, ?4)",
             params![
@@ -118,26 +118,26 @@ impl Store {
 
         let new_value = encode_entries(&entries)?;
 
-        tx.execute(
+        self.conn.execute(
             "UPDATE metadata
              SET value = '[]', value_type = 'list', last_timestamp = ?1
              WHERE rowid = ?2",
             params![timestamp, metadata_id],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
              VALUES (?1, ?2, ?3, ?4, 'list', 'push', ?5, ?6)",
             params![target_type_str, target_value, key, &new_value, email, timestamp],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM tombstones
              WHERE tombstone_type = 'metadata' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
             params![target_type_str, target_value, key],
         )?;
 
-        tx.commit()?;
+        sp.commit()?;
 
         Ok(())
     }
@@ -153,9 +153,9 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
         let existing = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT rowid, value_type FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
             )?;
@@ -174,10 +174,10 @@ impl Store {
                         expected: "list".into(),
                     });
                 }
-                let mut list_rows = load_list_rows_by_metadata_id_tx(&tx, metadata_id)?;
+                let mut list_rows = load_list_rows_by_metadata_id_tx(&self.conn, metadata_id)?;
                 if let Some(pos) = list_rows.iter().rposition(|row| row.value == value) {
                     let removed = list_rows.remove(pos);
-                    tx.execute(
+                    self.conn.execute(
                         "DELETE FROM list_values WHERE rowid = ?1",
                         params![removed.rowid],
                     )?;
@@ -194,26 +194,26 @@ impl Store {
                     .collect();
                 let new_value = encode_entries(&list_entries)?;
 
-                tx.execute(
+                self.conn.execute(
                     "UPDATE metadata
                      SET value = '[]', value_type = 'list', last_timestamp = ?1
                      WHERE rowid = ?2",
                     params![timestamp, metadata_id],
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
                      VALUES (?1, ?2, ?3, ?4, 'list', 'pop', ?5, ?6)",
                     params![target_type_str, target_value, key, &new_value, email, timestamp],
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM tombstones
                      WHERE tombstone_type = 'metadata' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                 )?;
 
-                tx.commit()?;
+                sp.commit()?;
 
                 Ok(())
             }
@@ -267,9 +267,9 @@ impl Store {
         timestamp: i64,
     ) -> Result<()> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
         let existing = {
-            let mut stmt = tx.prepare(
+            let mut stmt = self.conn.prepare(
                 "SELECT rowid, value_type FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
             )?;
@@ -288,7 +288,7 @@ impl Store {
                         expected: "list".into(),
                     });
                 }
-                let mut list_rows = load_list_rows_by_metadata_id_tx(&tx, metadata_id)?;
+                let mut list_rows = load_list_rows_by_metadata_id_tx(&self.conn, metadata_id)?;
                 if index >= list_rows.len() {
                     return Err(Error::IndexOutOfRange {
                         index,
@@ -304,13 +304,13 @@ impl Store {
                     &removed.value,
                 );
 
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM list_values WHERE rowid = ?1",
                     params![removed.rowid],
                 )?;
 
                 // Record a list tombstone so serialize propagates the deletion
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO tombstones (tombstone_type, target_type, target_value, key, entry_id, value, timestamp, email)
                      VALUES ('list_entry', ?1, ?2, ?3, ?4, '', ?5, ?6)
                      ON CONFLICT(tombstone_type, target_type, target_value, key, entry_id) DO UPDATE
@@ -327,26 +327,26 @@ impl Store {
                     .collect();
                 let new_value = encode_entries(&list_entries)?;
 
-                tx.execute(
+                self.conn.execute(
                     "UPDATE metadata
                      SET value = '[]', value_type = 'list', last_timestamp = ?1
                      WHERE rowid = ?2",
                     params![timestamp, metadata_id],
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
                      VALUES (?1, ?2, ?3, ?4, 'list', 'list:rm', ?5, ?6)",
                     params![target_type_str, target_value, key, &new_value, email, timestamp],
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM tombstones
                      WHERE tombstone_type = 'metadata' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                 )?;
 
-                tx.commit()?;
+                sp.commit()?;
 
                 Ok(())
             }

@@ -1,3 +1,5 @@
+/// Batch API for atomic multi-writes.
+mod batch;
 mod lists;
 mod metadata;
 mod promised;
@@ -6,11 +8,18 @@ mod schema;
 mod sets;
 mod stats;
 mod sync;
+/// Target-scoped handle for reducing parameter noise.
+pub mod target_handle;
 mod tombstones;
 /// Named return types for database query methods.
 pub mod types;
+mod value_ops;
+
+pub use batch::Batch;
+pub use target_handle::TargetHandle;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use rusqlite::{params, Connection};
@@ -19,6 +28,9 @@ use crate::error::{Error, Result};
 
 use crate::list_value::{encode_entries, ListEntry};
 use crate::types::GIT_REF_THRESHOLD;
+
+/// Global counter for generating unique savepoint names.
+static SAVEPOINT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// The time to wait when the database is locked before giving up.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
@@ -86,6 +98,55 @@ impl Store {
     pub fn set_repo(&mut self, repo: gix::Repository) {
         self.repo = Some(repo);
     }
+
+    /// Create a nestable savepoint on the connection.
+    ///
+    /// Unlike `unchecked_transaction()` (which issues `BEGIN DEFERRED` and
+    /// cannot nest), this uses SQLite's `SAVEPOINT` statement, which nests
+    /// correctly inside other savepoints and inside batch transactions.
+    fn savepoint(&self) -> Result<AutoSavepoint<'_>> {
+        AutoSavepoint::new(&self.conn)
+    }
+}
+
+/// RAII guard for a SQLite savepoint created via raw SQL.
+///
+/// Rolls back on drop unless [`commit()`](Self::commit) is called.
+/// Uses unique names so multiple savepoints can nest.
+struct AutoSavepoint<'a> {
+    conn: &'a Connection,
+    name: String,
+    committed: bool,
+}
+
+impl<'a> AutoSavepoint<'a> {
+    fn new(conn: &'a Connection) -> Result<Self> {
+        let id = SAVEPOINT_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let name = format!("gmeta_sp_{id}");
+        conn.execute_batch(&format!("SAVEPOINT {name}"))?;
+        Ok(Self {
+            conn,
+            name,
+            committed: false,
+        })
+    }
+
+    fn commit(mut self) -> Result<()> {
+        self.committed = true;
+        self.conn.execute_batch(&format!("RELEASE {}", self.name))?;
+        Ok(())
+    }
+}
+
+impl Drop for AutoSavepoint<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = self
+                .conn
+                .execute_batch(&format!("ROLLBACK TO {}", self.name));
+            let _ = self.conn.execute_batch(&format!("RELEASE {}", self.name));
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -127,10 +188,10 @@ fn load_list_entries_by_metadata_id(
 }
 
 fn load_list_entries_by_metadata_id_tx(
-    tx: &rusqlite::Transaction<'_>,
+    conn: &Connection,
     metadata_id: i64,
 ) -> Result<Vec<ListEntry>> {
-    let mut stmt = tx.prepare(
+    let mut stmt = conn.prepare(
         "SELECT value, timestamp, is_git_ref
          FROM list_values
          WHERE metadata_id = ?1
@@ -155,11 +216,8 @@ fn load_list_entries_by_metadata_id_tx(
     Ok(entries)
 }
 
-fn load_list_rows_by_metadata_id_tx(
-    tx: &rusqlite::Transaction<'_>,
-    metadata_id: i64,
-) -> Result<Vec<ListRow>> {
-    let mut stmt = tx.prepare(
+fn load_list_rows_by_metadata_id_tx(conn: &Connection, metadata_id: i64) -> Result<Vec<ListRow>> {
+    let mut stmt = conn.prepare(
         "SELECT rowid, value, timestamp
          FROM list_values
          WHERE metadata_id = ?1
@@ -190,10 +248,10 @@ fn encode_list_entries_by_metadata_id(
 }
 
 fn load_set_values_by_metadata_id_tx(
-    tx: &rusqlite::Transaction<'_>,
+    conn: &Connection,
     metadata_id: i64,
 ) -> Result<std::collections::BTreeMap<String, (String, i64)>> {
-    let mut stmt = tx.prepare(
+    let mut stmt = conn.prepare(
         "SELECT member_id, value, timestamp FROM set_values WHERE metadata_id = ?1 ORDER BY member_id",
     )?;
     let rows = stmt.query_map(params![metadata_id], |row| {

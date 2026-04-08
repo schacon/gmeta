@@ -10,11 +10,11 @@ pub fn run(target_str: &str, key: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
-    let removed = ctx.db.remove(
+    let removed = ctx.store().remove(
         &target.target_type,
         target.value_str(),
         key,
-        &ctx.email,
+        ctx.email(),
         ctx.timestamp,
     )?;
 

@@ -79,10 +79,10 @@ impl Store {
         }
 
         let git_ref_val: i64 = if is_git_ref { 1 } else { 0 };
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
         match value_type {
             ValueType::String => {
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata (target_type, target_value, key, value, value_type, last_timestamp, is_git_ref)
                      VALUES (?1, ?2, ?3, ?4, 'string', ?5, ?6)
                      ON CONFLICT(target_type, target_value, key) DO UPDATE
@@ -90,26 +90,26 @@ impl Store {
                     params![target_type_str, target_value, key, value, timestamp, git_ref_val],
                 )?;
 
-                let metadata_id: i64 = tx.query_row(
+                let metadata_id: i64 = self.conn.query_row(
                     "SELECT rowid FROM metadata WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                     |row| row.get(0),
                 )?;
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM list_values WHERE metadata_id = ?1",
                     params![metadata_id],
                 )?;
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM set_values WHERE metadata_id = ?1",
                     params![metadata_id],
                 )?;
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM tombstones WHERE tombstone_type = 'set_member' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                 )?;
             }
             ValueType::List => {
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata (target_type, target_value, key, value, value_type, last_timestamp, is_git_ref)
                      VALUES (?1, ?2, ?3, '[]', 'list', ?4, 0)
                      ON CONFLICT(target_type, target_value, key) DO UPDATE
@@ -117,28 +117,28 @@ impl Store {
                     params![target_type_str, target_value, key, timestamp],
                 )?;
 
-                let metadata_id: i64 = tx.query_row(
+                let metadata_id: i64 = self.conn.query_row(
                     "SELECT rowid FROM metadata WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                     |row| row.get(0),
                 )?;
 
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM list_values WHERE metadata_id = ?1",
                     params![metadata_id],
                 )?;
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM set_values WHERE metadata_id = ?1",
                     params![metadata_id],
                 )?;
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM tombstones WHERE tombstone_type = 'set_member' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                 )?;
 
                 for entry in parse_entries(value)? {
                     let (stored_value, item_is_git_ref) = blob_if_large(repo, &entry.value)?;
-                    tx.execute(
+                    self.conn.execute(
                         "INSERT INTO list_values (metadata_id, value, timestamp, is_git_ref)
                          VALUES (?1, ?2, ?3, ?4)",
                         params![
@@ -151,7 +151,7 @@ impl Store {
                 }
             }
             ValueType::Set => {
-                tx.execute(
+                self.conn.execute(
                     "INSERT INTO metadata (target_type, target_value, key, value, value_type, last_timestamp, is_git_ref)
                      VALUES (?1, ?2, ?3, '[]', 'set', ?4, 0)
                      ON CONFLICT(target_type, target_value, key) DO UPDATE
@@ -159,20 +159,20 @@ impl Store {
                     params![target_type_str, target_value, key, timestamp],
                 )?;
 
-                let metadata_id: i64 = tx.query_row(
+                let metadata_id: i64 = self.conn.query_row(
                     "SELECT rowid FROM metadata WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
                     params![target_type_str, target_value, key],
                     |row| row.get(0),
                 )?;
 
-                let existing_members = load_set_values_by_metadata_id_tx(&tx, metadata_id)?;
+                let existing_members = load_set_values_by_metadata_id_tx(&self.conn, metadata_id)?;
                 let new_members = normalize_set_values(value)?;
                 let new_member_ids: std::collections::BTreeSet<String> = new_members
                     .iter()
                     .map(|member| crate::types::set_member_id(member))
                     .collect();
 
-                tx.execute(
+                self.conn.execute(
                     "DELETE FROM list_values WHERE metadata_id = ?1",
                     params![metadata_id],
                 )?;
@@ -183,13 +183,13 @@ impl Store {
                         .get(&member_id)
                         .map(|(_, ts)| *ts)
                         .unwrap_or(timestamp);
-                    tx.execute(
+                    self.conn.execute(
                         "INSERT INTO set_values (metadata_id, member_id, value, timestamp)
                          VALUES (?1, ?2, ?3, ?4)
                          ON CONFLICT(metadata_id, member_id) DO UPDATE SET value = excluded.value, timestamp = excluded.timestamp",
                         params![metadata_id, member_id, member, member_timestamp],
                     )?;
-                    tx.execute(
+                    self.conn.execute(
                         "DELETE FROM tombstones WHERE tombstone_type = 'set_member' AND target_type = ?1 AND target_value = ?2 AND key = ?3 AND entry_id = ?4",
                         params![target_type_str, target_value, key, crate::types::set_member_id(member)],
                     )?;
@@ -197,7 +197,7 @@ impl Store {
 
                 for member_id in existing_members.keys() {
                     if !new_member_ids.contains(member_id) {
-                        tx.execute(
+                        self.conn.execute(
                             "DELETE FROM set_values WHERE metadata_id = ?1 AND member_id = ?2",
                             params![metadata_id, member_id],
                         )?;
@@ -205,7 +205,7 @@ impl Store {
                             .get(member_id)
                             .map(|(value, _)| value.clone())
                             .unwrap_or_default();
-                        tx.execute(
+                        self.conn.execute(
                             "INSERT INTO tombstones (tombstone_type, target_type, target_value, key, entry_id, value, timestamp, email)
                              VALUES ('set_member', ?1, ?2, ?3, ?4, ?5, ?6, ?7)
                              ON CONFLICT(tombstone_type, target_type, target_value, key, entry_id) DO UPDATE
@@ -217,18 +217,18 @@ impl Store {
             }
         }
 
-        tx.execute(
+        self.conn.execute(
             "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
              VALUES (?1, ?2, ?3, ?4, ?5, 'set', ?6, ?7)",
             params![target_type_str, target_value, key, value, value_type_str, email, timestamp],
         )?;
 
-        tx.execute(
+        self.conn.execute(
             "DELETE FROM tombstones WHERE tombstone_type = 'metadata' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
             params![target_type_str, target_value, key],
         )?;
 
-        tx.commit()?;
+        sp.commit()?;
 
         Ok(())
     }
@@ -491,9 +491,10 @@ impl Store {
         timestamp: i64,
     ) -> Result<bool> {
         let target_type_str = target_type.as_str();
-        let tx = self.conn.unchecked_transaction()?;
+        let sp = self.savepoint()?;
 
-        let metadata_id = tx
+        let metadata_id = self
+            .conn
             .query_row(
                 "SELECT rowid FROM metadata
                  WHERE target_type = ?1 AND target_value = ?2 AND key = ?3",
@@ -503,15 +504,15 @@ impl Store {
             .optional()?;
 
         let deleted = if let Some(metadata_id) = metadata_id {
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM list_values WHERE metadata_id = ?1",
                 params![metadata_id],
             )?;
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM set_values WHERE metadata_id = ?1",
                 params![metadata_id],
             )?;
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM metadata WHERE rowid = ?1",
                 params![metadata_id],
             )?
@@ -520,7 +521,7 @@ impl Store {
         };
 
         if deleted > 0 {
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO tombstones (tombstone_type, target_type, target_value, key, entry_id, value, timestamp, email)
                  VALUES ('metadata', ?1, ?2, ?3, '', '', ?4, ?5)
                  ON CONFLICT(tombstone_type, target_type, target_value, key, entry_id) DO UPDATE
@@ -529,20 +530,20 @@ impl Store {
             )?;
 
             // Clear per-entry list tombstones -- the whole-key tombstone supersedes them
-            tx.execute(
+            self.conn.execute(
                 "DELETE FROM tombstones
                  WHERE tombstone_type = 'list_entry' AND target_type = ?1 AND target_value = ?2 AND key = ?3",
                 params![target_type_str, target_value, key],
             )?;
 
-            tx.execute(
+            self.conn.execute(
                 "INSERT INTO metadata_log (target_type, target_value, key, value, value_type, operation, email, timestamp)
                  VALUES (?1, ?2, ?3, '', '', 'rm', ?4, ?5)",
                 params![target_type_str, target_value, key, email, timestamp],
             )?;
         }
 
-        tx.commit()?;
+        sp.commit()?;
 
         Ok(deleted > 0)
     }
