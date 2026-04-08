@@ -12,6 +12,7 @@ use crate::types::{TargetType, ValueType};
 
 impl Store {
     /// Set a value (upsert). JSON-encodes the value for storage.
+    #[allow(clippy::too_many_arguments)]
     pub fn set(
         &self,
         target_type: &TargetType,
@@ -38,6 +39,7 @@ impl Store {
     /// Set a value (upsert) with optional git ref flag.
     /// When is_git_ref is true, value contains a git blob SHA instead of the actual content.
     /// For list values, repo is used to store large items as git blob refs.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_with_git_ref(
         &self,
         repo: Option<&gix::Repository>,

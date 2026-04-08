@@ -32,6 +32,7 @@ impl Store {
     }
 
     /// Push a value onto a list, storing large items as git blob refs.
+    #[allow(clippy::too_many_arguments)]
     pub fn list_push_with_repo(
         &self,
         repo: Option<&gix::Repository>,
