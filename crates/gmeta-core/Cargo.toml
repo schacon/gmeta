@@ -17,5 +17,9 @@ sha1 = { workspace = true }
 thiserror = { workspace = true }
 time = { workspace = true }
 
+[dev-dependencies]
+gix = { workspace = true }
+tempfile = "3"
+
 [lints]
 workspace = true
