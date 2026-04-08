@@ -10,7 +10,7 @@ use gmeta_core::git_utils;
 /// This only succeeds if the branch doesn't already exist (no force push).
 pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
+    let repo = ctx.session.repo();
 
     let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
 
@@ -25,7 +25,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
         .string(&meta_url_key)
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let ns = ctx.namespace();
+    let ns = ctx.session.namespace();
 
     let readme_content = generate_readme(&origin_url, &meta_url, ns);
 
@@ -44,8 +44,8 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
         editor.write()?
     };
 
-    let name = git_utils::get_name(repo)?;
-    let email = git_utils::get_email(repo)?;
+    let name = ctx.session.name();
+    let email = ctx.session.email();
     let sig = gix::actor::Signature {
         name: name.into(),
         email: email.into(),
@@ -172,12 +172,12 @@ const MAX_RETRIES: u32 = 5;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
-    let ns = ctx.namespace();
+    let repo = ctx.session.repo();
+    let ns = ctx.session.namespace();
 
     // Resolve which remote to push to
     let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
-    let local_ref = ctx.local_ref();
+    let local_ref = ctx.session.local_ref();
     let remote_refspec = format!("refs/{}/main", ns);
 
     if verbose {

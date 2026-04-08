@@ -8,14 +8,14 @@ pub fn run_push(target_str: &str, key: &str, value: &str) -> Result<()> {
     validate_key(key)?;
 
     let ctx = CommandContext::open(None)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
-    ctx.store().list_push(
+    ctx.session.store().list_push(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
 
@@ -27,9 +27,10 @@ pub fn run_rm(target_str: &str, key: &str, index: Option<usize>) -> Result<()> {
     validate_key(key)?;
 
     let ctx = CommandContext::open(None)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
     let entries = ctx
+        .session
         .store()
         .list_entries(&target.target_type, target.value_str(), key)?;
 
@@ -50,12 +51,12 @@ pub fn run_rm(target_str: &str, key: &str, index: Option<usize>) -> Result<()> {
             }
         }
         Some(idx) => {
-            ctx.store().list_remove(
+            ctx.session.store().list_remove(
                 &target.target_type,
                 target.value_str(),
                 key,
                 idx,
-                ctx.email(),
+                ctx.session.email(),
                 ctx.timestamp,
             )?;
         }
@@ -69,14 +70,14 @@ pub fn run_pop(target_str: &str, key: &str, value: &str) -> Result<()> {
     validate_key(key)?;
 
     let ctx = CommandContext::open(None)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
-    ctx.store().list_pop(
+    ctx.session.store().list_pop(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
 

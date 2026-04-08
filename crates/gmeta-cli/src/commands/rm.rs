@@ -8,13 +8,13 @@ pub fn run(target_str: &str, key: &str) -> Result<()> {
     validate_key(key)?;
 
     let ctx = CommandContext::open(None)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
-    let removed = ctx.store().remove(
+    let removed = ctx.session.store().remove(
         &target.target_type,
         target.value_str(),
         key,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
 

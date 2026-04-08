@@ -7,8 +7,8 @@ use gmeta_core::types::{TargetType, ValueType};
 
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
-    let ns = ctx.namespace();
+    let repo = ctx.session.repo();
+    let ns = ctx.session.namespace();
 
     let tracking_ref = format!("refs/{}/remotes/main", ns);
     let tip_oid = match repo.find_reference(&tracking_ref) {
@@ -55,24 +55,26 @@ pub fn run() -> Result<()> {
         let message = decoded.message.to_str_lossy().to_string();
         let first_line = message.lines().next().unwrap_or("");
 
-        match super::pull::parse_commit_changes_pub(&message) {
+        match gmeta_core::sync::parse_commit_changes(&message) {
             Some(changes) => {
                 commits_parsed += 1;
                 let mut commit_inserted = 0;
                 let mut commit_skipped = 0;
                 let mut commit_deletes = 0;
 
-                for (op, target_type, target_value, key) in &changes {
-                    if *op == 'D' {
+                for change in &changes {
+                    if change.op == 'D' {
                         commit_deletes += 1;
                         skipped_deletes += 1;
                         continue;
                     }
-                    let tt = TargetType::from_str(target_type)?;
-                    if ctx
-                        .store()
-                        .insert_promised(&tt, target_value, key, &ValueType::String)?
-                    {
+                    let tt = TargetType::from_str(&change.target_type)?;
+                    if ctx.session.store().insert_promised(
+                        &tt,
+                        &change.target_value,
+                        &change.key,
+                        &ValueType::String,
+                    )? {
                         commit_inserted += 1;
                         inserted += 1;
                     } else {
@@ -94,17 +96,19 @@ pub fn run() -> Result<()> {
             None if decoded.parents().count() == 0 => {
                 // Root commit without a change list -- walk its tree
                 let tree_id = decoded.tree();
-                let keys = super::pull::extract_keys_from_tree_pub(repo, tree_id)?;
+                let keys = ctx.session.keys_in_tree(tree_id)?;
                 commits_parsed += 1;
                 let mut commit_inserted = 0;
                 let mut commit_skipped = 0;
 
                 for (target_type, target_value, key) in &keys {
                     let tt = TargetType::from_str(target_type)?;
-                    if ctx
-                        .store()
-                        .insert_promised(&tt, target_value, key, &ValueType::String)?
-                    {
+                    if ctx.session.store().insert_promised(
+                        &tt,
+                        target_value,
+                        key,
+                        &ValueType::String,
+                    )? {
                         commit_inserted += 1;
                         inserted += 1;
                     } else {

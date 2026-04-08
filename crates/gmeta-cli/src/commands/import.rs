@@ -51,11 +51,15 @@ pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<(
 
 fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
-    let email = ctx.email();
+    let repo = ctx.session.repo();
+    let email = ctx.session.email();
     let fallback_ts = ctx.timestamp;
 
-    let db = if dry_run { None } else { Some(ctx.store()) };
+    let db = if dry_run {
+        None
+    } else {
+        Some(ctx.session.store())
+    };
 
     let mut imported_count = 0u64;
 
@@ -863,10 +867,14 @@ const NOTES_REFS: &[&str] = &["refs/remotes/notes/ai", "refs/notes/ai"];
 
 fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
-    let email = ctx.email();
+    let repo = ctx.session.repo();
+    let email = ctx.session.email();
 
-    let db = if dry_run { None } else { Some(ctx.store()) };
+    let db = if dry_run {
+        None
+    } else {
+        Some(ctx.session.store())
+    };
 
     // Locate the notes ref
     let notes_ref = NOTES_REFS

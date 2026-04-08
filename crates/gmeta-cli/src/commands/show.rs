@@ -20,7 +20,7 @@ const BLUE: &str = "\x1b[34m";
 
 pub fn run(commit_ref: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
+    let repo = ctx.session.repo();
 
     // Resolve the ref to a full commit SHA
     let spec = repo
@@ -123,6 +123,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
 
     // Metadata on commit:<sha>
     let commit_entries = ctx
+        .session
         .store()
         .get_all(&TargetType::Commit, &sha, None)
         .unwrap_or_default();
@@ -134,6 +135,7 @@ pub fn run(commit_ref: &str) -> Result<()> {
     // Metadata on change-id:<cid>
     if let Some(ref cid) = change_id {
         let cid_entries = ctx
+            .session
             .store()
             .get_all(&TargetType::ChangeId, cid, None)
             .unwrap_or_default();

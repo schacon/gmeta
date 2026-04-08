@@ -37,7 +37,7 @@ pub fn run(
     validate_key(key)?;
 
     let ctx = CommandContext::open(timestamp)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
     let value_type = ValueType::from_str(value_type_str)?;
 
@@ -56,16 +56,16 @@ pub fn run(
         from_file && matches!(value_type, ValueType::String) && raw_value.len() > GIT_REF_THRESHOLD;
 
     if use_git_ref {
-        let repo = ctx.repo();
+        let repo = ctx.session.repo();
         let blob_oid: gix::ObjectId = repo.write_blob(raw_value.as_bytes())?.into();
-        ctx.store().set_with_git_ref(
+        ctx.session.store().set_with_git_ref(
             None,
             &target.target_type,
             target.value_str(),
             key,
             &blob_oid.to_string(),
             &value_type,
-            ctx.email(),
+            ctx.session.email(),
             ctx.timestamp,
             true,
         )?;
@@ -83,13 +83,13 @@ pub fn run(
             _ => bail!("unsupported value type"),
         };
 
-        ctx.store().set(
+        ctx.session.store().set(
             &target.target_type,
             target.value_str(),
             key,
             &stored_value,
             &value_type,
-            ctx.email(),
+            ctx.session.email(),
             ctx.timestamp,
         )?;
     }
@@ -109,14 +109,14 @@ pub fn run_add(
     validate_key(key)?;
 
     let ctx = CommandContext::open(timestamp)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
-    ctx.store().set_add(
+    ctx.session.store().set_add(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
     print_result("added", key, &target, json);
@@ -134,14 +134,14 @@ pub fn run_rm(
     validate_key(key)?;
 
     let ctx = CommandContext::open(timestamp)?;
-    ctx.resolve_target(&mut target)?;
+    ctx.session.resolve_target(&mut target)?;
 
-    ctx.store().set_remove(
+    ctx.session.store().set_remove(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
     print_result("removed", key, &target, json);
