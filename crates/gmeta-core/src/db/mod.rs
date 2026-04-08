@@ -6,9 +6,14 @@ mod schema;
 mod sets;
 mod stats;
 mod sync;
+/// Target-scoped handle for reducing parameter noise.
+pub mod target_handle;
 mod tombstones;
 /// Named return types for database query methods.
 pub mod types;
+mod value_ops;
+
+pub use target_handle::TargetHandle;
 
 use std::path::Path;
 use std::time::Duration;
