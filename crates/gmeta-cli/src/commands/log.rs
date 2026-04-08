@@ -6,7 +6,6 @@ use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 
 use crate::context::CommandContext;
-use gmeta_core::git_utils;
 use gmeta_core::types::TargetType;
 
 const RESET: &str = "\x1b[0m";
@@ -24,8 +23,9 @@ pub fn run(
 ) -> Result<()> {
     let mut ctx = CommandContext::open(None)?;
     // Attach a repo to the Store so blob-ref values are resolved during reads.
-    ctx.store_mut().set_repo(git_utils::discover_repo()?);
-    let repo = ctx.repo();
+    let git_dir = ctx.session.repo().git_dir().to_owned();
+    ctx.session.store_mut().set_repo(gix::open(git_dir)?);
+    let repo = ctx.session.repo();
 
     // Resolve start ref -> OID
     let start_oid = resolve_start(repo, start_ref)?;
@@ -48,6 +48,7 @@ pub fn run(
 
         // Fetch metadata before deciding whether to print the commit
         let entries = ctx
+            .session
             .store()
             .get_all(&TargetType::Commit, &sha, None)
             .unwrap_or_default();

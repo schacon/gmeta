@@ -15,6 +15,8 @@ pub mod git_utils;
 pub mod list_value;
 /// The library entry point: a session combining a git repo with a metadata store.
 pub mod session;
+/// High-level sync operations: promisor entries, commit change parsing, blobless clone support.
+pub mod sync;
 /// Git tree serialization, parsing, merging, and filtering.
 pub mod tree;
 /// Core metadata types: targets, value types, and path-building helpers.

@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 
-use crate::commands::{materialize, pull, serialize};
+use crate::commands::{materialize, serialize};
 use crate::context::CommandContext;
 use gmeta_core::git_utils;
 
@@ -57,8 +57,10 @@ fn check_remote_refs(repo: &gix::Repository, url: &str, ns: &str) -> Result<(boo
 
 pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
-    let ns = namespace_override.unwrap_or(ctx.namespace()).to_string();
+    let repo = ctx.session.repo();
+    let ns = namespace_override
+        .unwrap_or(ctx.session.namespace())
+        .to_string();
     let url = expand_url(url);
 
     // Check if this remote name already exists
@@ -191,13 +193,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             let tracking_ref_name = format!("refs/{}/remotes/main", ns);
             if let Ok(r) = repo.find_reference(&tracking_ref_name) {
                 if let Ok(tip_id) = r.into_fully_peeled_id() {
-                    let count = pull::insert_promisor_entries_pub(
-                        repo,
-                        ctx.store(),
-                        tip_id.detach(),
-                        None,
-                        false,
-                    )?;
+                    let count = ctx.session.index_history(tip_id.detach(), None)?;
                     if count > 0 {
                         eprintln!("Indexed {} keys from history (available on demand).", count);
                     }
@@ -215,8 +211,8 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 
 pub fn run_remove(name: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
-    let ns = ctx.namespace();
+    let repo = ctx.session.repo();
+    let ns = ctx.session.namespace();
 
     // Verify this is a meta remote
     let config = repo.config_snapshot();
@@ -286,7 +282,7 @@ pub fn run_remove(name: &str) -> Result<()> {
 
 pub fn run_list() -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
+    let repo = ctx.session.repo();
     let remotes = git_utils::list_meta_remotes(repo)?;
 
     if remotes.is_empty() {

@@ -1,9 +1,8 @@
 use anyhow::Result;
 use std::time::{Duration, Instant};
 
-use gmeta_core::db::Store;
-use gmeta_core::git_utils;
 use gmeta_core::types::TargetType;
+use gmeta_core::Session;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -15,9 +14,8 @@ const RED: &str = "\x1b[31m";
 const BLUE: &str = "\x1b[34m";
 
 pub fn run() -> Result<()> {
-    let repo = git_utils::discover_repo()?;
-    let db_path = git_utils::db_path(&repo)?;
-    let db = Store::open_with_repo(&db_path, repo)?;
+    let session = Session::discover()?;
+    let db = session.store();
 
     let keys = db.get_all_keys()?;
     let total = keys.len();

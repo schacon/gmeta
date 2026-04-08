@@ -8,7 +8,7 @@ use gmeta_core::types::{TargetType, ValueType};
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
 
-    let existing = read_prune_rules(ctx.store())?;
+    let existing = read_prune_rules(ctx.session.store())?;
 
     if let Some(ref rules) = existing {
         println!("Current auto-prune configuration:");
@@ -175,11 +175,11 @@ pub fn run() -> Result<()> {
     match max_keys {
         Some(ref v) => set_config(&ctx, "meta:prune:max-keys", v)?,
         None => {
-            ctx.store().remove(
+            ctx.session.store().remove(
                 &TargetType::Project,
                 "",
                 "meta:prune:max-keys",
-                ctx.email(),
+                ctx.session.email(),
                 ctx.timestamp,
             )?;
         }
@@ -187,11 +187,11 @@ pub fn run() -> Result<()> {
     match max_size {
         Some(ref v) => set_config(&ctx, "meta:prune:max-size", v)?,
         None => {
-            ctx.store().remove(
+            ctx.session.store().remove(
                 &TargetType::Project,
                 "",
                 "meta:prune:max-size",
-                ctx.email(),
+                ctx.session.email(),
                 ctx.timestamp,
             )?;
         }
@@ -199,11 +199,11 @@ pub fn run() -> Result<()> {
     match min_size {
         Some(ref v) => set_config(&ctx, "meta:prune:min-size", v)?,
         None => {
-            ctx.store().remove(
+            ctx.session.store().remove(
                 &TargetType::Project,
                 "",
                 "meta:prune:min-size",
-                ctx.email(),
+                ctx.session.email(),
                 ctx.timestamp,
             )?;
         }
@@ -215,13 +215,13 @@ pub fn run() -> Result<()> {
 
 fn set_config(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
     let stored = serde_json::to_string(value)?;
-    ctx.store().set(
+    ctx.session.store().set(
         &TargetType::Project,
         "",
         key,
         &stored,
         &ValueType::String,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
     Ok(())

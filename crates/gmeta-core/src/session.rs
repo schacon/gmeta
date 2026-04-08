@@ -19,6 +19,7 @@ pub struct Session {
     store: crate::db::Store,
     namespace: String,
     email: String,
+    name: String,
 }
 
 impl Session {
@@ -44,6 +45,7 @@ impl Session {
     fn from_repo(repo: gix::Repository) -> crate::error::Result<Self> {
         let db_path = crate::git_utils::db_path(&repo)?;
         let email = crate::git_utils::get_email(&repo)?;
+        let name = crate::git_utils::get_name(&repo)?;
         let namespace = crate::git_utils::get_namespace(&repo)?;
         let store = crate::db::Store::open(&db_path)?;
 
@@ -52,6 +54,7 @@ impl Session {
             store,
             namespace,
             email,
+            name,
         })
     }
 
@@ -84,6 +87,13 @@ impl Session {
         &self.email
     }
 
+    /// The user name from git config `user.name`.
+    ///
+    /// Used for commit signatures during serialization.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     /// The local serialization ref path (e.g. `refs/meta/local/main`).
     pub fn local_ref(&self) -> String {
         format!("refs/{}/local/main", self.namespace)
@@ -97,5 +107,32 @@ impl Session {
     /// Resolve a target's partial commit SHA using this session's repository.
     pub fn resolve_target(&self, target: &mut crate::types::Target) -> crate::error::Result<()> {
         target.resolve(&self.repo)
+    }
+
+    /// Index metadata keys from commit history for blobless clone support.
+    ///
+    /// Walks commits from `tip_oid` backward (optionally stopping at `old_tip`)
+    /// and inserts promisor entries for all keys found in commit messages or
+    /// root-commit trees. Returns the number of new entries indexed.
+    ///
+    /// Call this after a blobless fetch to build an index of historical keys
+    /// that can be hydrated on demand.
+    pub fn index_history(
+        &self,
+        tip_oid: gix::ObjectId,
+        old_tip: Option<gix::ObjectId>,
+    ) -> crate::error::Result<usize> {
+        crate::sync::insert_promisor_entries(&self.repo, &self.store, tip_oid, old_tip)
+    }
+
+    /// Extract all metadata keys from a git tree without reading blob content.
+    ///
+    /// Useful for discovering what keys exist in a tree fetched via blobless
+    /// clone. Only parses path names — works even when blobs are missing.
+    pub fn keys_in_tree(
+        &self,
+        tree_id: gix::ObjectId,
+    ) -> crate::error::Result<Vec<(String, String, String)>> {
+        crate::sync::extract_keys_from_tree(&self.repo, tree_id)
     }
 }

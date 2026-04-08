@@ -10,9 +10,8 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use time::OffsetDateTime;
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
-use gmeta_core::git_utils;
 use gmeta_core::types::{TargetType, ValueType};
+use gmeta_core::Session;
 
 // ANSI colors
 const BOLD: &str = "\x1b[1m";
@@ -26,7 +25,7 @@ const RESET: &str = "\x1b[0m";
 
 pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
+    let repo = ctx.session.repo();
     let workdir = repo
         .workdir()
         .context("bare repo not supported")?
@@ -422,10 +421,9 @@ impl WatchState {
             None => return Ok(()),
         };
 
-        let repo = git_utils::discover_repo()?;
-        let db_path = git_utils::db_path(&repo)?;
-        let db = Store::open(&db_path)?;
-        let email = git_utils::get_email(&repo)?;
+        let session = Session::discover()?;
+        let db = session.store();
+        let email = session.email();
 
         for stack in stacks {
             let branches = match stack["branches"].as_array() {
@@ -493,7 +491,7 @@ impl WatchState {
                             "branch:id",
                             &value,
                             &ValueType::String,
-                            &email,
+                            email,
                             ts,
                         )?;
 
@@ -509,12 +507,12 @@ impl WatchState {
                             let prompt_count = prompts.len();
                             for prompt in prompts {
                                 db.list_push_with_repo(
-                                    Some(&repo),
+                                    Some(session.repo()),
                                     &TargetType::ChangeId,
                                     cid,
                                     "agent:prompts",
                                     &prompt,
-                                    &email,
+                                    email,
                                     ts,
                                 )?;
                             }
@@ -605,18 +603,17 @@ impl WatchState {
             .or_insert(ts);
         let branch_id = format!("{}@{}", branch_name, first_seen);
 
-        let repo = git_utils::discover_repo()?;
-        let db_path = git_utils::db_path(&repo)?;
-        let db = Store::open(&db_path)?;
-        let email = git_utils::get_email(&repo)?;
+        let session = Session::discover()?;
+        let db = session.store();
+        let email = session.email();
 
         db.list_push_with_repo(
-            Some(&repo),
+            Some(session.repo()),
             &TargetType::Branch,
             &branch_id,
             "agent:transcripts",
             &transcript_content,
-            &email,
+            email,
             ts,
         )?;
 

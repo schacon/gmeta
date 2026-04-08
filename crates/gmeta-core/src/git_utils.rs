@@ -347,7 +347,7 @@ fn gix_config_string(repo: &gix::Repository, key: &str, default: &str) -> String
 /// # Errors
 ///
 /// Returns [`Error::NotARepository`] if no git repository is found.
-pub fn discover_repo() -> Result<gix::Repository> {
+pub(crate) fn discover_repo() -> Result<gix::Repository> {
     let repo = gix::discover(".").map_err(|_| Error::NotARepository)?;
     Ok(repo)
 }
@@ -361,7 +361,7 @@ pub fn discover_repo() -> Result<gix::Repository> {
 /// # Returns
 ///
 /// The path to `gmeta.sqlite` inside the git directory.
-pub fn db_path(repo: &gix::Repository) -> Result<PathBuf> {
+pub(crate) fn db_path(repo: &gix::Repository) -> Result<PathBuf> {
     Ok(repo.git_dir().join("gmeta.sqlite"))
 }
 
@@ -374,7 +374,7 @@ pub fn db_path(repo: &gix::Repository) -> Result<PathBuf> {
 /// # Returns
 ///
 /// The configured `user.email`, or `"unknown"` if not set.
-pub fn get_email(repo: &gix::Repository) -> Result<String> {
+pub(crate) fn get_email(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "user.email", "unknown"))
 }
 
@@ -387,7 +387,7 @@ pub fn get_email(repo: &gix::Repository) -> Result<String> {
 /// # Returns
 ///
 /// The configured `user.name`, or `"unknown"` if not set.
-pub fn get_name(repo: &gix::Repository) -> Result<String> {
+pub(crate) fn get_name(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "user.name", "unknown"))
 }
 
@@ -400,7 +400,7 @@ pub fn get_name(repo: &gix::Repository) -> Result<String> {
 /// # Returns
 ///
 /// The configured `meta.namespace`, or `"meta"` if not set.
-pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
+pub(crate) fn get_namespace(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "meta.namespace", "meta"))
 }
 
@@ -419,7 +419,7 @@ pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
 ///
 /// Returns [`Error::ResolveError`] if the partial SHA cannot be resolved,
 /// or [`Error::Other`] if the resolved object is not a commit.
-pub fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Result<String> {
+pub(crate) fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Result<String> {
     let obj = repo
         .rev_parse_single(partial.as_bytes())
         .map_err(|_| Error::ResolveError(partial.to_string()))?;

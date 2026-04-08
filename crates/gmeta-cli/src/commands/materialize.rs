@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::context::CommandContext;
 use anyhow::Result;
 use gix::refs::transaction::PreviousValue;
-use gmeta_core::git_utils;
 use gmeta_core::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
 use gmeta_core::tree::format::{build_merged_tree, parse_tree};
 use gmeta_core::tree::merge::{
@@ -33,10 +32,10 @@ enum PlannedDbChange {
 
 pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
+    let repo = ctx.session.repo();
 
-    let ns = ctx.namespace();
-    let local_ref_name = ctx.local_ref();
+    let ns = ctx.session.namespace();
+    let local_ref_name = ctx.session.local_ref();
 
     if verbose {
         eprintln!("[verbose] namespace: {}", ns);
@@ -65,7 +64,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         }
     }
 
-    let email = ctx.email();
+    let email = ctx.session.email();
     let now = ctx.timestamp;
 
     for (ref_name, remote_oid) in &remote_refs {
@@ -224,7 +223,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
                 let mut planned_changes = collect_db_changes_from_tree(
-                    ctx.store(),
+                    ctx.session.store(),
                     &remote_entries.values,
                     &remote_entries.tombstones,
                     &remote_entries.set_tombstones,
@@ -246,7 +245,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
 
             // Fast-forward: update SQLite from remote tree first.
-            ctx.store().apply_tree(
+            ctx.session.store().apply_tree(
                 &remote_entries.values,
                 &remote_entries.tombstones,
                 &remote_entries.set_tombstones,
@@ -266,8 +265,13 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                             key.key
                         );
                     }
-                    ctx.store()
-                        .apply_tombstone(&tt, &key.target_value, &key.key, email, now)?;
+                    ctx.session.store().apply_tombstone(
+                        &tt,
+                        &key.target_value,
+                        &key.key,
+                        email,
+                        now,
+                    )?;
                 }
             }
 
@@ -500,7 +504,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
                 let mut planned_changes = collect_db_changes_from_tree(
-                    ctx.store(),
+                    ctx.session.store(),
                     &merged_values,
                     &merged_tombstones,
                     &merged_set_tombstones,
@@ -544,7 +548,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if verbose {
                 eprintln!("[verbose] updating SQLite database...");
             }
-            ctx.store().apply_tree(
+            ctx.session.store().apply_tree(
                 &merged_values,
                 &merged_tombstones,
                 &merged_set_tombstones,
@@ -565,7 +569,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                                 key.key
                             );
                         }
-                        ctx.store().apply_tombstone(
+                        ctx.session.store().apply_tombstone(
                             &tt,
                             &key.target_value,
                             &key.key,
@@ -597,7 +601,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 );
             }
 
-            let name = git_utils::get_name(repo)?;
+            let name = ctx.session.name();
             let sig = gix::actor::Signature {
                 name: name.into(),
                 email: email.into(),
@@ -636,7 +640,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     }
 
     if !dry_run {
-        ctx.store().set_last_materialized(now)?;
+        ctx.session.store().set_last_materialized(now)?;
     }
 
     Ok(())

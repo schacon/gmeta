@@ -29,16 +29,16 @@ pub fn run(
     let ctx = CommandContext::open(None)?;
 
     if promisor {
-        return run_promisor_list(ctx.store(), target_type);
+        return run_promisor_list(ctx.session.store(), target_type);
     }
 
     if timeline {
-        return run_timeline(ctx.store());
+        return run_timeline(ctx.session.store());
     }
 
     match target_type {
-        None => run_overview(ctx.store()),
-        Some(tt) => run_list(ctx.store(), tt, term),
+        None => run_overview(ctx.session.store()),
+        Some(tt) => run_list(ctx.session.store(), tt, term),
     }
 }
 

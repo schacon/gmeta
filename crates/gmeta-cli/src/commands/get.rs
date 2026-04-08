@@ -20,11 +20,11 @@ pub fn run(
     let mut target = Target::parse(target_str)?;
 
     let ctx = CommandContext::open(None)?;
-    ctx.resolve_target(&mut target)?;
-    let repo = ctx.repo();
+    ctx.session.resolve_target(&mut target)?;
+    let repo = ctx.session.repo();
 
     let include_target_subtree = target.target_type == TargetType::Path;
-    let mut entries = ctx.store().get_all_with_target_prefix(
+    let mut entries = ctx.session.store().get_all_with_target_prefix(
         &target.target_type,
         target.value_str(),
         include_target_subtree,
@@ -34,12 +34,14 @@ pub fn run(
     // If no exact match, try prefix expansion for non-commit types
     // (commits are already resolved by git, but change-ids/branches may be partial)
     if entries.is_empty() && target.target_type != TargetType::Path {
-        let matches =
-            ctx.store()
-                .find_target_values_by_prefix(&target.target_type, target.value_str(), 2)?;
+        let matches = ctx.session.store().find_target_values_by_prefix(
+            &target.target_type,
+            target.value_str(),
+            2,
+        )?;
         if matches.len() == 1 {
             let expanded = &matches[0];
-            entries = ctx.store().get_all_with_target_prefix(
+            entries = ctx.session.store().get_all_with_target_prefix(
                 &target.target_type,
                 expanded,
                 false,
@@ -69,10 +71,16 @@ pub fn run(
         .collect();
 
     if !promised.is_empty() {
-        let hydrated = hydrate_promised_entries(repo, ctx.store(), &target.target_type, &promised)?;
+        let hydrated = hydrate_promised_entries(
+            repo,
+            ctx.session.store(),
+            &target.target_type,
+            &promised,
+            ctx.session.namespace(),
+        )?;
         if hydrated > 0 {
             // Re-query to get the now-resolved values
-            entries = ctx.store().get_all_with_target_prefix(
+            entries = ctx.session.store().get_all_with_target_prefix(
                 &target.target_type,
                 target.value_str(),
                 include_target_subtree,
@@ -101,7 +109,7 @@ pub fn run(
     }
 
     if json_output {
-        print_json(ctx.store(), &target, &resolved, with_authorship)?;
+        print_json(ctx.session.store(), &target, &resolved, with_authorship)?;
     } else {
         print_plain(&target, &resolved, key.is_some() && resolved.len() == 1)?;
     }
@@ -116,8 +124,8 @@ fn hydrate_promised_entries(
     db: &Store,
     target_type: &TargetType,
     entries: &[(String, String)], // (target_value, key)
+    ns: &str,
 ) -> Result<usize> {
-    let ns = git_utils::get_namespace(repo)?;
     let tracking_ref = format!("refs/{}/remotes/main", ns);
 
     let tip_commit = match repo.find_reference(&tracking_ref) {

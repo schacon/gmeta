@@ -10,7 +10,7 @@ pub fn run(list: bool, unset: bool, key: Option<&str>, value: Option<&str>) -> R
     let ctx = CommandContext::open(None)?;
 
     if list {
-        return run_list(ctx.store());
+        return run_list(ctx.session.store());
     }
 
     if unset {
@@ -24,7 +24,7 @@ pub fn run(list: bool, unset: bool, key: Option<&str>, value: Option<&str>) -> R
 
     match value {
         Some(val) => run_set(&ctx, key, val),
-        None => run_get(ctx.store(), key),
+        None => run_get(ctx.session.store(), key),
     }
 }
 
@@ -43,13 +43,13 @@ fn validate_config_key(key: &str) -> Result<()> {
 fn run_set(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
     let stored_value = serde_json::to_string(value)?;
 
-    ctx.store().set(
+    ctx.session.store().set(
         &TargetType::Project,
         "",
         key,
         &stored_value,
         &ValueType::String,
-        ctx.email(),
+        ctx.session.email(),
         ctx.timestamp,
     )?;
     Ok(())
@@ -82,9 +82,13 @@ fn run_list(db: &Store) -> Result<()> {
 }
 
 fn run_unset(ctx: &CommandContext, key: &str) -> Result<()> {
-    let removed = ctx
-        .store()
-        .remove(&TargetType::Project, "", key, ctx.email(), ctx.timestamp)?;
+    let removed = ctx.session.store().remove(
+        &TargetType::Project,
+        "",
+        key,
+        ctx.session.email(),
+        ctx.timestamp,
+    )?;
     if !removed {
         eprintln!("key '{}' not found", key);
     }

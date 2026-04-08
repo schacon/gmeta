@@ -12,16 +12,16 @@ use gix::refs::transaction::PreviousValue;
 use super::auto::parse_since_to_cutoff_ms;
 use crate::commands::serialize::{build_filtered_tree, count_prune_stats};
 use crate::context::CommandContext;
-use gmeta_core::git_utils;
 use gmeta_core::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
 use gmeta_core::types::TargetType;
 
 pub fn run(dry_run: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
-    let repo = ctx.repo();
+    let repo = ctx.session.repo();
 
     // Read prune rules -- need at least meta:prune:since
     let since = match ctx
+        .session
         .store()
         .get(&TargetType::Project, "", "meta:prune:since")?
     {
@@ -54,7 +54,7 @@ pub fn run(dry_run: bool) -> Result<()> {
             .unwrap_or_else(|| "?".to_string());
 
     // Find the current serialized tree
-    let ref_name = ctx.local_ref();
+    let ref_name = ctx.session.local_ref();
     let current_commit_oid = match repo
         .find_reference(&ref_name)
         .ok()
@@ -82,7 +82,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     eprintln!("  current tree: {} keys", current_keys);
 
     // Read filter rules so we produce the same tree as serialize would
-    let filter_rules = parse_filter_rules(ctx.store())?;
+    let filter_rules = parse_filter_rules(ctx.session.store())?;
 
     let is_main_dest = |key: &str| -> bool {
         match classify_key(key, &filter_rules) {
@@ -92,10 +92,10 @@ pub fn run(dry_run: bool) -> Result<()> {
     };
 
     // Read all metadata and split into kept vs pruned by cutoff + serialize filters
-    let all_metadata = ctx.store().get_all_metadata()?;
-    let all_tombstones = ctx.store().get_all_tombstones()?;
-    let all_set_tombstones = ctx.store().get_all_set_tombstones()?;
-    let all_list_tombstones = ctx.store().get_all_list_tombstones()?;
+    let all_metadata = ctx.session.store().get_all_metadata()?;
+    let all_tombstones = ctx.session.store().get_all_tombstones()?;
+    let all_set_tombstones = ctx.session.store().get_all_set_tombstones()?;
+    let all_list_tombstones = ctx.session.store().get_all_list_tombstones()?;
 
     // Count entries that would be pruned (old + in main dest)
     let mut pruned_meta = 0u64;
@@ -173,8 +173,8 @@ pub fn run(dry_run: bool) -> Result<()> {
     }
 
     // Commit the pruned tree
-    let name = git_utils::get_name(repo)?;
-    let email = git_utils::get_email(repo)?;
+    let name = ctx.session.name();
+    let email = ctx.session.email();
     let sig = gix::actor::Signature {
         name: name.into(),
         email: email.into(),
