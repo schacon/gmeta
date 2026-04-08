@@ -24,7 +24,7 @@ pub fn run(
 ) -> Result<()> {
     let mut ctx = CommandContext::open(None)?;
     // Attach a repo to the Store so blob-ref values are resolved during reads.
-    ctx.db.set_repo(git_utils::discover_repo()?);
+    ctx.store_mut().set_repo(git_utils::discover_repo()?);
     let repo = ctx.repo();
 
     // Resolve start ref -> OID
@@ -48,7 +48,7 @@ pub fn run(
 
         // Fetch metadata before deciding whether to print the commit
         let entries = ctx
-            .db
+            .store()
             .get_all(&TargetType::Commit, &sha, None)
             .unwrap_or_default();
         // get_all returns (key, value, value_type, is_git_ref)

@@ -10,8 +10,8 @@ use anyhow::Result;
 use time::{Duration, OffsetDateTime};
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
 use gmeta_core::list_value::list_values_from_json;
+use gmeta_core::Store;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -29,16 +29,16 @@ pub fn run(
     let ctx = CommandContext::open(None)?;
 
     if promisor {
-        return run_promisor_list(&ctx.db, target_type);
+        return run_promisor_list(ctx.store(), target_type);
     }
 
     if timeline {
-        return run_timeline(&ctx.db);
+        return run_timeline(ctx.store());
     }
 
     match target_type {
-        None => run_overview(&ctx.db),
-        Some(tt) => run_list(&ctx.db, tt, term),
+        None => run_overview(ctx.store()),
+        Some(tt) => run_list(ctx.store(), tt, term),
     }
 }
 

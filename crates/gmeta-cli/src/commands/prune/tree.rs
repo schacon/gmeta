@@ -21,7 +21,10 @@ pub fn run(dry_run: bool) -> Result<()> {
     let repo = ctx.repo();
 
     // Read prune rules -- need at least meta:prune:since
-    let since = match ctx.db.get(&TargetType::Project, "", "meta:prune:since")? {
+    let since = match ctx
+        .store()
+        .get(&TargetType::Project, "", "meta:prune:since")?
+    {
         Some(entry) => {
             let s: String = serde_json::from_str(&entry.value)?;
             s
@@ -79,7 +82,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     eprintln!("  current tree: {} keys", current_keys);
 
     // Read filter rules so we produce the same tree as serialize would
-    let filter_rules = parse_filter_rules(&ctx.db)?;
+    let filter_rules = parse_filter_rules(ctx.store())?;
 
     let is_main_dest = |key: &str| -> bool {
         match classify_key(key, &filter_rules) {
@@ -89,10 +92,10 @@ pub fn run(dry_run: bool) -> Result<()> {
     };
 
     // Read all metadata and split into kept vs pruned by cutoff + serialize filters
-    let all_metadata = ctx.db.get_all_metadata()?;
-    let all_tombstones = ctx.db.get_all_tombstones()?;
-    let all_set_tombstones = ctx.db.get_all_set_tombstones()?;
-    let all_list_tombstones = ctx.db.get_all_list_tombstones()?;
+    let all_metadata = ctx.store().get_all_metadata()?;
+    let all_tombstones = ctx.store().get_all_tombstones()?;
+    let all_set_tombstones = ctx.store().get_all_set_tombstones()?;
+    let all_list_tombstones = ctx.store().get_all_list_tombstones()?;
 
     // Count entries that would be pruned (old + in main dest)
     let mut pruned_meta = 0u64;

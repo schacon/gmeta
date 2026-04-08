@@ -58,7 +58,7 @@ fn check_remote_refs(repo: &gix::Repository, url: &str, ns: &str) -> Result<(boo
 pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
-    let ns = namespace_override.unwrap_or(&ctx.namespace).to_string();
+    let ns = namespace_override.unwrap_or(ctx.namespace()).to_string();
     let url = expand_url(url);
 
     // Check if this remote name already exists
@@ -193,7 +193,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                 if let Ok(tip_id) = r.into_fully_peeled_id() {
                     let count = pull::insert_promisor_entries_pub(
                         repo,
-                        &ctx.db,
+                        ctx.store(),
                         tip_id.detach(),
                         None,
                         false,
@@ -216,7 +216,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 pub fn run_remove(name: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
 
     // Verify this is a meta remote
     let config = repo.config_snapshot();

@@ -260,6 +260,34 @@ impl ValueType {
     }
 }
 
+/// A metadata value with its type.
+///
+/// Combines value content with type information so they cannot get out of sync.
+/// Used as both input to [`Store::set()`](crate::db::Store::set) and output
+/// from [`Store::get()`](crate::db::Store::get).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MetaValue {
+    /// A single string value.
+    String(String),
+    /// An ordered list of timestamped entries.
+    List(Vec<crate::list_value::ListEntry>),
+    /// An unordered set of unique string values.
+    Set(std::collections::BTreeSet<String>),
+}
+
+impl MetaValue {
+    /// Returns the corresponding [`ValueType`].
+    #[must_use]
+    pub fn value_type(&self) -> ValueType {
+        match self {
+            MetaValue::String(_) => ValueType::String,
+            MetaValue::List(_) => ValueType::List,
+            MetaValue::Set(_) => ValueType::Set,
+        }
+    }
+}
+
 /// Size threshold (in bytes) above which file values are stored as git blob references.
 pub const GIT_REF_THRESHOLD: usize = 1024;
 
@@ -570,5 +598,48 @@ mod tests {
             path,
             "commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/__tombstones/agent/chat/__deleted"
         );
+    }
+
+    #[test]
+    fn test_meta_value_string_type() {
+        let v = MetaValue::String("hello".to_string());
+        assert_eq!(v.value_type(), ValueType::String);
+    }
+
+    #[test]
+    fn test_meta_value_list_type() {
+        let v = MetaValue::List(vec![crate::list_value::ListEntry {
+            value: "item".to_string(),
+            timestamp: 1000,
+        }]);
+        assert_eq!(v.value_type(), ValueType::List);
+    }
+
+    #[test]
+    fn test_meta_value_set_type() {
+        let mut s = std::collections::BTreeSet::new();
+        s.insert("a".to_string());
+        s.insert("b".to_string());
+        let v = MetaValue::Set(s);
+        assert_eq!(v.value_type(), ValueType::Set);
+    }
+
+    #[test]
+    fn test_meta_value_empty_list_type() {
+        let v = MetaValue::List(vec![]);
+        assert_eq!(v.value_type(), ValueType::List);
+    }
+
+    #[test]
+    fn test_meta_value_empty_set_type() {
+        let v = MetaValue::Set(std::collections::BTreeSet::new());
+        assert_eq!(v.value_type(), ValueType::Set);
+    }
+
+    #[test]
+    fn test_meta_value_clone_eq() {
+        let v1 = MetaValue::String("test".to_string());
+        let v2 = v1.clone();
+        assert_eq!(v1, v2);
     }
 }

@@ -25,7 +25,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
         .string(&meta_url_key)
         .map(|s| s.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
 
     let readme_content = generate_readme(&origin_url, &meta_url, ns);
 
@@ -173,7 +173,7 @@ const MAX_RETRIES: u32 = 5;
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
 
     // Resolve which remote to push to
     let remote_name = git_utils::resolve_meta_remote(repo, remote)?;

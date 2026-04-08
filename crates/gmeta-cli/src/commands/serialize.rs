@@ -8,13 +8,13 @@ use time::OffsetDateTime;
 
 use crate::commands::prune::auto::{self, parse_since_to_cutoff_ms};
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
 use gmeta_core::git_utils;
 use gmeta_core::list_value::{make_entry_name, parse_entries};
 use gmeta_core::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
 use gmeta_core::tree::format::{build_dir, build_tree_from_paths, insert_path, TreeDir};
 use gmeta_core::tree::model::Tombstone;
 use gmeta_core::types::{Target, TargetType, ValueType};
+use gmeta_core::Store;
 
 const MAX_COMMIT_CHANGES: usize = 1000;
 
@@ -44,7 +44,7 @@ pub fn run(verbose: bool) -> Result<()> {
     let repo = ctx.repo();
 
     let local_ref_name = ctx.local_ref();
-    let last_materialized = ctx.db.get_last_materialized()?;
+    let last_materialized = ctx.store().get_last_materialized()?;
 
     if verbose {
         eprintln!("[verbose] local ref: {}", local_ref_name);
@@ -108,7 +108,7 @@ pub fn run(verbose: bool) -> Result<()> {
         dirty_target_bases,
         changes,
     ) = if let Some(since) = last_materialized {
-        let modified = ctx.db.get_modified_since(since)?;
+        let modified = ctx.store().get_modified_since(since)?;
         if verbose {
             eprintln!(
                 "[verbose] incremental mode: {} entries modified since last materialize",
@@ -155,10 +155,10 @@ pub fn run(verbose: bool) -> Result<()> {
             dirty_bases.insert(target.tree_base_path());
         }
 
-        let metadata = ctx.db.get_all_metadata()?;
-        let tombstones = ctx.db.get_all_tombstones()?;
-        let set_tombstones = ctx.db.get_all_set_tombstones()?;
-        let list_tombstones = ctx.db.get_all_list_tombstones()?;
+        let metadata = ctx.store().get_all_metadata()?;
+        let tombstones = ctx.store().get_all_tombstones()?;
+        let set_tombstones = ctx.store().get_all_set_tombstones()?;
+        let list_tombstones = ctx.store().get_all_list_tombstones()?;
 
         if verbose {
             eprintln!("[verbose] dirty target bases: {}", dirty_bases.len());
@@ -184,7 +184,7 @@ pub fn run(verbose: bool) -> Result<()> {
             eprintln!("[verbose] full serialization mode (no previous materialize)");
         }
 
-        let metadata = ctx.db.get_all_metadata()?;
+        let metadata = ctx.store().get_all_metadata()?;
 
         // Full serialize: all entries are adds
         let changes: Vec<(char, String, String)> = metadata
@@ -201,9 +201,9 @@ pub fn run(verbose: bool) -> Result<()> {
 
         (
             metadata,
-            ctx.db.get_all_tombstones()?,
-            ctx.db.get_all_set_tombstones()?,
-            ctx.db.get_all_list_tombstones()?,
+            ctx.store().get_all_tombstones()?,
+            ctx.store().get_all_set_tombstones()?,
+            ctx.store().get_all_list_tombstones()?,
             None,
             changes,
         )
@@ -217,10 +217,10 @@ pub fn run(verbose: bool) -> Result<()> {
     // If meta:prune:since is configured, drop entries older than the cutoff
     // before building the tree.
     let prune_since = ctx
-        .db
+        .store()
         .get(&TargetType::Project, "", "meta:prune:since")?
         .and_then(|e| serde_json::from_str::<String>(&e.value).ok());
-    let prune_rules = auto::read_prune_rules(&ctx.db)?;
+    let prune_rules = auto::read_prune_rules(ctx.store())?;
     let prune_cutoff_ms = prune_since
         .as_deref()
         .map(parse_since_to_cutoff_ms)
@@ -242,7 +242,7 @@ pub fn run(verbose: bool) -> Result<()> {
         metadata_entries
     };
 
-    let filter_rules = parse_filter_rules(&ctx.db)?;
+    let filter_rules = parse_filter_rules(ctx.store())?;
     if verbose && !filter_rules.is_empty() {
         eprintln!("[verbose] filter rules: {}", filter_rules.len());
         for rule in &filter_rules {
@@ -516,7 +516,8 @@ pub fn run(verbose: bool) -> Result<()> {
                         );
                     }
 
-                    let prune_tree_oid = prune_tree(repo, tree_oid, prune_rules, &ctx.db, verbose)?;
+                    let prune_tree_oid =
+                        prune_tree(repo, tree_oid, prune_rules, ctx.store(), verbose)?;
 
                     if prune_tree_oid != tree_oid {
                         if verbose {
@@ -589,7 +590,7 @@ pub fn run(verbose: bool) -> Result<()> {
     }
 
     let now = OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
-    ctx.db.set_last_materialized(now)?;
+    ctx.store().set_last_materialized(now)?;
 
     Ok(())
 }

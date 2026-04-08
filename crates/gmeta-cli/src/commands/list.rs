@@ -10,12 +10,12 @@ pub fn run_push(target_str: &str, key: &str, value: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
-    ctx.db.list_push(
+    ctx.store().list_push(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        &ctx.email,
+        ctx.email(),
         ctx.timestamp,
     )?;
 
@@ -30,7 +30,7 @@ pub fn run_rm(target_str: &str, key: &str, index: Option<usize>) -> Result<()> {
     ctx.resolve_target(&mut target)?;
 
     let entries = ctx
-        .db
+        .store()
         .list_entries(&target.target_type, target.value_str(), key)?;
 
     match index {
@@ -50,12 +50,12 @@ pub fn run_rm(target_str: &str, key: &str, index: Option<usize>) -> Result<()> {
             }
         }
         Some(idx) => {
-            ctx.db.list_remove(
+            ctx.store().list_remove(
                 &target.target_type,
                 target.value_str(),
                 key,
                 idx,
-                &ctx.email,
+                ctx.email(),
                 ctx.timestamp,
             )?;
         }
@@ -71,12 +71,12 @@ pub fn run_pop(target_str: &str, key: &str, value: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
-    ctx.db.list_pop(
+    ctx.store().list_pop(
         &target.target_type,
         target.value_str(),
         key,
         value,
-        &ctx.email,
+        ctx.email(),
         ctx.timestamp,
     )?;
 

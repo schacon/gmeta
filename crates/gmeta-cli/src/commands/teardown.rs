@@ -6,7 +6,7 @@ use gmeta_core::git_utils;
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
 
     // Remove the SQLite database
     let db_path = git_utils::db_path(repo)?;

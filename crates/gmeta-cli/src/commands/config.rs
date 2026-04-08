@@ -1,8 +1,8 @@
 use anyhow::{bail, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
 use gmeta_core::types::{validate_key, TargetType, ValueType};
+use gmeta_core::Store;
 
 const CONFIG_PREFIX: &str = "meta:";
 
@@ -10,7 +10,7 @@ pub fn run(list: bool, unset: bool, key: Option<&str>, value: Option<&str>) -> R
     let ctx = CommandContext::open(None)?;
 
     if list {
-        return run_list(&ctx.db);
+        return run_list(ctx.store());
     }
 
     if unset {
@@ -24,7 +24,7 @@ pub fn run(list: bool, unset: bool, key: Option<&str>, value: Option<&str>) -> R
 
     match value {
         Some(val) => run_set(&ctx, key, val),
-        None => run_get(&ctx.db, key),
+        None => run_get(ctx.store(), key),
     }
 }
 
@@ -43,13 +43,13 @@ fn validate_config_key(key: &str) -> Result<()> {
 fn run_set(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
     let stored_value = serde_json::to_string(value)?;
 
-    ctx.db.set(
+    ctx.store().set(
         &TargetType::Project,
         "",
         key,
         &stored_value,
         &ValueType::String,
-        &ctx.email,
+        ctx.email(),
         ctx.timestamp,
     )?;
     Ok(())
@@ -83,8 +83,8 @@ fn run_list(db: &Store) -> Result<()> {
 
 fn run_unset(ctx: &CommandContext, key: &str) -> Result<()> {
     let removed = ctx
-        .db
-        .remove(&TargetType::Project, "", key, &ctx.email, ctx.timestamp)?;
+        .store()
+        .remove(&TargetType::Project, "", key, ctx.email(), ctx.timestamp)?;
     if !removed {
         eprintln!("key '{}' not found", key);
     }

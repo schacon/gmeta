@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::context::CommandContext;
 use anyhow::Result;
 use gix::refs::transaction::PreviousValue;
-use gmeta_core::db::Store;
 use gmeta_core::git_utils;
 use gmeta_core::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
 use gmeta_core::tree::format::{build_merged_tree, parse_tree};
@@ -14,6 +13,7 @@ use gmeta_core::tree::merge::{
 };
 use gmeta_core::tree::model::{Key, ParsedTree, Tombstone, TreeValue};
 use gmeta_core::types::TargetType;
+use gmeta_core::Store;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlannedDbChange {
@@ -35,7 +35,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.repo();
 
-    let ns = &ctx.namespace;
+    let ns = ctx.namespace();
     let local_ref_name = ctx.local_ref();
 
     if verbose {
@@ -65,7 +65,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         }
     }
 
-    let email = &ctx.email;
+    let email = ctx.email();
     let now = ctx.timestamp;
 
     for (ref_name, remote_oid) in &remote_refs {
@@ -224,7 +224,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
                 let mut planned_changes = collect_db_changes_from_tree(
-                    &ctx.db,
+                    ctx.store(),
                     &remote_entries.values,
                     &remote_entries.tombstones,
                     &remote_entries.set_tombstones,
@@ -246,7 +246,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
 
             // Fast-forward: update SQLite from remote tree first.
-            ctx.db.apply_tree(
+            ctx.store().apply_tree(
                 &remote_entries.values,
                 &remote_entries.tombstones,
                 &remote_entries.set_tombstones,
@@ -266,7 +266,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                             key.key
                         );
                     }
-                    ctx.db
+                    ctx.store()
                         .apply_tombstone(&tt, &key.target_value, &key.key, email, now)?;
                 }
             }
@@ -500,7 +500,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if dry_run {
                 let mut planned_removals = BTreeSet::new();
                 let mut planned_changes = collect_db_changes_from_tree(
-                    &ctx.db,
+                    ctx.store(),
                     &merged_values,
                     &merged_tombstones,
                     &merged_set_tombstones,
@@ -544,7 +544,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if verbose {
                 eprintln!("[verbose] updating SQLite database...");
             }
-            ctx.db.apply_tree(
+            ctx.store().apply_tree(
                 &merged_values,
                 &merged_tombstones,
                 &merged_set_tombstones,
@@ -565,8 +565,13 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                                 key.key
                             );
                         }
-                        ctx.db
-                            .apply_tombstone(&tt, &key.target_value, &key.key, email, now)?;
+                        ctx.store().apply_tombstone(
+                            &tt,
+                            &key.target_value,
+                            &key.key,
+                            email,
+                            now,
+                        )?;
                     }
                 }
             }
@@ -595,7 +600,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             let name = git_utils::get_name(repo)?;
             let sig = gix::actor::Signature {
                 name: name.into(),
-                email: email.clone().into(),
+                email: email.into(),
                 time: gix::date::Time::now_local_or_utc(),
             };
 
@@ -631,7 +636,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
     }
 
     if !dry_run {
-        ctx.db.set_last_materialized(now)?;
+        ctx.store().set_last_materialized(now)?;
     }
 
     Ok(())
