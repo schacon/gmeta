@@ -3,8 +3,8 @@ use std::fs;
 use anyhow::{bail, Context, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::list_value::parse_entries;
 use gmeta_core::types::{validate_key, MetaValue, Target, ValueType, GIT_REF_THRESHOLD};
+use gmeta_core::ListEntry;
 
 fn print_result(action: &str, key: &str, target: &Target, json: bool) {
     let target_str = match &target.value {
@@ -78,7 +78,7 @@ pub fn run(
         let meta_value = match value_type {
             ValueType::String => MetaValue::String(raw_value),
             ValueType::List => {
-                let entries = parse_entries(&raw_value)?;
+                let entries = parse_list_input(&raw_value)?;
                 MetaValue::List(entries)
             }
             ValueType::Set => {
@@ -128,4 +128,42 @@ pub fn run_rm(
     ctx.session.target(&target).set_remove(key, value)?;
     print_result("removed", key, &target, json);
     Ok(())
+}
+
+/// Parse user-provided list JSON into `ListEntry` values.
+///
+/// Accepts both the current object format (`[{"value":"a","timestamp":1}]`)
+/// and the legacy plain-string format (`["a","b"]`). Legacy entries are
+/// assigned deterministic timestamps based on their position.
+fn parse_list_input(raw: &str) -> Result<Vec<ListEntry>> {
+    let items: Vec<serde_json::Value> = serde_json::from_str(raw)?;
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(idx, item)| match item {
+            serde_json::Value::String(s) => Ok(ListEntry {
+                value: s,
+                timestamp: idx as i64,
+            }),
+            serde_json::Value::Object(ref map) => {
+                let value = map
+                    .get("value")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("list entry missing 'value' field"))?
+                    .to_string();
+                let timestamp = match map.get("timestamp") {
+                    Some(serde_json::Value::Number(n)) => n
+                        .as_i64()
+                        .ok_or_else(|| anyhow::anyhow!("list entry 'timestamp' must be integer"))?,
+                    Some(serde_json::Value::String(s)) => s
+                        .parse::<i64>()
+                        .map_err(|_| anyhow::anyhow!("list entry 'timestamp' must be integer"))?,
+                    None => idx as i64,
+                    _ => bail!("list entry 'timestamp' must be integer"),
+                };
+                Ok(ListEntry { value, timestamp })
+            }
+            other => bail!("invalid list entry: expected string or object, got {other:?}"),
+        })
+        .collect()
 }
