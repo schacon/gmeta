@@ -10,7 +10,7 @@ use anyhow::Result;
 use time::{Duration, OffsetDateTime};
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
+use gmeta::db::Store;
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -157,10 +157,10 @@ fn run_promisor_list(db: &Store, target_type: Option<&str>) -> Result<()> {
 /// List keys for a specific target type, optionally fuzzy-filtered.
 fn run_list(db: &Store, target_type: &str, term: Option<&str>) -> Result<()> {
     let all = db.get_all_metadata()?;
-    let target_type_parsed = target_type.parse::<gmeta_core::TargetType>()?;
+    let target_type_parsed = target_type.parse::<gmeta::TargetType>()?;
 
     // Filter to target type
-    let mut entries: Vec<&gmeta_core::db::types::SerializableEntry> = all
+    let mut entries: Vec<&gmeta::db::types::SerializableEntry> = all
         .iter()
         .filter(|e| e.target_type == target_type_parsed)
         .collect();
@@ -176,7 +176,7 @@ fn run_list(db: &Store, target_type: &str, term: Option<&str>) -> Result<()> {
         entries.retain(|e| {
             fuzzy_matches(&lower_term, &e.target_value)
                 || fuzzy_matches(&lower_term, &e.key)
-                || (e.value_type == gmeta_core::types::ValueType::String
+                || (e.value_type == gmeta::types::ValueType::String
                     && fuzzy_matches(&lower_term, &decode_string_value(&e.value)))
         });
     }
@@ -190,8 +190,7 @@ fn run_list(db: &Store, target_type: &str, term: Option<&str>) -> Result<()> {
     let term_width = terminal_width();
 
     // Group by target_value
-    let mut by_target: BTreeMap<&str, Vec<&&gmeta_core::db::types::SerializableEntry>> =
-        BTreeMap::new();
+    let mut by_target: BTreeMap<&str, Vec<&&gmeta::db::types::SerializableEntry>> = BTreeMap::new();
     for entry in &entries {
         by_target
             .entry(&entry.target_value)
@@ -294,11 +293,11 @@ fn run_timeline(db: &Store) -> Result<()> {
 /// Format a value for one-line display, fitting within available width.
 fn format_value_oneline(
     value: &str,
-    value_type: &gmeta_core::types::ValueType,
+    value_type: &gmeta::types::ValueType,
     term_width: usize,
     key_len: usize,
 ) -> String {
-    use gmeta_core::types::ValueType;
+    use gmeta::types::ValueType;
     // 2 spaces indent + key + 2 spaces gap = overhead
     let overhead = 2 + key_len + 2;
     let available = if term_width > overhead + 5 {

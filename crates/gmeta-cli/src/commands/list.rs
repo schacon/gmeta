@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::context::CommandContext;
-use gmeta_core::types::Target;
+use gmeta::types::Target;
 
 pub fn run_push(target_str: &str, key: &str, value: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;

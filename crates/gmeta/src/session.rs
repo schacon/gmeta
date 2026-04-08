@@ -2,7 +2,7 @@ use time::OffsetDateTime;
 
 /// A session combining a Git repository with its gmeta metadata store.
 ///
-/// This is the primary entry point for gmeta-core consumers. It owns the
+/// This is the primary entry point for gmeta consumers. It owns the
 /// `gix::Repository`, the SQLite [`Store`](crate::db::Store), and resolved
 /// configuration values (namespace, user email).
 ///
@@ -20,12 +20,12 @@ use time::OffsetDateTime;
 /// # Example
 ///
 /// ```no_run
-/// use gmeta_core::Session;
+/// use gmeta::Session;
 ///
 /// let session = Session::discover()?;
 /// println!("email: {}", session.email());
 /// println!("namespace: {}", session.namespace());
-/// # Ok::<(), gmeta_core::Error>(())
+/// # Ok::<(), gmeta::Error>(())
 /// ```
 pub struct Session {
     pub(crate) repo: gix::Repository,

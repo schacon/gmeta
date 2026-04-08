@@ -6,7 +6,7 @@ use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 
 use crate::context::CommandContext;
-use gmeta_core::types::{Target, TargetType};
+use gmeta::types::{Target, TargetType};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";

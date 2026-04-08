@@ -1,4 +1,4 @@
-//! # gmeta-core
+//! # gmeta
 //!
 //! A library for storing and exchanging structured metadata in Git repositories.
 //! This is the reference implementation of the [gmeta spec](https://schacon.github.io/gmeta/).
@@ -19,7 +19,7 @@
 //! ## Quick Start
 //!
 //! ```no_run
-//! use gmeta_core::{Session, Target, MetaValue};
+//! use gmeta::{Session, Target, MetaValue};
 //!
 //! // Open a session for the current git repository
 //! let session = Session::discover()?;
@@ -37,14 +37,14 @@
 //! // Sync with remote
 //! session.serialize()?;
 //! session.push_once(None)?;
-//! # Ok::<(), gmeta_core::Error>(())
+//! # Ok::<(), gmeta::Error>(())
 //! ```
 //!
 //! If you already have a [`gix::Repository`] (e.g. in a host application like
 //! GitButler), clone it cheaply and pass it in:
 //!
 //! ```no_run
-//! # use gmeta_core::Session;
+//! # use gmeta::Session;
 //! let repo = gix::open(".")?;
 //! let session = Session::open(repo.clone())?;
 //! // `repo` is still fully usable here
@@ -72,7 +72,7 @@
 //! blob data is fetched on demand when accessed. The [`Session::pull()`] method
 //! automatically indexes historical keys for lazy loading.
 
-/// Typed error types for all gmeta-core operations.
+/// Typed error types for all gmeta operations.
 pub mod error;
 
 /// The library entry point: a session combining a git repo with a metadata store.

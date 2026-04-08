@@ -10,8 +10,8 @@ use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use time::OffsetDateTime;
 
 use crate::context::CommandContext;
-use gmeta_core::types::{Target, TargetType, ValueType};
-use gmeta_core::Session;
+use gmeta::types::{Target, TargetType, ValueType};
+use gmeta::Session;
 
 // ANSI colors
 const BOLD: &str = "\x1b[1m";

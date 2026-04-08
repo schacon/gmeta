@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use time::OffsetDateTime;
 
 use crate::context::CommandContext;
-use gmeta_core::types::{Target, TargetType, ValueType};
+use gmeta::types::{Target, TargetType, ValueType};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";

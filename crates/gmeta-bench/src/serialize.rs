@@ -12,9 +12,9 @@ use gix::prelude::ObjectIdExt;
 use std::io::Write;
 use std::time::Instant;
 
-use gmeta_core::db::Store;
-use gmeta_core::tree_paths;
-use gmeta_core::types::{Target, TargetType, ValueType};
+use gmeta::db::Store;
+use gmeta::tree_paths;
+use gmeta::types::{Target, TargetType, ValueType};
 
 const RESET: &str = "\x1b[0m";
 const BOLD: &str = "\x1b[1m";
@@ -201,9 +201,9 @@ fn do_serialize(repo: &gix::Repository, db: &Store, ref_name: &str) -> Result<()
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 fn build_bench_tree(
     repo: &gix::Repository,
-    metadata_entries: &[gmeta_core::db::types::SerializableEntry],
+    metadata_entries: &[gmeta::db::types::SerializableEntry],
 ) -> Result<gix::ObjectId> {
-    use gmeta_core::types::Target;
+    use gmeta::types::Target;
     use std::collections::BTreeMap;
 
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();

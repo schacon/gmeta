@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-gmeta-core = { path = "../gmeta-core", features = ["internal"] }
+gmeta = { path = "../gmeta", features = ["internal"] }
 anyhow = { workspace = true }
 gix = { workspace = true }
 serde_json = { workspace = true }

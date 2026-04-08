@@ -2,7 +2,7 @@
 
 mod helpers;
 
-use gmeta_core::*;
+use gmeta::*;
 use helpers::*;
 
 #[test]

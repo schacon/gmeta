@@ -6,8 +6,8 @@ use anyhow::{bail, Context, Result};
 use serde_json::Value;
 
 use crate::context::CommandContext;
-use gmeta_core::db::Store;
-use gmeta_core::types::{TargetType, ValueType, GIT_REF_THRESHOLD};
+use gmeta::db::Store;
+use gmeta::types::{TargetType, ValueType, GIT_REF_THRESHOLD};
 
 /// Supported import source formats.
 #[derive(Debug, Clone, PartialEq)]
@@ -205,7 +205,7 @@ fn import_checkpoints_from_commits(
 
                 // Skip if already imported
                 if let Some(db) = db {
-                    let commit_target = gmeta_core::types::Target::from_parts(
+                    let commit_target = gmeta::types::Target::from_parts(
                         TargetType::Commit,
                         Some(commit_sha.clone()),
                     );
@@ -522,12 +522,12 @@ fn import_session(
                     if !lines.is_empty() {
                         let mut entries = Vec::new();
                         for (i, line) in lines.iter().enumerate() {
-                            entries.push(gmeta_core::ListEntry {
+                            entries.push(gmeta::ListEntry {
                                 value: line.to_string(),
                                 timestamp: *ts + i as i64,
                             });
                         }
-                        let encoded = gmeta_core::list_value::encode_entries(&entries)?;
+                        let encoded = gmeta::list_value::encode_entries(&entries)?;
                         count += set_value(
                             repo,
                             db,
@@ -713,12 +713,12 @@ fn import_trails(
                 if !arr.is_empty() {
                     let mut entries = Vec::new();
                     for (i, item) in arr.iter().enumerate() {
-                        entries.push(gmeta_core::ListEntry {
+                        entries.push(gmeta::ListEntry {
                             value: serde_json::to_string(item)?,
                             timestamp: ts + i as i64,
                         });
                     }
-                    let encoded = gmeta_core::list_value::encode_entries(&entries)?;
+                    let encoded = gmeta::list_value::encode_entries(&entries)?;
                     count += set_value(
                         repo,
                         db,
@@ -789,12 +789,9 @@ fn set_value(
 
     if let Some(db) = db {
         let target = if *target_type == TargetType::Project {
-            gmeta_core::types::Target::project()
+            gmeta::types::Target::project()
         } else {
-            gmeta_core::types::Target::from_parts(
-                target_type.clone(),
-                Some(target_value.to_string()),
-            )
+            gmeta::types::Target::from_parts(target_type.clone(), Some(target_value.to_string()))
         };
         if use_git_ref {
             let blob_oid: gix::ObjectId = repo.write_blob(value.as_bytes())?.into();
@@ -979,10 +976,8 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 
             // Check whether we already have data for this commit
             if let Some(db) = db {
-                let commit_target = gmeta_core::types::Target::from_parts(
-                    TargetType::Commit,
-                    Some(commit_sha.clone()),
-                );
+                let commit_target =
+                    gmeta::types::Target::from_parts(TargetType::Commit, Some(commit_sha.clone()));
                 if db.get(&commit_target, "agent.blame")?.is_some() {
                     skipped_exists += 1;
                     continue;
@@ -1001,10 +996,8 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
             );
 
             if let Some(db) = db {
-                let commit_target = gmeta_core::types::Target::from_parts(
-                    TargetType::Commit,
-                    Some(commit_sha.clone()),
-                );
+                let commit_target =
+                    gmeta::types::Target::from_parts(TargetType::Commit, Some(commit_sha.clone()));
                 // agent.blame -- store as git blob ref if large
                 let (blame_val, is_ref) = if parsed.blame.len() > GIT_REF_THRESHOLD {
                     let oid: gix::ObjectId = repo.write_blob(parsed.blame.as_bytes())?.into();
