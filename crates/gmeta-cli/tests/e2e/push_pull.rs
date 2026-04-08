@@ -1,6 +1,9 @@
+use gix::prelude::ObjectIdExt;
 use predicates::prelude::*;
 
-use crate::harness::{self, commit_target, setup_bare_with_meta, setup_repo};
+use crate::harness::{
+    self, commit_target, open_repo, ref_to_commit_oid, setup_bare_with_meta, setup_repo,
+};
 
 #[test]
 fn push_simple() {
@@ -26,14 +29,11 @@ fn push_simple() {
         .success()
         .stdout(predicate::str::contains("Pushed metadata to meta"));
 
-    let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
-    let commit = bare
-        .find_reference("refs/meta/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap();
+    let bare = open_repo(bare_dir.path());
+    let tip_oid = ref_to_commit_oid(&bare, "refs/meta/main");
+    let commit = tip_oid.attach(&bare).object().unwrap().into_commit();
     assert_eq!(
-        commit.parent_count(),
+        commit.parent_ids().count(),
         1,
         "pushed commit should have exactly 1 parent (no merge commits)"
     );
@@ -89,13 +89,10 @@ fn push_commit_message_format() {
         .success();
     harness::gmeta(dir.path()).args(["push"]).assert().success();
 
-    let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
-    let commit = bare
-        .find_reference("refs/meta/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap();
-    let msg = commit.message().unwrap();
+    let bare = open_repo(bare_dir.path());
+    let tip_oid = ref_to_commit_oid(&bare, "refs/meta/main");
+    let commit = tip_oid.attach(&bare).object().unwrap().into_commit();
+    let msg = commit.message_raw_sloppy().to_string();
     assert!(
         msg.contains("gmeta: serialize"),
         "commit message should start with 'gmeta: serialize', got: {}",
@@ -154,23 +151,21 @@ fn push_conflict_produces_no_merge_commits() {
         .assert()
         .success();
 
-    let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
-    let tip = bare
-        .find_reference("refs/meta/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap();
+    let bare = open_repo(bare_dir.path());
+    let tip_oid = ref_to_commit_oid(&bare, "refs/meta/main");
 
-    let mut revwalk = bare.revwalk().unwrap();
-    revwalk.push(tip.id()).unwrap();
-    for oid in revwalk {
-        let oid = oid.unwrap();
-        let commit = bare.find_commit(oid).unwrap();
+    let walk = bare.rev_walk(Some(tip_oid));
+    let iter = walk.all().unwrap();
+    for info_result in iter {
+        let info = info_result.unwrap();
+        let oid = info.id;
+        let commit = oid.attach(&bare).object().unwrap().into_commit();
+        let parent_count = commit.parent_ids().count();
         assert!(
-            commit.parent_count() <= 1,
+            parent_count <= 1,
             "commit {} has {} parents — merge commits are not allowed in pushed history",
-            &commit.id().to_string()[..8],
-            commit.parent_count()
+            &oid.to_string()[..8],
+            parent_count
         );
     }
 }

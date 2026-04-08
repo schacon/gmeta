@@ -12,7 +12,6 @@ gmeta-core = { path = "../gmeta-core" }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.11"
-git2 = { workspace = true }
 gix = { workspace = true }
 notify = "7"
 rusqlite = { workspace = true }
@@ -23,8 +22,10 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2"
+gix = { workspace = true }
 gix-testtools = "0.18"
 predicates = "3"
+serde_json = { workspace = true }
 sha1 = { workspace = true }
 tempfile = "3"
 

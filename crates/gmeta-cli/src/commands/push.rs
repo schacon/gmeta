@@ -1,4 +1,6 @@
 use anyhow::{bail, Result};
+use gix::prelude::ObjectIdExt;
+use gix::refs::transaction::PreviousValue;
 
 use crate::commands::{materialize, serialize};
 use crate::context::CommandContext;
@@ -7,19 +9,22 @@ use gmeta_core::git_utils;
 /// Push a README commit to refs/heads/main on the meta remote.
 /// This only succeeds if the branch doesn't already exist (no force push).
 pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
 
     let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
 
-    // Gather project info from .git/config
-    let config = repo.config()?;
+    // Gather project info from git config
+    let config = repo.config_snapshot();
     let origin_url = config
-        .get_string("remote.origin.url")
-        .unwrap_or_else(|_| "unknown".to_string());
+        .string("remote.origin.url")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let meta_url_key = format!("remote.{}.url", remote_name);
     let meta_url = config
-        .get_string(&format!("remote.{}.url", remote_name))
-        .unwrap_or_else(|_| "unknown".to_string());
+        .string(&meta_url_key)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
     let ns = &ctx.namespace;
 
     let readme_content = generate_readme(&origin_url, &meta_url, ns);
@@ -31,22 +36,33 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     }
 
     // Create blob -> tree -> commit
-    let blob_oid = repo.blob(readme_content.as_bytes())?;
+    let blob_oid: gix::ObjectId = repo.write_blob(readme_content.as_bytes())?.into();
 
-    let mut tb = repo.treebuilder(None)?;
-    tb.insert("README.md", blob_oid, 0o100644)?;
-    let tree_oid = tb.write()?;
-    let tree = repo.find_tree(tree_oid)?;
+    let tree_oid = {
+        let mut editor = repo.empty_tree().edit()?;
+        editor.upsert("README.md", gix::objs::tree::EntryKind::Blob, blob_oid)?;
+        editor.write()?
+    };
 
-    let sig = repo.signature()?;
-    let commit_oid = repo.commit(
-        None, // don't update any local ref
-        &sig,
-        &sig,
-        "Initial metadata repository setup\n\nCreated by gmeta to provide documentation for contributors.",
-        &tree,
-        &[], // no parents — root commit
-    )?;
+    let name = git_utils::get_name(repo)?;
+    let email = git_utils::get_email(repo)?;
+    let sig = gix::actor::Signature {
+        name: name.into(),
+        email: email.into(),
+        time: gix::date::Time::now_local_or_utc(),
+    };
+
+    let commit = gix::objs::Commit {
+        message: "Initial metadata repository setup\n\nCreated by gmeta to provide documentation for contributors.".into(),
+        tree: tree_oid.into(),
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: vec![].into(),
+        extra_headers: Default::default(),
+    };
+
+    let commit_oid = repo.write_object(&commit)?.detach();
 
     if verbose {
         eprintln!("[verbose] created blob: {}", blob_oid);
@@ -63,7 +79,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     }
 
     eprintln!("Pushing README to {}...", remote_name);
-    let result = git_utils::git2_run_git(repo, &["push", &remote_name, &push_refspec]);
+    let result = git_utils::run_git(repo, &["push", &remote_name, &push_refspec]);
 
     match result {
         Ok(_) => {
@@ -155,8 +171,8 @@ See `gmeta --help` for the full command reference.
 const MAX_RETRIES: u32 = 5;
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let ns = &ctx.namespace;
 
     // Resolve which remote to push to
@@ -184,13 +200,13 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let local_oid = repo
         .find_reference(&local_ref)
         .ok()
-        .and_then(|r| r.peel_to_commit().ok())
-        .map(|c| c.id());
+        .and_then(|r| r.into_fully_peeled_id().ok())
+        .map(|id| id.detach());
     let remote_oid = repo
         .find_reference(&remote_tracking_ref)
         .ok()
-        .and_then(|r| r.peel_to_commit().ok())
-        .map(|c| c.id());
+        .and_then(|r| r.into_fully_peeled_id().ok())
+        .map(|id| id.detach());
 
     if let (Some(local), Some(remote)) = (local_oid, remote_oid) {
         if local == remote {
@@ -208,7 +224,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         }
 
         eprintln!("Pushing to {}...", remote_name);
-        let result = git_utils::git2_run_git(repo, &["push", &remote_name, &push_refspec]);
+        let result = git_utils::run_git(repo, &["push", &remote_name, &push_refspec]);
 
         match result {
             Ok(_) => {
@@ -232,9 +248,9 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 
                 // Fetch latest remote data
                 let fetch_refspec = format!("{}:refs/{}/remotes/main", remote_refspec, ns);
-                git_utils::git2_run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
+                git_utils::run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
 
-                // Hydrate tip tree blobs so libgit2 can read them
+                // Hydrate tip tree blobs so gix can read them
                 let short_ref = format!("{}/remotes/main", ns);
                 git_utils::hydrate_tip_blobs(repo, &remote_name, &short_ref)?;
 
@@ -260,34 +276,61 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
 /// remote tip and whose tree is the current local ref's tree. This ensures
 /// the pushed history is always a clean fast-forward with no merge commits.
 fn rebase_local_on_remote(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     local_ref: &str,
     remote_ref: &str,
     verbose: bool,
 ) -> anyhow::Result<()> {
-    let local_commit = repo.find_reference(local_ref)?.peel_to_commit()?;
-    let remote_commit = repo.find_reference(remote_ref)?.peel_to_commit()?;
+    let local_ref_obj = repo.find_reference(local_ref)?;
+    let local_oid = local_ref_obj.into_fully_peeled_id()?.detach();
+    let local_commit_obj = local_oid.attach(repo).object()?.into_commit();
+    let local_decoded = local_commit_obj.decode()?;
+
+    let remote_ref_obj = repo.find_reference(remote_ref)?;
+    let remote_oid = remote_ref_obj.into_fully_peeled_id()?.detach();
 
     // If the local commit is already a single-parent child of remote, nothing to do
-    if local_commit.parent_count() == 1 && local_commit.parent_id(0)? == remote_commit.id() {
+    let parent_ids: Vec<gix::ObjectId> = local_decoded.parents().collect();
+    if parent_ids.len() == 1 && parent_ids[0] == remote_oid {
         return Ok(());
     }
 
-    let tree = local_commit.tree()?;
-    let message = local_commit.message().unwrap_or("");
-    let sig = local_commit.author();
+    let tree_id = local_decoded.tree();
+    let message = local_decoded.message.to_owned();
+    let author_ref = local_decoded.author().map_err(|e| anyhow::anyhow!("{e}"))?;
 
-    // Use None for the ref update here — we'll force-update the ref ourselves,
-    // because repo.commit(Some(ref)) requires the current tip to be the first parent.
-    let new_oid = repo.commit(None, &sig, &sig, message, &tree, &[&remote_commit])?;
-    repo.reference(local_ref, new_oid, true, "gmeta: rebase for push")?;
+    let commit = gix::objs::Commit {
+        message,
+        tree: tree_id,
+        author: gix::actor::Signature {
+            name: author_ref.name.into(),
+            email: author_ref.email.into(),
+            time: author_ref.time().map_err(|e| anyhow::anyhow!("{e}"))?,
+        },
+        committer: gix::actor::Signature {
+            name: author_ref.name.into(),
+            email: author_ref.email.into(),
+            time: author_ref.time().map_err(|e| anyhow::anyhow!("{e}"))?,
+        },
+        encoding: None,
+        parents: vec![remote_oid].into(),
+        extra_headers: Default::default(),
+    };
+
+    let new_oid = repo.write_object(&commit)?.detach();
+    repo.reference(
+        local_ref,
+        new_oid,
+        PreviousValue::Any,
+        "gmeta: rebase for push",
+    )?;
 
     if verbose {
         eprintln!(
             "[verbose] rebased local ref onto remote tip: {} -> {} (parent: {})",
-            &local_commit.id().to_string()[..8],
+            &local_oid.to_string()[..8],
             &new_oid.to_string()[..8],
-            &remote_commit.id().to_string()[..8],
+            &remote_oid.to_string()[..8],
         );
     }
 

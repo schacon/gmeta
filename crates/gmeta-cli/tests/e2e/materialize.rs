@@ -1,8 +1,12 @@
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
+use gix::refs::transaction::PreviousValue;
 use predicates::prelude::*;
 use tempfile::TempDir;
 
 use crate::harness::{
-    self, commit_target, copy_meta_objects, copy_meta_objects_from, setup_repo, target_fanout,
+    self, commit_target, copy_meta_objects, copy_meta_objects_from, open_repo, ref_to_commit_oid,
+    setup_repo, target_fanout,
 };
 
 #[test]
@@ -19,13 +23,8 @@ fn fast_forward_applies_remote_removal() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let first_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let first_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -37,18 +36,23 @@ fn fast_forward_applies_remote_removal() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let second_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let second_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
 
-    repo.reference("refs/meta/origin", second_oid, true, "test remote")
-        .unwrap();
-    repo.reference("refs/meta/local/main", first_oid, true, "rollback local")
-        .unwrap();
+    repo.reference(
+        "refs/meta/origin",
+        second_oid,
+        PreviousValue::Any,
+        "test remote",
+    )
+    .unwrap();
+    repo.reference(
+        "refs/meta/local/main",
+        first_oid,
+        PreviousValue::Any,
+        "rollback local",
+    )
+    .unwrap();
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -89,13 +93,8 @@ fn fast_forward_applies_remote_list_entry_removal() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let first_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let first_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -107,18 +106,23 @@ fn fast_forward_applies_remote_list_entry_removal() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let second_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let second_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
 
-    repo.reference("refs/meta/origin", second_oid, true, "test remote")
-        .unwrap();
-    repo.reference("refs/meta/local/main", first_oid, true, "rollback local")
-        .unwrap();
+    repo.reference(
+        "refs/meta/origin",
+        second_oid,
+        PreviousValue::Any,
+        "test remote",
+    )
+    .unwrap();
+    repo.reference(
+        "refs/meta/local/main",
+        first_oid,
+        PreviousValue::Any,
+        "rollback local",
+    )
+    .unwrap();
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -206,15 +210,15 @@ fn serialize_wipe_db_materialize_restores_all_data() {
 
     // Copy the local ref to a "remote" ref and delete the local ref so
     // materialize sees the remote as ahead and performs a fast-forward.
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let local_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
-    repo.reference("refs/meta/origin", local_oid, true, "simulate remote")
-        .unwrap();
+    let repo = open_repo(dir.path());
+    let local_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    repo.reference(
+        "refs/meta/origin",
+        local_oid,
+        PreviousValue::Any,
+        "simulate remote",
+    )
+    .unwrap();
     // Delete the local ref — materialize needs to see the remote as ahead.
     repo.find_reference("refs/meta/local/main")
         .unwrap()
@@ -273,38 +277,32 @@ fn serialize_wipe_db_materialize_restores_all_data() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let reference = repo.find_reference("refs/meta/local/main").unwrap();
-    let tree = reference.peel_to_commit().unwrap().tree().unwrap();
+    let repo = open_repo(dir.path());
+    let commit_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    let commit_obj = commit_oid.attach(&repo).object().unwrap().into_commit();
+    let tree = commit_obj.tree().unwrap();
 
     // Spot-check: the commit target path should exist in the re-serialized tree.
     let first2 = &sha[..2];
     let expected_path = format!("commit/{}/{}/agent/model/__value", first2, sha);
     let mut found = false;
-    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-        let full = format!("{}{}", root, entry.name().unwrap_or(""));
-        if full == expected_path {
-            let blob = repo.find_blob(entry.id()).unwrap();
-            assert_eq!(std::str::from_utf8(blob.content()).unwrap(), "claude-4.6");
+    let mut results = Vec::new();
+    walk_tree(&repo, tree.id, "", &mut results);
+    for (path, content) in &results {
+        if *path == expected_path {
+            assert_eq!(content, "claude-4.6");
             found = true;
         }
-        git2::TreeWalkResult::Ok
-    })
-    .unwrap();
+    }
     assert!(found, "commit metadata should survive the full round-trip");
 
     // Spot-check: the list entries should exist in the re-serialized tree.
     let fanout = target_fanout("sc-feature-abc123");
     let list_prefix = format!("branch/{}/sc-feature-abc123/agent/chat/__list/", fanout);
-    let mut list_count = 0;
-    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-        let full = format!("{}{}", root, entry.name().unwrap_or(""));
-        if full.starts_with(&list_prefix) && entry.kind() == Some(git2::ObjectType::Blob) {
-            list_count += 1;
-        }
-        git2::TreeWalkResult::Ok
-    })
-    .unwrap();
+    let list_count = results
+        .iter()
+        .filter(|(path, _)| path.starts_with(&list_prefix))
+        .count();
     assert_eq!(
         list_count, 2,
         "list entries should survive the full round-trip"
@@ -323,42 +321,99 @@ fn preserves_local_changes_over_stale_remote() {
     let repo_a_dir = TempDir::new().unwrap();
     let repo_b_dir = TempDir::new().unwrap();
 
-    git2::Repository::init_bare(bare_dir.path()).unwrap();
-
-    let repo_a = git2::Repository::init(repo_a_dir.path()).unwrap();
     {
-        let mut config = repo_a.config().unwrap();
-        config.set_str("user.email", "alice@example.com").unwrap();
-        config.set_str("user.name", "Alice").unwrap();
-    }
+        let _ = gix::init_bare(bare_dir.path()).unwrap();
+        harness::open_repo(bare_dir.path())
+    };
+
+    let repo_a = {
+        let _ = gix::init(repo_a_dir.path()).unwrap();
+        harness::open_repo(repo_a_dir.path())
+    };
+    git_config(repo_a_dir.path(), "user.email", "alice@example.com");
+    git_config(repo_a_dir.path(), "user.name", "Alice");
+    git_remote_add(
+        repo_a_dir.path(),
+        "origin",
+        bare_dir.path().to_str().unwrap(),
+    );
+
+    let sig_a = gix::actor::Signature {
+        name: "Alice".into(),
+        email: "alice@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
+    let tree_oid = repo_a
+        .empty_tree()
+        .edit()
+        .unwrap()
+        .write()
+        .unwrap()
+        .detach();
+    let commit_obj = gix::objs::Commit {
+        message: "initial".into(),
+        tree: tree_oid,
+        author: sig_a.clone(),
+        committer: sig_a,
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let init_oid = repo_a.write_object(&commit_obj).unwrap().detach();
     repo_a
-        .remote("origin", bare_dir.path().to_str().unwrap())
+        .reference("refs/heads/main", init_oid, PreviousValue::Any, "init")
         .unwrap();
-    let sig_a = git2::Signature::now("Alice", "alice@example.com").unwrap();
-    let tree_oid = repo_a.treebuilder(None).unwrap().write().unwrap();
-    let tree = repo_a.find_tree(tree_oid).unwrap();
-    let init_oid = repo_a
-        .commit(Some("HEAD"), &sig_a, &sig_a, "initial", &tree, &[])
+    repo_a
+        .reference("HEAD", init_oid, PreviousValue::Any, "init")
+        .unwrap();
+    repo_a
+        .reference(
+            "refs/remotes/origin/main",
+            init_oid,
+            PreviousValue::Any,
+            "init",
+        )
         .unwrap();
 
-    repo_a
-        .reference("refs/remotes/origin/main", init_oid, true, "init")
-        .unwrap();
+    let repo_b = {
+        let _ = gix::init(repo_b_dir.path()).unwrap();
+        harness::open_repo(repo_b_dir.path())
+    };
+    git_config(repo_b_dir.path(), "user.email", "bob@example.com");
+    git_config(repo_b_dir.path(), "user.name", "Bob");
+    git_remote_add(
+        repo_b_dir.path(),
+        "origin",
+        bare_dir.path().to_str().unwrap(),
+    );
 
-    let repo_b = git2::Repository::init(repo_b_dir.path()).unwrap();
-    {
-        let mut config = repo_b.config().unwrap();
-        config.set_str("user.email", "bob@example.com").unwrap();
-        config.set_str("user.name", "Bob").unwrap();
-    }
+    let sig_b = gix::actor::Signature {
+        name: "Bob".into(),
+        email: "bob@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
+    let tree_oid_b = repo_b
+        .empty_tree()
+        .edit()
+        .unwrap()
+        .write()
+        .unwrap()
+        .detach();
+    let commit_obj_b = gix::objs::Commit {
+        message: "initial".into(),
+        tree: tree_oid_b,
+        author: sig_b.clone(),
+        committer: sig_b,
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let init_oid_b = repo_b.write_object(&commit_obj_b).unwrap().detach();
     repo_b
-        .remote("origin", bare_dir.path().to_str().unwrap())
+        .reference("refs/heads/main", init_oid_b, PreviousValue::Any, "init")
         .unwrap();
-    let sig_b = git2::Signature::now("Bob", "bob@example.com").unwrap();
-    let tree_oid_b = repo_b.treebuilder(None).unwrap().write().unwrap();
-    let tree_b = repo_b.find_tree(tree_oid_b).unwrap();
     repo_b
-        .commit(Some("HEAD"), &sig_b, &sig_b, "initial", &tree_b, &[])
+        .reference("HEAD", init_oid_b, PreviousValue::Any, "init")
         .unwrap();
 
     // === Step 1: User A sets metadata and serializes ===
@@ -387,18 +442,27 @@ fn preserves_local_changes_over_stale_remote() {
         .assert()
         .success();
 
-    let a_local_ref = repo_a.find_reference("refs/meta/local/main").unwrap();
-    let a_local_oid = a_local_ref.peel_to_commit().unwrap().id();
+    let a_local_oid = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
     copy_meta_objects(&repo_a, &bare_dir);
-    let bare_repo = git2::Repository::open_bare(bare_dir.path()).unwrap();
+    let bare_repo = harness::open_repo(bare_dir.path());
     bare_repo
-        .reference("refs/meta/local/main", a_local_oid, true, "push from A")
+        .reference(
+            "refs/meta/local/main",
+            a_local_oid,
+            PreviousValue::Any,
+            "push from A",
+        )
         .unwrap();
 
     // === Step 2: User B pulls and materializes (no new data) ===
     copy_meta_objects_from(&bare_dir, &repo_b);
     repo_b
-        .reference("refs/meta/origin", a_local_oid, true, "fetch from bare")
+        .reference(
+            "refs/meta/origin",
+            a_local_oid,
+            PreviousValue::Any,
+            "fetch from bare",
+        )
         .unwrap();
 
     harness::gmeta(repo_b_dir.path())
@@ -411,25 +475,29 @@ fn preserves_local_changes_over_stale_remote() {
         .assert()
         .success();
 
-    let b_local_ref = repo_b.find_reference("refs/meta/local/main").unwrap();
-    let b_local_oid = b_local_ref.peel_to_commit().unwrap().id();
+    let b_local_oid = ref_to_commit_oid(&repo_b, "refs/meta/local/main");
     copy_meta_objects(&repo_b, &bare_dir);
-    let bare_repo = git2::Repository::open_bare(bare_dir.path()).unwrap();
+    let bare_repo = harness::open_repo(bare_dir.path());
     bare_repo
-        .reference("refs/meta/local/main", b_local_oid, true, "push from B")
+        .reference(
+            "refs/meta/local/main",
+            b_local_oid,
+            PreviousValue::Any,
+            "push from B",
+        )
         .unwrap();
 
     // === Step 3: User A pulls B's ref, overwrites a value locally, serializes ===
     copy_meta_objects_from(&bare_dir, &repo_a);
-    let bare_repo = git2::Repository::open_bare(bare_dir.path()).unwrap();
-    let bare_local = bare_repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let bare_repo = harness::open_repo(bare_dir.path());
+    let bare_local = ref_to_commit_oid(&bare_repo, "refs/meta/local/main");
     repo_a
-        .reference("refs/meta/origin", bare_local, true, "fetch from bare")
+        .reference(
+            "refs/meta/origin",
+            bare_local,
+            PreviousValue::Any,
+            "fetch from bare",
+        )
         .unwrap();
 
     harness::gmeta(repo_a_dir.path())
@@ -480,38 +548,91 @@ fn both_sides_modified_later_timestamp_wins() {
     let repo_a_dir = TempDir::new().unwrap();
     let repo_b_dir = TempDir::new().unwrap();
 
-    git2::Repository::init_bare(bare_dir.path()).unwrap();
-
-    let repo_a = git2::Repository::init(repo_a_dir.path()).unwrap();
     {
-        let mut config = repo_a.config().unwrap();
-        config.set_str("user.email", "alice@example.com").unwrap();
-        config.set_str("user.name", "Alice").unwrap();
-    }
+        let _ = gix::init_bare(bare_dir.path()).unwrap();
+        harness::open_repo(bare_dir.path())
+    };
+
+    let repo_a = {
+        let _ = gix::init(repo_a_dir.path()).unwrap();
+        harness::open_repo(repo_a_dir.path())
+    };
+    git_config(repo_a_dir.path(), "user.email", "alice@example.com");
+    git_config(repo_a_dir.path(), "user.name", "Alice");
+    git_remote_add(
+        repo_a_dir.path(),
+        "origin",
+        bare_dir.path().to_str().unwrap(),
+    );
+
+    let sig_a = gix::actor::Signature {
+        name: "Alice".into(),
+        email: "alice@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
+    let tree_oid = repo_a
+        .empty_tree()
+        .edit()
+        .unwrap()
+        .write()
+        .unwrap()
+        .detach();
+    let commit_obj = gix::objs::Commit {
+        message: "initial".into(),
+        tree: tree_oid,
+        author: sig_a.clone(),
+        committer: sig_a,
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let init_oid = repo_a.write_object(&commit_obj).unwrap().detach();
     repo_a
-        .remote("origin", bare_dir.path().to_str().unwrap())
+        .reference("refs/heads/main", init_oid, PreviousValue::Any, "init")
         .unwrap();
-    let sig_a = git2::Signature::now("Alice", "alice@example.com").unwrap();
-    let tree_oid = repo_a.treebuilder(None).unwrap().write().unwrap();
-    let tree = repo_a.find_tree(tree_oid).unwrap();
     repo_a
-        .commit(Some("HEAD"), &sig_a, &sig_a, "initial", &tree, &[])
+        .reference("HEAD", init_oid, PreviousValue::Any, "init")
         .unwrap();
 
-    let repo_b = git2::Repository::init(repo_b_dir.path()).unwrap();
-    {
-        let mut config = repo_b.config().unwrap();
-        config.set_str("user.email", "bob@example.com").unwrap();
-        config.set_str("user.name", "Bob").unwrap();
-    }
+    let repo_b = {
+        let _ = gix::init(repo_b_dir.path()).unwrap();
+        harness::open_repo(repo_b_dir.path())
+    };
+    git_config(repo_b_dir.path(), "user.email", "bob@example.com");
+    git_config(repo_b_dir.path(), "user.name", "Bob");
+    git_remote_add(
+        repo_b_dir.path(),
+        "origin",
+        bare_dir.path().to_str().unwrap(),
+    );
+
+    let sig_b = gix::actor::Signature {
+        name: "Bob".into(),
+        email: "bob@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
+    let tree_oid_b = repo_b
+        .empty_tree()
+        .edit()
+        .unwrap()
+        .write()
+        .unwrap()
+        .detach();
+    let commit_obj_b = gix::objs::Commit {
+        message: "initial".into(),
+        tree: tree_oid_b,
+        author: sig_b.clone(),
+        committer: sig_b,
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let init_oid_b = repo_b.write_object(&commit_obj_b).unwrap().detach();
     repo_b
-        .remote("origin", bare_dir.path().to_str().unwrap())
+        .reference("refs/heads/main", init_oid_b, PreviousValue::Any, "init")
         .unwrap();
-    let sig_b = git2::Signature::now("Bob", "bob@example.com").unwrap();
-    let tree_oid_b = repo_b.treebuilder(None).unwrap().write().unwrap();
-    let tree_b = repo_b.find_tree(tree_oid_b).unwrap();
     repo_b
-        .commit(Some("HEAD"), &sig_b, &sig_b, "initial", &tree_b, &[])
+        .reference("HEAD", init_oid_b, PreviousValue::Any, "init")
         .unwrap();
 
     // === Step 1: User A sets initial data and serializes ===
@@ -530,22 +651,16 @@ fn both_sides_modified_later_timestamp_wins() {
         .assert()
         .success();
 
-    let a_oid = repo_a
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let a_oid = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
     copy_meta_objects(&repo_a, &bare_dir);
-    git2::Repository::open_bare(bare_dir.path())
-        .unwrap()
-        .reference("refs/meta/local/main", a_oid, true, "push A")
+    harness::open_repo(bare_dir.path())
+        .reference("refs/meta/local/main", a_oid, PreviousValue::Any, "push A")
         .unwrap();
 
     // === Step 2: User B pulls, materializes, modifies, serializes ===
     copy_meta_objects_from(&bare_dir, &repo_b);
     repo_b
-        .reference("refs/meta/origin", a_oid, true, "fetch")
+        .reference("refs/meta/origin", a_oid, PreviousValue::Any, "fetch")
         .unwrap();
 
     harness::gmeta(repo_b_dir.path())
@@ -568,16 +683,10 @@ fn both_sides_modified_later_timestamp_wins() {
         .assert()
         .success();
 
-    let b_oid = repo_b
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let b_oid = ref_to_commit_oid(&repo_b, "refs/meta/local/main");
     copy_meta_objects(&repo_b, &bare_dir);
-    git2::Repository::open_bare(bare_dir.path())
-        .unwrap()
-        .reference("refs/meta/local/main", b_oid, true, "push B")
+    harness::open_repo(bare_dir.path())
+        .reference("refs/meta/local/main", b_oid, PreviousValue::Any, "push B")
         .unwrap();
 
     // === Step 3: User A modifies the same key AFTER B, serializes, then materializes ===
@@ -598,7 +707,7 @@ fn both_sides_modified_later_timestamp_wins() {
 
     copy_meta_objects_from(&bare_dir, &repo_a);
     repo_a
-        .reference("refs/meta/origin", b_oid, true, "fetch B")
+        .reference("refs/meta/origin", b_oid, PreviousValue::Any, "fetch B")
         .unwrap();
 
     harness::gmeta(repo_a_dir.path())
@@ -617,21 +726,25 @@ fn both_sides_modified_later_timestamp_wins() {
         .stdout(predicate::str::contains("tom@example.com"));
 
     // === Now test the reverse: B materializes A's newer changes ===
-    let a_oid_new = repo_a
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let a_oid_new = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
     copy_meta_objects(&repo_a, &bare_dir);
-    git2::Repository::open_bare(bare_dir.path())
-        .unwrap()
-        .reference("refs/meta/local/main", a_oid_new, true, "push A new")
+    harness::open_repo(bare_dir.path())
+        .reference(
+            "refs/meta/local/main",
+            a_oid_new,
+            PreviousValue::Any,
+            "push A new",
+        )
         .unwrap();
 
     copy_meta_objects_from(&bare_dir, &repo_b);
     repo_b
-        .reference("refs/meta/origin", a_oid_new, true, "fetch A new")
+        .reference(
+            "refs/meta/origin",
+            a_oid_new,
+            PreviousValue::Any,
+            "fetch A new",
+        )
         .unwrap();
 
     harness::gmeta(repo_b_dir.path())
@@ -664,13 +777,8 @@ fn dry_run_does_not_mutate_sqlite_or_ref() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let first_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let first_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -682,17 +790,22 @@ fn dry_run_does_not_mutate_sqlite_or_ref() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let second_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
-    repo.reference("refs/meta/origin", second_oid, true, "test remote")
-        .unwrap();
-    repo.reference("refs/meta/local/main", first_oid, true, "rollback local")
-        .unwrap();
+    let repo = open_repo(dir.path());
+    let second_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    repo.reference(
+        "refs/meta/origin",
+        second_oid,
+        PreviousValue::Any,
+        "test remote",
+    )
+    .unwrap();
+    repo.reference(
+        "refs/meta/local/main",
+        first_oid,
+        PreviousValue::Any,
+        "rollback local",
+    )
+    .unwrap();
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -714,13 +827,8 @@ fn dry_run_does_not_mutate_sqlite_or_ref() {
         .stdout(predicate::str::contains("stale"))
         .stdout(predicate::str::contains("v2").not());
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let local_after = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let local_after = ref_to_commit_oid(&repo, "refs/meta/local/main");
     assert_eq!(local_after, first_oid);
 }
 
@@ -738,13 +846,8 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let base_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let base_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -756,15 +859,15 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let remote_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
-    repo.reference("refs/meta/local/main", base_oid, true, "rollback to base")
-        .unwrap();
+    let repo = open_repo(dir.path());
+    let remote_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    repo.reference(
+        "refs/meta/local/main",
+        base_oid,
+        PreviousValue::Any,
+        "rollback to base",
+    )
+    .unwrap();
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -776,15 +879,15 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let local_oid = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
-    repo.reference("refs/meta/origin", remote_oid, true, "set remote")
-        .unwrap();
+    let repo = open_repo(dir.path());
+    let local_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    repo.reference(
+        "refs/meta/origin",
+        remote_oid,
+        PreviousValue::Any,
+        "set remote",
+    )
+    .unwrap();
     drop(repo);
 
     harness::gmeta(dir.path())
@@ -801,20 +904,18 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
         .success()
         .stdout(predicate::str::contains("local"));
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let local_after = repo
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo = open_repo(dir.path());
+    let local_after = ref_to_commit_oid(&repo, "refs/meta/local/main");
     assert_eq!(local_after, local_oid);
 }
 
 #[test]
 fn no_common_ancestor_uses_two_way_merge_remote_wins() {
     let bare_dir = TempDir::new().unwrap();
-    git2::Repository::init_bare(bare_dir.path()).unwrap();
+    {
+        let _ = gix::init_bare(bare_dir.path()).unwrap();
+        harness::open_repo(bare_dir.path())
+    };
     let (repo_a_dir, _sha_a) = setup_repo();
     let (repo_b_dir, _sha_b) = setup_repo();
 
@@ -831,13 +932,8 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
         .assert()
         .success();
 
-    let repo_a = git2::Repository::open(repo_a_dir.path()).unwrap();
-    let a_oid = repo_a
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo_a = open_repo(repo_a_dir.path());
+    let a_oid = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
 
     harness::gmeta(repo_b_dir.path())
         .args(["set", "project", "agent:model", "remote"])
@@ -852,22 +948,21 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
         .assert()
         .success();
 
-    let repo_b = git2::Repository::open(repo_b_dir.path()).unwrap();
-    let b_oid = repo_b
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let repo_b = open_repo(repo_b_dir.path());
+    let b_oid = ref_to_commit_oid(&repo_b, "refs/meta/local/main");
 
     copy_meta_objects(&repo_b, &bare_dir);
-    git2::Repository::open_bare(bare_dir.path())
-        .unwrap()
-        .reference("refs/meta/local/main", b_oid, true, "push B")
+    harness::open_repo(bare_dir.path())
+        .reference("refs/meta/local/main", b_oid, PreviousValue::Any, "push B")
         .unwrap();
     copy_meta_objects_from(&bare_dir, &repo_a);
     repo_a
-        .reference("refs/meta/origin", b_oid, true, "fetch B into A")
+        .reference(
+            "refs/meta/origin",
+            b_oid,
+            PreviousValue::Any,
+            "fetch B into A",
+        )
         .unwrap();
 
     harness::gmeta(repo_a_dir.path())
@@ -883,12 +978,7 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
         ))
         .stdout(predicate::str::contains("agent:model"));
 
-    let a_after_dry_run = repo_a
-        .find_reference("refs/meta/local/main")
-        .unwrap()
-        .peel_to_commit()
-        .unwrap()
-        .id();
+    let a_after_dry_run = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
     assert_eq!(a_after_dry_run, a_oid);
 
     harness::gmeta(repo_a_dir.path())
@@ -914,4 +1004,61 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
         .assert()
         .success()
         .stdout(predicate::str::contains("keep-too"));
+}
+
+/// Recursively walk a tree, collecting `(path, blob_content)` pairs.
+fn walk_tree(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    prefix: &str,
+    results: &mut Vec<(String, String)>,
+) {
+    let tree = tree_id.attach(repo).object().unwrap().into_tree();
+    for entry in tree.iter() {
+        let entry = entry.unwrap();
+        let name = entry.filename().to_str().unwrap();
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.mode().is_tree() {
+            walk_tree(repo, entry.object_id(), &path, results);
+        } else {
+            let blob = entry.object().unwrap();
+            let content = std::str::from_utf8(blob.data.as_ref())
+                .unwrap_or("")
+                .to_string();
+            results.push((path, content));
+        }
+    }
+}
+
+/// Set a git config value using the `git` subprocess.
+fn git_config(repo_path: &std::path::Path, key: &str, value: &str) {
+    let output = std::process::Command::new("git")
+        .args(["-C", &repo_path.to_string_lossy(), "config", key, value])
+        .output()
+        .expect("should be able to run git config");
+    assert!(output.status.success(), "git config {key} {value} failed");
+}
+
+/// Add a git remote using the `git` subprocess.
+fn git_remote_add(repo_path: &std::path::Path, name: &str, url: &str) {
+    let output = std::process::Command::new("git")
+        .args([
+            "-C",
+            &repo_path.to_string_lossy(),
+            "remote",
+            "add",
+            name,
+            url,
+        ])
+        .output()
+        .expect("should be able to run git remote add");
+    assert!(
+        output.status.success(),
+        "git remote add {name} {url} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

@@ -1,8 +1,9 @@
+use gix::prelude::ObjectIdExt;
 use predicates::prelude::*;
 
 use crate::harness::{
-    self, setup_bare_with_history, setup_bare_with_history_retained, setup_bare_with_meta,
-    setup_repo,
+    self, open_repo, ref_to_commit_oid, setup_bare_with_history, setup_bare_with_history_retained,
+    setup_bare_with_meta, setup_repo,
 };
 
 #[test]
@@ -79,20 +80,20 @@ fn promisor_entry_not_serialized() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let local_ref = repo.find_reference("refs/meta/local/main").unwrap();
-    let commit = local_ref.peel_to_commit().unwrap();
-    let tree = commit.tree().unwrap();
+    let repo = open_repo(dir.path());
+    let commit_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    let commit_obj = commit_oid.attach(&repo).object().unwrap().into_commit();
+    let tree = commit_obj.tree().unwrap();
 
-    let project_entry = tree.get_name("project").unwrap();
-    let project_tree = repo.find_tree(project_entry.id()).unwrap();
+    let project_entry = tree.find_entry("project").unwrap();
+    let project_tree = project_entry.object().unwrap().into_tree();
 
     assert!(
-        project_tree.get_name("testing").is_some(),
+        project_tree.find_entry("testing").is_some(),
         "tip key 'testing' should be in serialized tree"
     );
     assert!(
-        project_tree.get_name("old_key").is_none(),
+        project_tree.find_entry("old_key").is_none(),
         "promised key 'old_key' should NOT be in serialized tree"
     );
 }

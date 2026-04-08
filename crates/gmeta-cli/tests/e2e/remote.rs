@@ -1,13 +1,16 @@
 use predicates::prelude::*;
 use tempfile::TempDir;
 
-use crate::harness::{self, setup_bare_with_meta, setup_repo};
+use crate::harness::{self, open_repo, setup_bare_with_meta, setup_repo};
 
 #[test]
 fn remote_add_no_meta_refs() {
     let (dir, _sha) = setup_repo();
     let bare_dir = TempDir::new().unwrap();
-    git2::Repository::init_bare(bare_dir.path()).unwrap();
+    {
+        let _ = gix::init_bare(bare_dir.path()).unwrap();
+        harness::open_repo(bare_dir.path())
+    };
 
     let bare_path = bare_dir.path().to_str().unwrap();
 
@@ -44,16 +47,21 @@ fn remote_add_with_namespace_override() {
         .success()
         .stdout(predicate::str::contains("Added meta remote"));
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let config = repo.config().unwrap();
-    let fetch = config.get_string("remote.meta.fetch").unwrap();
+    let repo = open_repo(dir.path());
+    let config = repo.config_snapshot();
+    let fetch = config
+        .string("remote.meta.fetch")
+        .expect("fetch refspec should exist");
+    let fetch_str = fetch.to_string();
     assert!(
-        fetch.contains("refs/altmeta/"),
+        fetch_str.contains("refs/altmeta/"),
         "fetch refspec should use altmeta namespace, got: {}",
-        fetch
+        fetch_str
     );
-    let meta_ns = config.get_string("remote.meta.metanamespace").unwrap();
-    assert_eq!(meta_ns, "altmeta");
+    let meta_ns = config
+        .string("remote.meta.metanamespace")
+        .expect("metanamespace should exist");
+    assert_eq!(meta_ns.to_string(), "altmeta");
 }
 
 #[test]
@@ -68,11 +76,13 @@ fn remote_add_shorthand_url_expansion() {
             "git@github.com:nonexistent-user-xyz/nonexistent-repo-xyz.git",
         ));
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let config = repo.config().unwrap();
-    let url = config.get_string("remote.meta.url").unwrap();
+    let repo = open_repo(dir.path());
+    let config = repo.config_snapshot();
+    let url = config
+        .string("remote.meta.url")
+        .expect("remote URL should exist");
     assert_eq!(
-        url,
+        url.to_string(),
         "git@github.com:nonexistent-user-xyz/nonexistent-repo-xyz.git"
     );
 }

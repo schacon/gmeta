@@ -4,9 +4,8 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1"
-git2 = "0.20"
 gix = { version = "0.81.0", default-features = false, features = [
-    "sha1", "revision", "merge", "tree-editor",
+    "sha1", "revision", "merge", "tree-editor", "blob-diff",
 ] }
 rusqlite = { version = "0.33", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

@@ -56,20 +56,33 @@ pub fn insert_path(dir: &mut Dir, parts: &[&str], content: Vec<u8>) {
 /// # Errors
 ///
 /// Returns an error if any Git object write fails.
-pub fn build_dir(repo: &git2::Repository, dir: &Dir) -> Result<git2::Oid> {
-    let mut tb = repo.treebuilder(None)?;
+pub fn build_dir(repo: &gix::Repository, dir: &Dir) -> Result<gix::ObjectId> {
+    let mut editor = repo
+        .empty_tree()
+        .edit()
+        .map_err(|e| Error::Other(format!("{e}")))?;
 
     for (name, content) in &dir.files {
-        let blob_oid = repo.blob(content)?;
-        tb.insert(name, blob_oid, 0o100644)?;
+        let blob_id = repo
+            .write_blob(content)
+            .map_err(|e| Error::Other(format!("{e}")))?
+            .detach();
+        editor
+            .upsert(name, gix::objs::tree::EntryKind::Blob, blob_id)
+            .map_err(|e| Error::Other(format!("{e}")))?;
     }
 
     for (name, child_dir) in &dir.dirs {
         let child_oid = build_dir(repo, child_dir)?;
-        tb.insert(name, child_oid, 0o040000)?;
+        editor
+            .upsert(name, gix::objs::tree::EntryKind::Tree, child_oid)
+            .map_err(|e| Error::Other(format!("{e}")))?;
     }
 
-    Ok(tb.write()?)
+    Ok(editor
+        .write()
+        .map_err(|e| Error::Other(format!("{e}")))?
+        .detach())
 }
 
 /// Build a nested Git tree structure from flat file paths (full rebuild).
@@ -87,9 +100,9 @@ pub fn build_dir(repo: &git2::Repository, dir: &Dir) -> Result<git2::Oid> {
 ///
 /// Returns an error if any Git object write fails.
 pub fn build_tree_from_paths(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     files: &BTreeMap<String, Vec<u8>>,
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     let mut root = Dir::default();
 
     for (path, content) in files {
@@ -119,12 +132,16 @@ pub fn build_tree_from_paths(
 /// # Errors
 ///
 /// Returns an error if Git object reads fail or paths are malformed.
-pub fn parse_tree(repo: &git2::Repository, tree: &git2::Tree, prefix: &str) -> Result<ParsedTree> {
+pub fn parse_tree(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    prefix: &str,
+) -> Result<ParsedTree> {
     let mut parsed = ParsedTree::default();
 
     // Walk the tree recursively and collect all blob paths
     let mut paths: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    collect_blobs(repo, tree, prefix, &mut paths)?;
+    collect_blobs(repo, tree_id, prefix, &mut paths)?;
 
     // Group paths by target/key.
     for (path, content) in &paths {
@@ -311,29 +328,31 @@ fn parse_tombstone_blob(content: &[u8]) -> Option<TombstoneEntry> {
 
 /// Recursively collect all blobs from a Git tree into a flat path map.
 fn collect_blobs(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
     prefix: &str,
     paths: &mut BTreeMap<String, Vec<u8>>,
 ) -> Result<()> {
+    let tree = repo
+        .find_tree(tree_id)
+        .map_err(|e| Error::Other(format!("{e}")))?;
     for entry in tree.iter() {
-        let name = entry.name().unwrap_or("");
+        let entry = entry.map_err(|e| Error::Other(format!("{e}")))?;
+        let name = std::str::from_utf8(entry.filename())
+            .map_err(|_| Error::Other("non-UTF8 tree entry".into()))?;
         let full_path = if prefix.is_empty() {
             name.to_string()
         } else {
-            format!("{}/{}", prefix, name)
+            format!("{prefix}/{name}")
         };
 
-        match entry.kind() {
-            Some(git2::ObjectType::Blob) => {
-                let blob = repo.find_blob(entry.id())?;
-                paths.insert(full_path, blob.content().to_vec());
-            }
-            Some(git2::ObjectType::Tree) => {
-                let subtree = repo.find_tree(entry.id())?;
-                collect_blobs(repo, &subtree, &full_path, paths)?;
-            }
-            _ => {}
+        if entry.mode().is_blob() {
+            let blob = repo
+                .find_blob(entry.object_id())
+                .map_err(|e| Error::Other(format!("{e}")))?;
+            paths.insert(full_path, blob.data.to_vec());
+        } else if entry.mode().is_tree() {
+            collect_blobs(repo, entry.object_id(), &full_path, paths)?;
         }
     }
     Ok(())
@@ -421,12 +440,12 @@ pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a
 ///
 /// Returns an error if target parsing or Git object writes fail.
 pub fn build_merged_tree(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     values: &BTreeMap<Key, TreeValue>,
     tombstones: &BTreeMap<Key, TombstoneEntry>,
     set_tombstones: &BTreeMap<(Key, String), String>,
     list_tombstones: &BTreeMap<(Key, String), TombstoneEntry>,
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
     for ((target_type, target_value, key), tree_val) in values {

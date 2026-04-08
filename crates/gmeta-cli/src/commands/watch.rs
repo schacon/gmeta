@@ -25,8 +25,8 @@ const RED: &str = "\x1b[31m";
 const RESET: &str = "\x1b[0m";
 
 pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let workdir = repo
         .workdir()
         .context("bare repo not supported")?
@@ -52,7 +52,7 @@ pub fn run(agent: &str, debounce_secs: u64) -> Result<()> {
         git_dir.join("refs").display()
     );
     eprintln!(
-        "{}{}[watch]{} Debounce: {}s — press Ctrl+C to stop\n",
+        "{}{}[watch]{} Debounce: {}s -- press Ctrl+C to stop\n",
         BOLD, CYAN, RESET, debounce_secs
     );
 
@@ -288,7 +288,7 @@ impl WatchState {
                                 }
                             }
                             Some("tool_use") => {
-                                // Skip tool calls — too noisy
+                                // Skip tool calls -- too noisy
                             }
                             _ => {}
                         }
@@ -347,7 +347,7 @@ impl WatchState {
             .unwrap_or(0);
 
         eprintln!(
-            "\n{}{}[idle]{} Agent stopped ({}s) — committing...",
+            "\n{}{}[idle]{} Agent stopped ({}s) -- committing...",
             BOLD, YELLOW, RESET, idle_secs
         );
 
@@ -371,7 +371,7 @@ impl WatchState {
             return Ok(());
         }
 
-        // Try to parse JSON output — but commit --json wraps in {"result": ..., "status": ...}
+        // Try to parse JSON output
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
             // Use embedded status if available
             if !json["status"].is_null() {
@@ -422,10 +422,10 @@ impl WatchState {
             None => return Ok(()),
         };
 
-        let repo = git_utils::git2_discover_repo()?;
-        let db_path = git_utils::git2_db_path(&repo)?;
+        let repo = git_utils::discover_repo()?;
+        let db_path = git_utils::db_path(&repo)?;
         let db = Db::open(&db_path)?;
-        let email = git_utils::git2_get_email(&repo)?;
+        let email = git_utils::get_email(&repo)?;
 
         for stack in stacks {
             let branches = match stack["branches"].as_array() {
@@ -499,7 +499,7 @@ impl WatchState {
 
                         let short_cid = &cid[..16.min(cid.len())];
                         eprintln!(
-                            "  {}[meta]{} change-id:{}… branch:id = {}",
+                            "  {}[meta]{} change-id:{}... branch:id = {}",
                             CYAN, RESET, short_cid, branch_id
                         );
 
@@ -519,7 +519,7 @@ impl WatchState {
                                 )?;
                             }
                             eprintln!(
-                                "  {}[meta]{} change-id:{}… agent:prompts += {} prompt(s)",
+                                "  {}[meta]{} change-id:{}... agent:prompts += {} prompt(s)",
                                 CYAN, RESET, short_cid, prompt_count
                             );
                         }
@@ -605,10 +605,10 @@ impl WatchState {
             .or_insert(ts);
         let branch_id = format!("{}@{}", branch_name, first_seen);
 
-        let repo = git_utils::git2_discover_repo()?;
-        let db_path = git_utils::git2_db_path(&repo)?;
+        let repo = git_utils::discover_repo()?;
+        let db_path = git_utils::db_path(&repo)?;
         let db = Db::open(&db_path)?;
-        let email = git_utils::git2_get_email(&repo)?;
+        let email = git_utils::get_email(&repo)?;
 
         db.list_push_with_repo(
             Some(&repo),
@@ -621,7 +621,7 @@ impl WatchState {
         )?;
 
         eprintln!(
-            "  {}{}[meta]{} Stored {} transcript lines → branch:{} agent:transcripts",
+            "  {}{}[meta]{} Stored {} transcript lines -> branch:{} agent:transcripts",
             BOLD,
             GREEN,
             RESET,
@@ -629,7 +629,7 @@ impl WatchState {
             branch_id
         );
 
-        // Clear stored lines — they've been persisted
+        // Clear stored lines -- they've been persisted
         self.session_lines.remove(&session_id);
 
         Ok(())
@@ -679,7 +679,7 @@ fn extract_content_texts(content: &serde_json::Value) -> Vec<String> {
 
 fn truncate(s: &str, max: usize) -> String {
     if s.len() > max {
-        format!("{}…", &s[..max])
+        format!("{}...", &s[..max])
     } else {
         s.to_string()
     }

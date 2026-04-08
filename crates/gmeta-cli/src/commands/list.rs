@@ -7,7 +7,7 @@ pub fn run_push(target_str: &str, key: &str, value: &str) -> Result<()> {
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
     ctx.db.list_push(
@@ -26,7 +26,7 @@ pub fn run_rm(target_str: &str, key: &str, index: Option<usize>) -> Result<()> {
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
     let entries = ctx
@@ -68,7 +68,7 @@ pub fn run_pop(target_str: &str, key: &str, value: &str) -> Result<()> {
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
     ctx.db.list_pop(

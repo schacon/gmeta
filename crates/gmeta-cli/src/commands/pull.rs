@@ -1,4 +1,6 @@
 use anyhow::Result;
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 
 use crate::commands::{materialize, serialize};
 use crate::context::CommandContext;
@@ -7,8 +9,8 @@ use gmeta_core::git_utils;
 use gmeta_core::types::{self, TargetType, ValueType};
 
 pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let ns = &ctx.namespace;
 
     let remote_name = git_utils::resolve_meta_remote(repo, remote)?;
@@ -25,19 +27,17 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     let old_tip = repo
         .find_reference(&tracking_ref)
         .ok()
-        .and_then(|r| r.peel_to_commit().ok())
-        .map(|c| c.id());
+        .and_then(|r| r.into_fully_peeled_id().ok());
 
     // Fetch latest remote metadata
     eprintln!("Fetching metadata from {}...", remote_name);
-    git_utils::git2_run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
+    git_utils::run_git(repo, &["fetch", &remote_name, &fetch_refspec])?;
 
     // Get the new tip
     let new_tip = repo
         .find_reference(&tracking_ref)
         .ok()
-        .and_then(|r| r.peel_to_commit().ok())
-        .map(|c| c.id());
+        .and_then(|r| r.into_fully_peeled_id().ok());
 
     // Check if we need to materialize even if no new commits were fetched
     // (e.g. remote add fetched but never materialized)
@@ -54,7 +54,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
             eprintln!("No new commits, but local state needs materializing.");
         }
         (Some(old), Some(new)) => {
-            let count = count_commits_between(repo, old, new);
+            let count = count_commits_between(repo, old.into(), new.into());
             eprintln!(
                 "Fetched {} new commit{}.",
                 count,
@@ -67,7 +67,7 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         _ => {}
     }
 
-    // Hydrate tip tree blobs so libgit2 can read them
+    // Hydrate tip tree blobs so gix can read them
     let short_ref = format!("{}/remotes/main", ns);
     git_utils::hydrate_tip_blobs(repo, &remote_name, &short_ref)?;
 
@@ -84,7 +84,13 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     // On first materialize, walk the entire history (pass None as old_tip).
     if let Some(new) = new_tip {
         let walk_from = if needs_materialize { None } else { old_tip };
-        let promisor_count = insert_promisor_entries(repo, &ctx.db, new, walk_from, verbose)?;
+        let promisor_count = insert_promisor_entries(
+            repo,
+            &ctx.db,
+            new.into(),
+            walk_from.map(|id| id.into()),
+            verbose,
+        )?;
         if promisor_count > 0 {
             eprintln!(
                 "Indexed {} keys from history (available on demand).",
@@ -148,10 +154,10 @@ fn parse_commit_changes(message: &str) -> Option<Vec<(char, String, String, Stri
 
 /// Public entry point for inserting promisor entries (used by remote add).
 pub fn insert_promisor_entries_pub(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     db: &Db,
-    tip_oid: git2::Oid,
-    old_tip: Option<git2::Oid>,
+    tip_oid: gix::ObjectId,
+    old_tip: Option<gix::ObjectId>,
     verbose: bool,
 ) -> Result<usize> {
     insert_promisor_entries(repo, db, tip_oid, old_tip, verbose)
@@ -160,23 +166,24 @@ pub fn insert_promisor_entries_pub(
 /// Walk non-tip commits and insert promisor entries for keys mentioned in their
 /// commit messages. Returns the number of new promisor entries inserted.
 fn insert_promisor_entries(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     db: &Db,
-    tip_oid: git2::Oid,
-    old_tip: Option<git2::Oid>,
+    tip_oid: gix::ObjectId,
+    old_tip: Option<gix::ObjectId>,
     verbose: bool,
 ) -> Result<usize> {
-    let mut revwalk = repo.revwalk()?;
-    revwalk.push(tip_oid)?;
+    let mut walk = repo.rev_walk(Some(tip_oid));
     if let Some(old) = old_tip {
-        revwalk.hide(old)?;
+        walk = walk.with_boundary(Some(old));
     }
+    let iter = walk.all()?;
 
     let mut count = 0;
     let mut is_tip = true;
 
-    for oid_result in revwalk {
-        let oid = oid_result?;
+    for info_result in iter {
+        let info = info_result?;
+        let oid = info.id;
 
         // Skip the tip commit — it was already fully materialized
         if is_tip {
@@ -184,10 +191,16 @@ fn insert_promisor_entries(
             continue;
         }
 
-        let commit = repo.find_commit(oid)?;
-        let message = commit.message().unwrap_or("");
+        // If we're using boundary, stop at the boundary commit
+        if old_tip.is_some() && Some(oid) == old_tip {
+            break;
+        }
 
-        match parse_commit_changes(message) {
+        let commit_obj = oid.attach(repo).object()?;
+        let commit = commit_obj.into_commit();
+        let message = commit.message_raw_sloppy().to_str_lossy().to_string();
+
+        match parse_commit_changes(&message) {
             Some(changes) => {
                 for (op, target_type_str, target_value, key) in &changes {
                     if *op == 'D' {
@@ -208,10 +221,10 @@ fn insert_promisor_entries(
                     }
                 }
             }
-            None if commit.parent_count() == 0 => {
+            None if commit.decode()?.parents().count() == 0 => {
                 // Root commit without a change list — walk its tree to discover keys
-                let tree = commit.tree()?;
-                let keys = extract_keys_from_tree(repo, &tree)?;
+                let tree_id = commit.tree_id()?.detach();
+                let keys = extract_keys_from_tree(repo, tree_id)?;
                 for (target_type_str, target_value, key) in &keys {
                     let target_type = TargetType::from_str(target_type_str)?;
                     if db.insert_promised(&target_type, target_value, key, &ValueType::String)? {
@@ -236,30 +249,24 @@ fn insert_promisor_entries(
 
 /// Public entry point for extracting keys from a tree (used by promisor command).
 pub fn extract_keys_from_tree_pub(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
 ) -> Result<Vec<(String, String, String)>> {
-    extract_keys_from_tree(repo, tree)
+    extract_keys_from_tree(repo, tree_id)
 }
 
 /// Extract (target_type, target_value, key) tuples from a git tree by walking
 /// all paths and parsing the tree structure. Only looks at path names — does not
 /// read blob content, so works on trees with missing blobs.
 fn extract_keys_from_tree(
-    _repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
 ) -> Result<Vec<(String, String, String)>> {
     let mut keys = Vec::new();
     let mut paths = Vec::new();
 
     // Collect all paths via tree walk
-    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-        if entry.kind() == Some(git2::ObjectType::Blob) {
-            let full_path = format!("{}{}", root, entry.name().unwrap_or(""));
-            paths.push(full_path);
-        }
-        git2::TreeWalkResult::Ok
-    })?;
+    collect_blob_paths(repo, tree_id, String::new(), &mut paths)?;
 
     for path in &paths {
         if let Some(parsed) = parse_tree_path(path) {
@@ -270,6 +277,31 @@ fn extract_keys_from_tree(
     keys.sort();
     keys.dedup();
     Ok(keys)
+}
+
+/// Recursively collect all blob paths in a tree.
+fn collect_blob_paths(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    prefix: String,
+    paths: &mut Vec<String>,
+) -> Result<()> {
+    let tree = tree_id.attach(repo).object()?.into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
+        let full_path = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{}{}", prefix, name)
+        };
+        if entry.mode().is_blob() {
+            paths.push(full_path);
+        } else if entry.mode().is_tree() {
+            collect_blob_paths(repo, entry.object_id(), format!("{}/", full_path), paths)?;
+        }
+    }
+    Ok(())
 }
 
 /// Parse a tree path like "project/testing/__value" or "commit/ab/ab1234.../agent/model/__value"
@@ -352,18 +384,12 @@ fn parse_tree_path(path: &str) -> Option<(String, String, String)> {
 }
 
 /// Count commits reachable from `new` but not from `old`.
-fn count_commits_between(repo: &git2::Repository, old: git2::Oid, new: git2::Oid) -> usize {
-    let mut revwalk = match repo.revwalk() {
-        Ok(rw) => rw,
-        Err(_) => return 0,
-    };
-    if revwalk.push(new).is_err() {
-        return 0;
+fn count_commits_between(repo: &gix::Repository, old: gix::ObjectId, new: gix::ObjectId) -> usize {
+    let walk = repo.rev_walk(Some(new)).with_boundary(Some(old));
+    match walk.all() {
+        Ok(iter) => iter.filter(|r| r.is_ok()).count().saturating_sub(1), // subtract the boundary commit
+        Err(_) => 0,
     }
-    if revwalk.hide(old).is_err() {
-        return 0;
-    }
-    revwalk.count()
 }
 
 #[cfg(test)]

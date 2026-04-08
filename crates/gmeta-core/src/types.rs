@@ -97,20 +97,6 @@ impl Target {
     }
 
     /// If this is a commit target with a partial SHA, expand it to 40 chars
-    /// using the given git2 repository.
-    pub fn git2_resolve(&mut self, repo: &git2::Repository) -> Result<()> {
-        if self.target_type == TargetType::Commit {
-            if let Some(ref v) = self.value {
-                if v.len() < 40 {
-                    let full = crate::git_utils::git2_resolve_commit_sha(repo, v)?;
-                    self.value = Some(full);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// If this is a commit target with a partial SHA, expand it to 40 chars
     /// using the given Git repository.
     pub fn resolve(&mut self, repo: &gix::Repository) -> Result<()> {
         if self.target_type == TargetType::Commit {

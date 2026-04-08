@@ -26,7 +26,7 @@ pub fn run(
     timeline: bool,
     promisor: bool,
 ) -> Result<()> {
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
 
     if promisor {
         return run_promisor_list(&ctx.db, target_type);

@@ -10,10 +10,9 @@ mod tombstones;
 use std::path::Path;
 use std::time::Duration;
 
-use git2::Repository;
 use rusqlite::{params, Connection};
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 use crate::list_value::{encode_entries, ListEntry};
 use crate::types::GIT_REF_THRESHOLD;
@@ -48,7 +47,7 @@ fn configure_connection(conn: &Connection) -> Result<()> {
 pub struct Db {
     pub conn: Connection,
     /// Optional git repository for resolving git-ref list item blobs on read.
-    pub repo: Option<Repository>,
+    pub repo: Option<gix::Repository>,
 }
 
 impl Db {
@@ -60,7 +59,7 @@ impl Db {
         Ok(db)
     }
 
-    pub fn open_with_repo(path: &Path, repo: Repository) -> Result<Self> {
+    pub fn open_with_repo(path: &Path, repo: gix::Repository) -> Result<Self> {
         let conn = Connection::open(path)?;
         configure_connection(&conn)?;
         let db = Db {
@@ -90,7 +89,7 @@ struct ListRow {
 
 fn load_list_entries_by_metadata_id(
     conn: &Connection,
-    repo: Option<&Repository>,
+    repo: Option<&gix::Repository>,
     metadata_id: i64,
 ) -> Result<Vec<ListEntry>> {
     let mut stmt = conn.prepare(
@@ -175,7 +174,7 @@ fn load_list_rows_by_metadata_id_tx(
 
 fn encode_list_entries_by_metadata_id(
     conn: &Connection,
-    repo: Option<&Repository>,
+    repo: Option<&gix::Repository>,
     metadata_id: i64,
 ) -> Result<String> {
     let entries = load_list_entries_by_metadata_id(conn, repo, metadata_id)?;
@@ -226,10 +225,13 @@ fn normalize_set_values(raw: &str) -> Result<Vec<String>> {
 
 /// Store `value` as a git blob if it exceeds GIT_REF_THRESHOLD, otherwise return as-is.
 /// Returns (stored_value, is_git_ref).
-fn blob_if_large(repo: Option<&Repository>, value: &str) -> Result<(String, bool)> {
+fn blob_if_large(repo: Option<&gix::Repository>, value: &str) -> Result<(String, bool)> {
     if value.len() > GIT_REF_THRESHOLD {
         if let Some(repo) = repo {
-            let oid = repo.blob(value.as_bytes())?;
+            let oid = repo
+                .write_blob(value.as_bytes())
+                .map_err(|e| Error::Other(format!("{e}")))?
+                .detach();
             return Ok((oid.to_string(), true));
         }
     }
@@ -237,7 +239,7 @@ fn blob_if_large(repo: Option<&Repository>, value: &str) -> Result<(String, bool
 }
 
 /// Resolve a stored value: if `is_git_ref` is true, read the blob content from the repo.
-fn resolve_blob(repo: Option<&Repository>, value: &str, is_git_ref: bool) -> Result<String> {
+fn resolve_blob(repo: Option<&gix::Repository>, value: &str, is_git_ref: bool) -> Result<String> {
     if !is_git_ref {
         return Ok(value.to_string());
     }
@@ -245,9 +247,12 @@ fn resolve_blob(repo: Option<&Repository>, value: &str, is_git_ref: bool) -> Res
         Some(r) => r,
         None => return Ok(value.to_string()), // no repo, return OID as-is
     };
-    let oid = value.parse::<git2::Oid>()?;
-    let blob = repo.find_blob(oid)?;
-    Ok(String::from_utf8_lossy(blob.content()).into_owned())
+    let oid =
+        gix::ObjectId::from_hex(value.as_bytes()).map_err(|e| Error::Other(format!("{e}")))?;
+    let blob = repo
+        .find_blob(oid)
+        .map_err(|e| Error::Other(format!("{e}")))?;
+    Ok(String::from_utf8_lossy(&blob.data).into_owned())
 }
 
 fn escape_like_pattern(input: &str) -> String {

@@ -6,7 +6,7 @@ use crate::context::CommandContext;
 use gmeta_core::types::TargetType;
 
 pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
 
     let cutoff_ms = if skip_date {
         // Prune everything (cutoff far in the future so all timestamps qualify)

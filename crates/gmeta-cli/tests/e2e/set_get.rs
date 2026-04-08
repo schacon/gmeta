@@ -1,6 +1,8 @@
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 use predicates::prelude::*;
 
-use crate::harness::{self, commit_target, setup_repo};
+use crate::harness::{self, commit_target, open_repo, ref_to_commit_oid, setup_repo};
 
 #[test]
 fn set_and_get_string() {
@@ -338,12 +340,7 @@ fn custom_namespace() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    repo.config()
-        .unwrap()
-        .set_str("meta.namespace", "notes")
-        .unwrap();
-    drop(repo);
+    git_config(dir.path(), "meta.namespace", "notes");
 
     harness::gmeta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
@@ -356,7 +353,7 @@ fn custom_namespace() {
         .success()
         .stdout(predicate::str::contains("refs/notes/local/main"));
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
+    let repo = open_repo(dir.path());
     assert!(repo.find_reference("refs/notes/local/main").is_ok());
     assert!(repo.find_reference("refs/meta/local/main").is_err());
 }
@@ -446,33 +443,62 @@ fn set_type_round_trips_and_serializes_members() {
         .assert()
         .success();
 
-    let repo = git2::Repository::open(dir.path()).unwrap();
-    let reference = repo.find_reference("refs/meta/local/main").unwrap();
-    let commit = reference.peel_to_commit().unwrap();
-    let tree = commit.tree().unwrap();
+    let repo = open_repo(dir.path());
+    let commit_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    let commit_obj = commit_oid.attach(&repo).object().unwrap().into_commit();
+    let tree = commit_obj.tree().unwrap();
     let fanout = harness::target_fanout("sc-branch-1-deadbeef");
 
+    let set_prefix = format!("branch/{}/sc-branch-1-deadbeef/reviewer/__set/", fanout);
+
     let mut set_members = Vec::new();
-    tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
-        let full_path = format!("{}{}", root, entry.name().unwrap_or(""));
-        if full_path.starts_with(&format!(
-            "branch/{}/sc-branch-1-deadbeef/reviewer/__set/",
-            fanout
-        )) && entry.kind() == Some(git2::ObjectType::Blob)
-        {
-            let tail = full_path
-                .strip_prefix(&format!(
-                    "branch/{}/sc-branch-1-deadbeef/reviewer/__set/",
-                    fanout
-                ))
-                .unwrap();
+    let mut results = Vec::new();
+    walk_tree(&repo, tree.id, "", &mut results);
+    for (path, _) in &results {
+        if path.starts_with(&set_prefix) {
+            let tail = path.strip_prefix(&set_prefix).unwrap();
             if !tail.contains('/') {
-                set_members.push(full_path);
+                set_members.push(path.clone());
             }
         }
-        git2::TreeWalkResult::Ok
-    })
-    .unwrap();
+    }
 
     assert_eq!(set_members.len(), 2);
+}
+
+/// Recursively walk a tree, collecting `(path, blob_content)` pairs.
+fn walk_tree(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    prefix: &str,
+    results: &mut Vec<(String, String)>,
+) {
+    let tree = tree_id.attach(repo).object().unwrap().into_tree();
+    for entry in tree.iter() {
+        let entry = entry.unwrap();
+        let name = entry.filename().to_str().unwrap();
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.mode().is_tree() {
+            walk_tree(repo, entry.object_id(), &path, results);
+        } else {
+            let blob = entry.object().unwrap();
+            let content = std::str::from_utf8(blob.data.as_ref())
+                .unwrap_or("")
+                .to_string();
+            results.push((path, content));
+        }
+    }
+}
+
+/// Set a git config value using the `git` subprocess.
+fn git_config(repo_path: &std::path::Path, key: &str, value: &str) {
+    let output = std::process::Command::new("git")
+        .args(["-C", &repo_path.to_string_lossy(), "config", key, value])
+        .output()
+        .expect("should be able to run git config");
+    assert!(output.status.success(), "git config {key} {value} failed");
 }

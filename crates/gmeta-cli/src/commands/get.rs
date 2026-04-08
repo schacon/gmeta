@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use git2::Repository;
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 use serde_json::{json, Map, Value};
 
 use crate::context::CommandContext;
@@ -18,9 +19,9 @@ pub fn run(
 ) -> Result<()> {
     let mut target = Target::parse(target_str)?;
 
-    let ctx = CommandContext::open_git2(None)?;
-    ctx.git2_resolve_target(&mut target)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    ctx.resolve_target(&mut target)?;
+    let repo = ctx.repo();
 
     let include_target_subtree = target.target_type == TargetType::Path;
     let mut entries = ctx.db.get_all_with_target_prefix(
@@ -111,24 +112,24 @@ pub fn run(
 /// Hydrate promised entries by looking up their blob OIDs in the tip tree
 /// and fetching any that aren't already local. Returns the number hydrated.
 fn hydrate_promised_entries(
-    repo: &Repository,
+    repo: &gix::Repository,
     db: &Db,
     target_type: &TargetType,
     entries: &[(String, String)], // (target_value, key)
 ) -> Result<usize> {
-    let ns = git_utils::git2_get_namespace(repo)?;
+    let ns = git_utils::get_namespace(repo)?;
     let tracking_ref = format!("refs/{}/remotes/main", ns);
 
     let tip_commit = match repo.find_reference(&tracking_ref) {
-        Ok(r) => r.peel_to_commit()?,
+        Ok(r) => r.into_fully_peeled_id()?,
         Err(_) => return Ok(0),
     };
-    let tip_tree = tip_commit.tree()?;
+    let tip_tree_id = tip_commit.object()?.into_commit().tree_id()?.detach();
 
     // For each promised entry, find its blob OID(s) in the tip tree
     struct PendingEntry {
         idx: usize,
-        oids: Vec<git2::Oid>,
+        oids: Vec<gix::ObjectId>,
         value_type: ValueType,
     }
 
@@ -148,7 +149,7 @@ fn hydrate_promised_entries(
 
         // Try __value (string) first
         if let Ok(path) = types::build_tree_path(&parsed_target, key) {
-            if let Some(oid) = git_utils::find_blob_oid_in_tree(repo, &tip_tree, &path)? {
+            if let Some(oid) = git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)? {
                 pending.push(PendingEntry {
                     idx,
                     oids: vec![oid],
@@ -160,27 +161,31 @@ fn hydrate_promised_entries(
 
         // Try __list directory
         if let Ok(path) = types::build_list_tree_dir_path(&parsed_target, key) {
-            if let Some(dir_oid) = git_utils::find_blob_oid_in_tree(repo, &tip_tree, &path)? {
+            if let Some(dir_oid) = git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)? {
                 // dir_oid is a tree — collect all blob entries in it
-                if let Ok(list_tree) = repo.find_tree(dir_oid) {
-                    let oids: Vec<_> = list_tree
-                        .iter()
-                        .filter(|e| {
-                            let name = e.name().unwrap_or("");
-                            !name.starts_with("__")
-                                && name != types::TOMBSTONE_ROOT
-                                && e.kind() == Some(git2::ObjectType::Blob)
-                        })
-                        .map(|e| e.id())
-                        .collect();
-                    if !oids.is_empty() {
-                        pending.push(PendingEntry {
-                            idx,
-                            oids,
-                            value_type: ValueType::List,
-                        });
-                        continue;
-                    }
+                let list_tree = dir_oid.attach(repo).object()?.into_tree();
+                let oids: Vec<_> = list_tree
+                    .iter()
+                    .filter_map(|e| {
+                        let e = e.ok()?;
+                        let name = e.filename().to_str().ok()?;
+                        if name.starts_with("__") || name == types::TOMBSTONE_ROOT {
+                            return None;
+                        }
+                        if e.mode().is_blob() {
+                            Some(e.object_id())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !oids.is_empty() {
+                    pending.push(PendingEntry {
+                        idx,
+                        oids,
+                        value_type: ValueType::List,
+                    });
+                    continue;
                 }
             }
         }
@@ -188,26 +193,30 @@ fn hydrate_promised_entries(
         // Try __set directory
         if let Ok(key_path) = types::build_key_tree_path(&parsed_target, key) {
             let set_path = format!("{}/{}", key_path, types::SET_VALUE_DIR);
-            if let Some(dir_oid) = git_utils::find_blob_oid_in_tree(repo, &tip_tree, &set_path)? {
-                if let Ok(set_tree) = repo.find_tree(dir_oid) {
-                    let oids: Vec<_> = set_tree
-                        .iter()
-                        .filter(|e| {
-                            let name = e.name().unwrap_or("");
-                            !name.starts_with("__")
-                                && name != types::TOMBSTONE_ROOT
-                                && e.kind() == Some(git2::ObjectType::Blob)
-                        })
-                        .map(|e| e.id())
-                        .collect();
-                    if !oids.is_empty() {
-                        pending.push(PendingEntry {
-                            idx,
-                            oids,
-                            value_type: ValueType::Set,
-                        });
-                        continue;
-                    }
+            if let Some(dir_oid) = git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &set_path)? {
+                let set_tree = dir_oid.attach(repo).object()?.into_tree();
+                let oids: Vec<_> = set_tree
+                    .iter()
+                    .filter_map(|e| {
+                        let e = e.ok()?;
+                        let name = e.filename().to_str().ok()?;
+                        if name.starts_with("__") || name == types::TOMBSTONE_ROOT {
+                            return None;
+                        }
+                        if e.mode().is_blob() {
+                            Some(e.object_id())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !oids.is_empty() {
+                    pending.push(PendingEntry {
+                        idx,
+                        oids,
+                        value_type: ValueType::Set,
+                    });
+                    continue;
                 }
             }
         }
@@ -226,13 +235,13 @@ fn hydrate_promised_entries(
     }
 
     // Collect all OIDs, try to read locally first, fetch missing ones
-    let all_oids: Vec<git2::Oid> = pending
+    let all_oids: Vec<gix::ObjectId> = pending
         .iter()
         .flat_map(|p| p.oids.iter().copied())
         .collect();
-    let mut missing: Vec<git2::Oid> = Vec::new();
+    let mut missing: Vec<gix::ObjectId> = Vec::new();
     for oid in &all_oids {
-        if repo.find_blob(*oid).is_err() {
+        if oid.attach(repo).object().is_err() {
             missing.push(*oid);
         }
     }
@@ -255,11 +264,11 @@ fn hydrate_promised_entries(
         match entry.value_type {
             ValueType::String => {
                 let oid = entry.oids[0];
-                let blob = match repo.find_blob(oid) {
-                    Ok(b) => b,
+                let blob = match oid.attach(repo).object() {
+                    Ok(b) => b.into_blob(),
                     Err(_) => continue,
                 };
-                let content = match std::str::from_utf8(blob.content()) {
+                let content = match std::str::from_utf8(&blob.data) {
                     Ok(s) => s,
                     Err(_) => continue,
                 };
@@ -278,8 +287,9 @@ fn hydrate_promised_entries(
                 // Read all list entry blobs, build JSON array
                 let mut list_entries = Vec::new();
                 for oid in &entry.oids {
-                    if let Ok(blob) = repo.find_blob(*oid) {
-                        if let Ok(s) = std::str::from_utf8(blob.content()) {
+                    if let Ok(obj) = oid.attach(repo).object() {
+                        let blob = obj.into_blob();
+                        if let Ok(s) = std::str::from_utf8(&blob.data) {
                             list_entries.push(s.to_string());
                         }
                     }
@@ -299,8 +309,9 @@ fn hydrate_promised_entries(
                 // Read all set member blobs, build JSON array
                 let mut set_members = Vec::new();
                 for oid in &entry.oids {
-                    if let Ok(blob) = repo.find_blob(*oid) {
-                        if let Ok(s) = std::str::from_utf8(blob.content()) {
+                    if let Ok(obj) = oid.attach(repo).object() {
+                        let blob = obj.into_blob();
+                        if let Ok(s) = std::str::from_utf8(&blob.data) {
                             set_members.push(s.to_string());
                         }
                     }
@@ -325,12 +336,15 @@ fn hydrate_promised_entries(
 }
 
 /// Resolve a git blob SHA to its content as a UTF-8 string.
-fn resolve_git_ref(repo: &Repository, sha: &str) -> Result<String> {
-    let oid = git2::Oid::from_str(sha).with_context(|| format!("invalid git blob SHA: {}", sha))?;
-    let blob = repo
-        .find_blob(oid)
+fn resolve_git_ref(repo: &gix::Repository, sha: &str) -> Result<String> {
+    let oid = gix::ObjectId::from_hex(sha.as_bytes())
+        .with_context(|| format!("invalid git blob SHA: {}", sha))?;
+    let obj = oid
+        .attach(repo)
+        .object()
         .with_context(|| format!("git blob not found: {}", sha))?;
-    let content = std::str::from_utf8(blob.content())
+    let blob = obj.into_blob();
+    let content = std::str::from_utf8(&blob.data)
         .with_context(|| format!("git blob {} is not valid UTF-8", sha))?;
     Ok(content.to_string())
 }

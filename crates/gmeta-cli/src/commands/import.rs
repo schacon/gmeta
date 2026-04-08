@@ -1,7 +1,8 @@
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 use std::collections::HashSet;
 
 use anyhow::{bail, Context, Result};
-use git2::Repository;
 use serde_json::Value;
 
 use crate::context::CommandContext;
@@ -30,8 +31,8 @@ pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<(
 }
 
 fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let email = &ctx.email;
     let fallback_ts = ctx.timestamp;
 
@@ -40,14 +41,13 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
     let mut imported_count = 0u64;
 
     // Resolve the checkpoints tree (local or remote)
-    let checkpoints_tree = resolve_entire_ref(repo, "entire/checkpoints/v1")?;
-    if checkpoints_tree.is_none() {
+    let checkpoints_tree_id = resolve_entire_ref(repo, "entire/checkpoints/v1")?;
+    if checkpoints_tree_id.is_none() {
         eprintln!("No entire/checkpoints/v1 ref found (local or remote), skipping checkpoints");
     }
 
     // Step 1: Walk all commits looking for Entire-Checkpoint trailers.
-    // For each one, look up the checkpoint in the checkpoints tree and import.
-    if let Some(ref cp_tree) = checkpoints_tree {
+    if let Some(cp_tree_id) = checkpoints_tree_id {
         if let Some(ts) = since_epoch {
             let date_str = time::OffsetDateTime::from_unix_timestamp(ts)
                 .ok()
@@ -67,13 +67,13 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
             eprintln!("Scanning commits for Entire-Checkpoint trailers...");
         }
         imported_count +=
-            import_checkpoints_from_commits(repo, cp_tree, db, email, dry_run, since_epoch)?;
+            import_checkpoints_from_commits(repo, cp_tree_id, db, email, dry_run, since_epoch)?;
     }
 
     // Step 2: Import trails
-    if let Some(tree) = resolve_entire_ref(repo, "entire/trails/v1")? {
+    if let Some(tree_id) = resolve_entire_ref(repo, "entire/trails/v1")? {
         eprintln!("Processing entire/trails/v1...");
-        imported_count += import_trails(repo, &tree, db, email, fallback_ts, dry_run)?;
+        imported_count += import_trails(repo, tree_id, db, email, fallback_ts, dry_run)?;
     } else {
         eprintln!("No entire/trails/v1 ref found, skipping trails");
     }
@@ -87,8 +87,8 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
     Ok(())
 }
 
-/// Resolve an entire ref to the tree of its tip commit.
-fn resolve_entire_ref<'a>(repo: &'a Repository, refname: &str) -> Result<Option<git2::Tree<'a>>> {
+/// Resolve an entire ref to the tree OID of its tip commit.
+fn resolve_entire_ref(repo: &gix::Repository, refname: &str) -> Result<Option<gix::ObjectId>> {
     let reference = repo
         .find_reference(&format!("refs/heads/{}", refname))
         .or_else(|_| repo.find_reference(&format!("refs/remotes/origin/{}", refname)))
@@ -96,10 +96,12 @@ fn resolve_entire_ref<'a>(repo: &'a Repository, refname: &str) -> Result<Option<
 
     match reference {
         Ok(r) => {
-            let refname_used = r.name().unwrap_or("unknown");
+            let refname_used = r.name().as_bstr().to_string();
             eprintln!("  Resolved {} via {}", refname, refname_used);
-            let commit = r.peel_to_commit()?;
-            Ok(Some(commit.tree()?))
+            let commit_id = r.into_fully_peeled_id()?.detach();
+            let commit_obj = commit_id.attach(repo).object()?.into_commit();
+            let tree_id = commit_obj.tree_id()?.detach();
+            Ok(Some(tree_id))
         }
         Err(_) => Ok(None),
     }
@@ -108,184 +110,203 @@ fn resolve_entire_ref<'a>(repo: &'a Repository, refname: &str) -> Result<Option<
 /// Walk all commits across all refs, find Entire-Checkpoint trailers,
 /// look up each checkpoint in the checkpoints tree, and import it.
 fn import_checkpoints_from_commits(
-    repo: &Repository,
-    checkpoints_tree: &git2::Tree,
+    repo: &gix::Repository,
+    checkpoints_tree_id: gix::ObjectId,
     db: Option<&Db>,
     email: &str,
     dry_run: bool,
     since_epoch: Option<i64>,
 ) -> Result<u64> {
     let mut count = 0u64;
-    let mut seen_commits: HashSet<git2::Oid> = HashSet::new();
+    let mut seen_commits: HashSet<gix::ObjectId> = HashSet::new();
     let mut found = 0u64;
     let mut skipped = 0u64;
     let mut missing = 0u64;
 
-    let mut revwalk = repo.revwalk()?;
-    // Push all refs except entire/* branches themselves
-    if let Ok(refs) = repo.references() {
-        for r in refs.flatten() {
-            let name = r.name().unwrap_or("");
-            if name.contains("/entire/") {
-                continue;
-            }
-            if let Some(oid) = r.target() {
-                revwalk.push(oid).ok();
-            }
-        }
-    }
-    revwalk.set_sorting(git2::Sort::TIME)?;
-
-    let mut scanned = 0u64;
-    for oid in revwalk {
-        let oid = oid?;
-        if !seen_commits.insert(oid) {
+    // Collect all ref tips to walk
+    let mut start_oids: Vec<gix::ObjectId> = Vec::new();
+    let platform = repo.references()?;
+    for r in platform.all()?.flatten() {
+        let name = r.name().as_bstr().to_string();
+        if name.contains("/entire/") {
             continue;
         }
-        scanned += 1;
-
-        let commit = repo.find_commit(oid)?;
-
-        // Skip commits older than --since date
-        if let Some(cutoff) = since_epoch {
-            if commit.time().seconds() < cutoff {
-                continue;
-            }
+        if let Ok(id) = r.into_fully_peeled_id() {
+            start_oids.push(id.detach());
         }
+    }
 
-        let msg = commit.message().unwrap_or("");
+    // Walk each ref tip
+    let mut scanned = 0u64;
+    for start_oid in &start_oids {
+        let walk = repo.rev_walk(Some(*start_oid));
+        let iter = match walk.all() {
+            Ok(it) => it,
+            Err(_) => continue,
+        };
 
-        // Look for Entire-Checkpoint trailer(s)
-        for line in msg.lines() {
-            let line = line.trim();
-            let checkpoint_id = match line.strip_prefix("Entire-Checkpoint:") {
-                Some(id) => id.trim(),
-                None => continue,
+        for info_result in iter {
+            let info = match info_result {
+                Ok(i) => i,
+                Err(_) => continue,
             };
-            if checkpoint_id.is_empty() {
+            let oid = info.id;
+            if !seen_commits.insert(oid) {
                 continue;
             }
+            scanned += 1;
 
-            let commit_sha = oid.to_string();
+            let commit_obj = oid.attach(repo).object()?.into_commit();
+            let decoded = commit_obj.decode()?;
 
-            // Skip if already imported
-            if let Some(db) = db {
-                if let Ok(Some(_)) = db.get(&TargetType::Commit, &commit_sha, "agent:checkpoint-id")
+            // Skip commits older than --since date
+            if let Some(cutoff) = since_epoch {
+                if {
+                    let a = decoded.author().map_err(|e| anyhow::anyhow!("{e}"))?;
+                    a.time().map_err(|e| anyhow::anyhow!("{e}"))?.seconds
+                } < cutoff
                 {
-                    skipped += 1;
                     continue;
                 }
             }
 
-            // Look up checkpoint in the sharded tree: first2/rest/
-            let shard = &checkpoint_id[..2.min(checkpoint_id.len())];
-            let rest = &checkpoint_id[2.min(checkpoint_id.len())..];
+            let msg = decoded.message.to_str_lossy().to_string();
 
-            let checkpoint_tree = (|| -> Result<Option<git2::Tree>> {
-                let shard_tree = match entry_to_tree(repo, checkpoints_tree, shard)? {
-                    Some(t) => t,
-                    None => return Ok(None),
+            // Look for Entire-Checkpoint trailer(s)
+            for line in msg.lines() {
+                let line = line.trim();
+                let checkpoint_id = match line.strip_prefix("Entire-Checkpoint:") {
+                    Some(id) => id.trim(),
+                    None => continue,
                 };
-                entry_to_tree(repo, &shard_tree, rest)
-            })()?;
-
-            let checkpoint_tree = match checkpoint_tree {
-                Some(t) => t,
-                None => {
-                    missing += 1;
-                    eprintln!(
-                        "  Commit {} has Entire-Checkpoint: {} but checkpoint not found in tree",
-                        &commit_sha[..7],
-                        checkpoint_id
-                    );
+                if checkpoint_id.is_empty() {
                     continue;
                 }
-            };
 
-            found += 1;
-            eprintln!(
-                "  Commit {} ← checkpoint {}",
-                &commit_sha[..7],
-                checkpoint_id,
-            );
+                let commit_sha = oid.to_string();
 
-            // Use the commit's author date as the metadata timestamp
-            let mut ts = commit.author().when().seconds() * 1000;
-
-            // Store checkpoint ID
-            count += set_value(
-                repo,
-                db,
-                dry_run,
-                &TargetType::Commit,
-                &commit_sha,
-                "agent:checkpoint-id",
-                &json_string(checkpoint_id),
-                &ValueType::String,
-                email,
-                ts,
-            )?;
-            ts += 1;
-
-            // Import top-level metadata.json (checkpoint summary)
-            if let Some(content) = entry_to_blob(repo, &checkpoint_tree, "metadata.json")? {
-                let meta: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
-                // Each tuple is (gmeta-key, [json aliases in priority order]).
-                // Only the first alias found is imported, avoiding duplicate writes.
-                let checkpoint_fields: &[(&str, &[&str])] = &[
-                    ("strategy", &["strategy"]),
-                    ("branch", &["branch"]),
-                    ("files-changed", &["filesChanged", "files_changed"]),
-                    ("token-usage", &["tokenUsage", "token_usage"]),
-                ];
-                for (gmeta_key, aliases) in checkpoint_fields {
-                    if let Some(val) = aliases.iter().find_map(|a| meta.get(*a)) {
-                        let key = format!("agent:{}", gmeta_key);
-                        let json_val = json_encode_value(val)?;
-                        count += set_value(
-                            repo,
-                            db,
-                            dry_run,
-                            &TargetType::Commit,
-                            &commit_sha,
-                            &key,
-                            &json_val,
-                            &ValueType::String,
-                            email,
-                            ts,
-                        )?;
-                        ts += 1;
+                // Skip if already imported
+                if let Some(db) = db {
+                    if let Ok(Some(_)) =
+                        db.get(&TargetType::Commit, &commit_sha, "agent:checkpoint-id")
+                    {
+                        skipped += 1;
+                        continue;
                     }
                 }
-            }
 
-            // Import session slots (0, 1, 2, ...)
-            let mut session_idx = 0u32;
-            loop {
-                let slot_name = session_idx.to_string();
-                let session_tree = match entry_to_tree(repo, &checkpoint_tree, &slot_name)? {
+                // Look up checkpoint in the sharded tree: first2/rest/
+                let shard = &checkpoint_id[..2.min(checkpoint_id.len())];
+                let rest = &checkpoint_id[2.min(checkpoint_id.len())..];
+
+                let checkpoint_tree_id = (|| -> Result<Option<gix::ObjectId>> {
+                    let shard_id = match entry_to_tree_id(repo, checkpoints_tree_id, shard)? {
+                        Some(t) => t,
+                        None => return Ok(None),
+                    };
+                    entry_to_tree_id(repo, shard_id, rest)
+                })()?;
+
+                let checkpoint_tree_id = match checkpoint_tree_id {
                     Some(t) => t,
-                    None => break,
+                    None => {
+                        missing += 1;
+                        eprintln!(
+                            "  Commit {} has Entire-Checkpoint: {} but checkpoint not found in tree",
+                            &commit_sha[..7],
+                            checkpoint_id
+                        );
+                        continue;
+                    }
                 };
 
-                let key_prefix = if session_idx == 0 {
-                    "agent".to_string()
-                } else {
-                    format!("agent:session-{}", session_idx)
-                };
+                found += 1;
+                eprintln!(
+                    "  Commit {} <- checkpoint {}",
+                    &commit_sha[..7],
+                    checkpoint_id,
+                );
 
-                count += import_session(
+                // Use the commit's author date as the metadata timestamp
+                let mut ts = {
+                    let a = decoded.author().map_err(|e| anyhow::anyhow!("{e}"))?;
+                    a.time().map_err(|e| anyhow::anyhow!("{e}"))?.seconds
+                } * 1000;
+
+                // Store checkpoint ID
+                count += set_value(
                     repo,
-                    &session_tree,
                     db,
-                    &commit_sha,
-                    &key_prefix,
-                    email,
-                    &mut ts,
                     dry_run,
+                    &TargetType::Commit,
+                    &commit_sha,
+                    "agent:checkpoint-id",
+                    &json_string(checkpoint_id),
+                    &ValueType::String,
+                    email,
+                    ts,
                 )?;
+                ts += 1;
 
-                session_idx += 1;
+                // Import top-level metadata.json (checkpoint summary)
+                if let Some(content) = entry_to_blob(repo, checkpoint_tree_id, "metadata.json")? {
+                    let meta: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
+                    let checkpoint_fields: &[(&str, &[&str])] = &[
+                        ("strategy", &["strategy"]),
+                        ("branch", &["branch"]),
+                        ("files-changed", &["filesChanged", "files_changed"]),
+                        ("token-usage", &["tokenUsage", "token_usage"]),
+                    ];
+                    for (gmeta_key, aliases) in checkpoint_fields {
+                        if let Some(val) = aliases.iter().find_map(|a| meta.get(*a)) {
+                            let key = format!("agent:{}", gmeta_key);
+                            let json_val = json_encode_value(val)?;
+                            count += set_value(
+                                repo,
+                                db,
+                                dry_run,
+                                &TargetType::Commit,
+                                &commit_sha,
+                                &key,
+                                &json_val,
+                                &ValueType::String,
+                                email,
+                                ts,
+                            )?;
+                            ts += 1;
+                        }
+                    }
+                }
+
+                // Import session slots (0, 1, 2, ...)
+                let mut session_idx = 0u32;
+                loop {
+                    let slot_name = session_idx.to_string();
+                    let session_tree_id =
+                        match entry_to_tree_id(repo, checkpoint_tree_id, &slot_name)? {
+                            Some(t) => t,
+                            None => break,
+                        };
+
+                    let key_prefix = if session_idx == 0 {
+                        "agent".to_string()
+                    } else {
+                        format!("agent:session-{}", session_idx)
+                    };
+
+                    count += import_session(
+                        repo,
+                        session_tree_id,
+                        db,
+                        &commit_sha,
+                        &key_prefix,
+                        email,
+                        &mut ts,
+                        dry_run,
+                    )?;
+
+                    session_idx += 1;
+                }
             }
         }
     }
@@ -300,8 +321,8 @@ fn import_checkpoints_from_commits(
 
 /// Import a single session slot's data.
 fn import_session(
-    repo: &Repository,
-    session_tree: &git2::Tree,
+    repo: &gix::Repository,
+    session_tree_id: gix::ObjectId,
     db: Option<&Db>,
     commit_sha: &str,
     key_prefix: &str,
@@ -312,7 +333,7 @@ fn import_session(
     let mut count = 0u64;
 
     // Session metadata.json
-    if let Some(content) = entry_to_blob(repo, session_tree, "metadata.json")? {
+    if let Some(content) = entry_to_blob(repo, session_tree_id, "metadata.json")? {
         let meta: Value =
             serde_json::from_str(&content).context("parsing session metadata.json")?;
 
@@ -372,7 +393,7 @@ fn import_session(
     }
 
     // prompt.txt
-    if let Some(content) = entry_to_blob(repo, session_tree, "prompt.txt")? {
+    if let Some(content) = entry_to_blob(repo, session_tree_id, "prompt.txt")? {
         let key = format!("{}:prompt", key_prefix);
         count += set_value(
             repo,
@@ -389,8 +410,8 @@ fn import_session(
         *ts += 1;
     }
 
-    // full.jsonl → transcript stored as a single string blob (large, so typically a git ref)
-    if let Some(content) = entry_to_blob(repo, session_tree, "full.jsonl")? {
+    // full.jsonl
+    if let Some(content) = entry_to_blob(repo, session_tree_id, "full.jsonl")? {
         let key = format!("{}:transcript", key_prefix);
         if !content.trim().is_empty() {
             let json_val = json_string(&content);
@@ -411,7 +432,7 @@ fn import_session(
     }
 
     // content_hash.txt
-    if let Some(content) = entry_to_blob(repo, session_tree, "content_hash.txt")? {
+    if let Some(content) = entry_to_blob(repo, session_tree_id, "content_hash.txt")? {
         let key = format!("{}:content-hash", key_prefix);
         count += set_value(
             repo,
@@ -428,20 +449,18 @@ fn import_session(
         *ts += 1;
     }
 
-    // tasks/ directory → subagent data
-    if let Some(tasks_tree) = entry_to_tree(repo, session_tree, "tasks")? {
-        for task_entry in tasks_tree.iter() {
-            let tool_use_id = task_entry.name().unwrap_or("").to_string();
-            if tool_use_id.is_empty() {
+    // tasks/ directory
+    if let Some(tasks_tree_id) = entry_to_tree_id(repo, session_tree_id, "tasks")? {
+        let tasks_tree = tasks_tree_id.attach(repo).object()?.into_tree();
+        for task_entry_result in tasks_tree.iter() {
+            let task_entry = task_entry_result?;
+            let tool_use_id = task_entry.filename().to_str_lossy().to_string();
+            if tool_use_id.is_empty() || !task_entry.mode().is_tree() {
                 continue;
             }
-            let task_obj = task_entry.to_object(repo)?;
-            let task_tree = match task_obj.as_tree() {
-                Some(t) => t,
-                None => continue,
-            };
+            let task_tree_id = task_entry.object_id();
 
-            if let Some(content) = entry_to_blob(repo, task_tree, "checkpoint.json")? {
+            if let Some(content) = entry_to_blob(repo, task_tree_id, "checkpoint.json")? {
                 let key = format!(
                     "{}:tasks:{}:checkpoint",
                     key_prefix,
@@ -462,48 +481,51 @@ fn import_session(
                 *ts += 1;
             }
 
-            for agent_entry in task_tree.iter() {
-                let name = agent_entry.name().unwrap_or("");
-                if name.starts_with("agent-") && name.ends_with(".jsonl") {
-                    let agent_obj = agent_entry.to_object(repo)?;
-                    if let Some(blob) = agent_obj.as_blob() {
-                        let content = String::from_utf8_lossy(blob.content());
-                        let agent_id = name
-                            .strip_prefix("agent-")
-                            .unwrap_or(name)
-                            .strip_suffix(".jsonl")
-                            .unwrap_or(name);
-                        let key = format!(
-                            "{}:tasks:{}:agent-{}",
-                            key_prefix,
-                            sanitize_key_segment(&tool_use_id),
-                            sanitize_key_segment(agent_id),
-                        );
-                        let lines: Vec<&str> =
-                            content.lines().filter(|l| !l.trim().is_empty()).collect();
-                        if !lines.is_empty() {
-                            let mut entries = Vec::new();
-                            for (i, line) in lines.iter().enumerate() {
-                                entries.push(gmeta_core::list_value::ListEntry {
-                                    value: line.to_string(),
-                                    timestamp: *ts + i as i64,
-                                });
-                            }
-                            let encoded = gmeta_core::list_value::encode_entries(&entries)?;
-                            count += set_value(
-                                repo,
-                                db,
-                                dry_run,
-                                &TargetType::Commit,
-                                commit_sha,
-                                &key,
-                                &encoded,
-                                &ValueType::List,
-                                email,
-                                *ts,
-                            )?;
-                            *ts += lines.len() as i64 + 1;
+            let task_tree = task_tree_id.attach(repo).object()?.into_tree();
+            for agent_entry_result in task_tree.iter() {
+                let agent_entry = agent_entry_result?;
+                let name = agent_entry.filename().to_str_lossy().to_string();
+                if name.starts_with("agent-")
+                    && name.ends_with(".jsonl")
+                    && agent_entry.mode().is_blob()
+                {
+                    let blob = agent_entry.object_id().attach(repo).object()?.into_blob();
+                    let content = String::from_utf8_lossy(&blob.data);
+                    let agent_id = name
+                        .strip_prefix("agent-")
+                        .unwrap_or(&name)
+                        .strip_suffix(".jsonl")
+                        .unwrap_or(&name);
+                    let key = format!(
+                        "{}:tasks:{}:agent-{}",
+                        key_prefix,
+                        sanitize_key_segment(&tool_use_id),
+                        sanitize_key_segment(agent_id),
+                    );
+                    let lines: Vec<&str> =
+                        content.lines().filter(|l| !l.trim().is_empty()).collect();
+                    if !lines.is_empty() {
+                        let mut entries = Vec::new();
+                        for (i, line) in lines.iter().enumerate() {
+                            entries.push(gmeta_core::list_value::ListEntry {
+                                value: line.to_string(),
+                                timestamp: *ts + i as i64,
+                            });
                         }
+                        let encoded = gmeta_core::list_value::encode_entries(&entries)?;
+                        count += set_value(
+                            repo,
+                            db,
+                            dry_run,
+                            &TargetType::Commit,
+                            commit_sha,
+                            &key,
+                            &encoded,
+                            &ValueType::List,
+                            email,
+                            *ts,
+                        )?;
+                        *ts += lines.len() as i64 + 1;
                     }
                 }
             }
@@ -514,35 +536,36 @@ fn import_session(
 }
 
 /// Read a blob from a tree entry by name.
-fn entry_to_blob(repo: &Repository, tree: &git2::Tree, name: &str) -> Result<Option<String>> {
-    match tree.get_name(name) {
-        Some(entry) => {
-            let obj = entry.to_object(repo)?;
-            match obj.as_blob() {
-                Some(blob) => Ok(Some(String::from_utf8_lossy(blob.content()).to_string())),
-                None => Ok(None),
-            }
+fn entry_to_blob(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    name: &str,
+) -> Result<Option<String>> {
+    let tree = tree_id.attach(repo).object()?.into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        if entry.filename().to_str_lossy() == name && entry.mode().is_blob() {
+            let blob = entry.object_id().attach(repo).object()?.into_blob();
+            return Ok(Some(String::from_utf8_lossy(&blob.data).to_string()));
         }
-        None => Ok(None),
     }
+    Ok(None)
 }
 
-/// Read a subtree from a tree entry by name.
-fn entry_to_tree<'a>(
-    repo: &'a Repository,
-    tree: &git2::Tree,
+/// Read a subtree OID from a tree entry by name.
+fn entry_to_tree_id(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
     name: &str,
-) -> Result<Option<git2::Tree<'a>>> {
-    match tree.get_name(name) {
-        Some(entry) => {
-            let obj = entry.to_object(repo)?;
-            match obj.into_tree() {
-                Ok(t) => Ok(Some(t)),
-                Err(_) => Ok(None),
-            }
+) -> Result<Option<gix::ObjectId>> {
+    let tree = tree_id.attach(repo).object()?.into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        if entry.filename().to_str_lossy() == name && entry.mode().is_tree() {
+            return Ok(Some(entry.object_id()));
         }
-        None => Ok(None),
     }
+    Ok(None)
 }
 
 /// Load the set of trail IDs that have already been imported.
@@ -564,8 +587,8 @@ fn load_imported_trail_ids(db: Option<&Db>) -> Result<HashSet<String>> {
 }
 
 fn import_trails(
-    repo: &Repository,
-    root_tree: &git2::Tree,
+    repo: &gix::Repository,
+    root_tree_id: gix::ObjectId,
     db: Option<&Db>,
     email: &str,
     base_ts: i64,
@@ -575,19 +598,18 @@ fn import_trails(
     let mut ts = base_ts;
     let imported_trails = load_imported_trail_ids(db)?;
 
-    for shard_entry in root_tree.iter() {
-        let shard_name = shard_entry.name().unwrap_or("");
-        if shard_name.len() != 2 {
+    let root_tree = root_tree_id.attach(repo).object()?.into_tree();
+    for shard_entry_result in root_tree.iter() {
+        let shard_entry = shard_entry_result?;
+        let shard_name = shard_entry.filename().to_str_lossy().to_string();
+        if shard_name.len() != 2 || !shard_entry.mode().is_tree() {
             continue;
         }
-        let shard_obj = shard_entry.to_object(repo)?;
-        let shard_tree = match shard_obj.as_tree() {
-            Some(t) => t,
-            None => continue,
-        };
 
-        for item_entry in shard_tree.iter() {
-            let rest_name = item_entry.name().unwrap_or("");
+        let shard_tree = shard_entry.object_id().attach(repo).object()?.into_tree();
+        for item_entry_result in shard_tree.iter() {
+            let item_entry = item_entry_result?;
+            let rest_name = item_entry.filename().to_str_lossy().to_string();
             let trail_id = format!("{}{}", shard_name, rest_name);
 
             if imported_trails.contains(&trail_id) {
@@ -595,13 +617,12 @@ fn import_trails(
                 continue;
             }
 
-            let item_obj = item_entry.to_object(repo)?;
-            let item_tree = match item_obj.as_tree() {
-                Some(t) => t,
-                None => continue,
-            };
+            if !item_entry.mode().is_tree() {
+                continue;
+            }
+            let item_tree_id = item_entry.object_id();
 
-            let meta_content = match entry_to_blob(repo, item_tree, "metadata.json")? {
+            let meta_content = match entry_to_blob(repo, item_tree_id, "metadata.json")? {
                 Some(c) => c,
                 None => {
                     eprintln!("  Skipping trail {} (no metadata.json)", trail_id);
@@ -626,7 +647,7 @@ fn import_trails(
                     .unwrap_or("0000")
             );
             eprintln!(
-                "  Trail {} (branch {}) → branch:{}",
+                "  Trail {} (branch {}) -> branch:{}",
                 trail_id, branch_name, branch_uuid
             );
 
@@ -688,7 +709,7 @@ fn import_trails(
                 }
             }
 
-            if let Some(content) = entry_to_blob(repo, item_tree, "checkpoints.json")? {
+            if let Some(content) = entry_to_blob(repo, item_tree_id, "checkpoints.json")? {
                 let arr: Vec<Value> = serde_json::from_str(&content).unwrap_or_default();
                 if !arr.is_empty() {
                     let mut entries = Vec::new();
@@ -715,7 +736,7 @@ fn import_trails(
                 }
             }
 
-            if let Some(content) = entry_to_blob(repo, item_tree, "discussion.json")? {
+            if let Some(content) = entry_to_blob(repo, item_tree_id, "discussion.json")? {
                 let disc: Value = serde_json::from_str(&content).unwrap_or(Value::Null);
                 if disc != Value::Null {
                     count += set_value(
@@ -742,7 +763,7 @@ fn import_trails(
 /// Store a value in the database (or just count it for dry run).
 /// Large string values (> GIT_REF_THRESHOLD bytes) are stored as git blob refs.
 fn set_value(
-    repo: &Repository,
+    repo: &gix::Repository,
     db: Option<&Db>,
     dry_run: bool,
     target_type: &TargetType,
@@ -769,7 +790,7 @@ fn set_value(
 
     if let Some(db) = db {
         if use_git_ref {
-            let blob_oid = repo.blob(value.as_bytes())?;
+            let blob_oid: gix::ObjectId = repo.write_blob(value.as_bytes())?.into();
             db.set_with_git_ref(
                 None,
                 target_type,
@@ -829,39 +850,19 @@ fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-//
-// Reads the git-ai authorship notes stored in refs/remotes/notes/ai (or the
-// local mirror refs/notes/ai).  Each blob in that fanout tree is a note for
-// one commit.  The note format is:
-//
-//   <path>
-//     <prompt_id> <lines>
-//   ...
-//   ---
-//   { JSON with schema_version, git_ai_version, prompts: { <id>: { agent_id: { tool, model }, ... } } }
-//
-// We import three metadata keys per commit:
-//   agent.blame           — the raw blame section (paths + line ranges), as-is
-//   agent.git-ai.schema-version — schema_version from the JSON
-//   agent.git-ai.version  — git_ai_version from the JSON (omitted if absent)
-//   agent.model           — comma-separated "tool/model" for each unique prompt
-//
-// When multiple prompts exist the model values are deduplicated and joined with
-// ", " so the field stays a simple string.
-
 const NOTES_REFS: &[&str] = &["refs/remotes/notes/ai", "refs/notes/ai"];
 
 fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let email = &ctx.email;
 
     let db = if dry_run { None } else { Some(&ctx.db) };
 
-    // Locate the notes ref — prefer remote mirror, fall back to local.
+    // Locate the notes ref
     let notes_ref = NOTES_REFS
         .iter()
-        .find(|r| repo.find_reference(r).is_ok())
+        .find(|&&r| repo.find_reference(r).is_ok())
         .copied();
 
     let notes_ref = match notes_ref {
@@ -874,82 +875,97 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 
     eprintln!("importing git-ai notes from {}", notes_ref);
 
-    // Resolve to the notes tree OID (the ref points to a commit whose tree is
-    // the fanout directory).
-    let notes_tree_oid = {
-        let reference = repo.find_reference(notes_ref)?;
-        let obj = reference.peel(git2::ObjectType::Commit)?;
-        let commit = obj.as_commit().context("notes ref is not a commit")?;
-        commit.tree_id()
-    };
-    let notes_tree = repo.find_tree(notes_tree_oid)?;
+    // Resolve to the notes tree OID
+    let notes_commit_id = repo
+        .find_reference(notes_ref)?
+        .into_fully_peeled_id()?
+        .detach();
+    let notes_commit = notes_commit_id.attach(repo).object()?.into_commit();
+    let notes_tree_id = notes_commit.tree_id()?.detach();
 
-    // Walk the two-level fanout tree: top-level entries are two-hex-char
-    // directory names; their children are blobs named with the remaining 38
-    // chars of the commit SHA.
+    // Walk the two-level fanout tree
     let mut total = 0u64;
     let mut imported = 0u64;
     let mut skipped_date = 0u64;
     let mut skipped_exists = 0u64;
     let mut errors = 0u64;
 
-    for shard_entry in notes_tree.iter() {
-        let shard_name = match shard_entry.name() {
-            Some(n) => n.to_string(),
-            None => continue,
+    let notes_tree = notes_tree_id.attach(repo).object()?.into_tree();
+    for shard_entry_result in notes_tree.iter() {
+        let shard_entry = match shard_entry_result {
+            Ok(e) => e,
+            Err(_) => continue,
         };
+        let shard_name = shard_entry.filename().to_str_lossy().to_string();
         // Only descend into two-char hex shard dirs.
         if shard_name.len() != 2 || !shard_name.chars().all(|c| c.is_ascii_hexdigit()) {
             continue;
         }
-        let shard_tree = match repo.find_tree(shard_entry.id()) {
-            Ok(t) => t,
+        if !shard_entry.mode().is_tree() {
+            continue;
+        }
+        let shard_tree = match shard_entry.object_id().attach(repo).object() {
+            Ok(o) => o.into_tree(),
             Err(_) => continue,
         };
 
-        for note_entry in shard_tree.iter() {
-            let rest = match note_entry.name() {
-                Some(n) => n.to_string(),
-                None => continue,
+        for note_entry_result in shard_tree.iter() {
+            let note_entry = match note_entry_result {
+                Ok(e) => e,
+                Err(_) => continue,
             };
-            // Full commit SHA = shard prefix + remaining chars.
+            let rest = note_entry.filename().to_str_lossy().to_string();
             let commit_sha = format!("{}{}", shard_name, rest);
 
             // Verify the annotated commit exists and is within --since range.
-            let commit_oid = match git2::Oid::from_str(&commit_sha) {
+            let commit_oid = match gix::ObjectId::from_hex(commit_sha.as_bytes()) {
                 Ok(o) => o,
                 Err(_) => {
                     errors += 1;
                     continue;
                 }
             };
-            let annotated_commit = match repo.find_commit(commit_oid) {
-                Ok(c) => c,
+            let annotated_commit = match commit_oid.attach(repo).object() {
+                Ok(o) => o.into_commit(),
+                Err(_) => {
+                    errors += 1;
+                    continue;
+                }
+            };
+            let decoded = match annotated_commit.decode() {
+                Ok(d) => d,
                 Err(_) => {
                     errors += 1;
                     continue;
                 }
             };
             if let Some(since) = since_epoch {
-                if annotated_commit.time().seconds() < since {
+                if {
+                    let a = decoded.author().map_err(|e| anyhow::anyhow!("{e}"))?;
+                    a.time().map_err(|e| anyhow::anyhow!("{e}"))?.seconds
+                } < since
+                {
                     skipped_date += 1;
                     continue;
                 }
             }
-            let commit_ts = annotated_commit.author().when().seconds() * 1000;
+            let commit_ts = {
+                let a = decoded.author().map_err(|e| anyhow::anyhow!("{e}"))?;
+                a.time().map_err(|e| anyhow::anyhow!("{e}"))?.seconds
+            } * 1000;
 
             total += 1;
 
             // Read the note blob.
-            let blob = match repo.find_blob(note_entry.id()) {
-                Ok(b) => b,
+            let blob = match note_entry.object_id().attach(repo).object() {
+                Ok(o) => o.into_blob(),
                 Err(_) => {
                     errors += 1;
                     continue;
                 }
             };
-            let note_text = match std::str::from_utf8(blob.content()) {
-                Ok(s) => s,
+            let note_text = match std::str::from_utf8(&blob.data) {
+                Ok(s) => s.to_string(),
                 Err(_) => {
                     errors += 1;
                     continue;
@@ -957,7 +973,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
             };
 
             // Parse the note.
-            let parsed = match parse_git_ai_note(note_text) {
+            let parsed = match parse_git_ai_note(&note_text) {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!(
@@ -970,8 +986,7 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
                 }
             };
 
-            // Check whether we already have data for this commit so we can
-            // report skips without touching the DB on a real run.
+            // Check whether we already have data for this commit
             if let Some(db) = db {
                 if db
                     .get(&TargetType::Commit, &commit_sha, "agent.blame")?
@@ -994,9 +1009,9 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
             );
 
             if let Some(db) = db {
-                // agent.blame — store as git blob ref if large
+                // agent.blame -- store as git blob ref if large
                 let (blame_val, is_ref) = if parsed.blame.len() > GIT_REF_THRESHOLD {
-                    let oid = repo.blob(parsed.blame.as_bytes())?;
+                    let oid: gix::ObjectId = repo.write_blob(parsed.blame.as_bytes())?.into();
                     (oid.to_string(), true)
                 } else {
                     (json_string(&parsed.blame), false)
@@ -1073,15 +1088,13 @@ fn run_git_ai(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
 }
 
 struct GitAiNote {
-    blame: String, // raw blame section (everything before ---)
+    blame: String,
     schema_version: String,
     git_ai_version: Option<String>,
-    model: String, // deduplicated "tool/model" joined with ", "
+    model: String,
 }
 
 fn parse_git_ai_note(text: &str) -> Result<GitAiNote> {
-    // Split on the `---` separator between blame and JSON.
-    // Notes with no blame section start with `---\n` directly.
     let (blame_raw, json_raw) = if let Some(rest) = text.strip_prefix("---\n") {
         ("", rest)
     } else {
@@ -1107,7 +1120,6 @@ fn parse_git_ai_note(text: &str) -> Result<GitAiNote> {
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    // Collect unique "tool/model" strings across all prompts.
     let mut models: Vec<String> = Vec::new();
     if let Some(prompts) = json.get("prompts").and_then(|v| v.as_object()) {
         for prompt in prompts.values() {

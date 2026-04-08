@@ -35,7 +35,7 @@
 //! Usage:  gmeta history-walker [--commits N]   (default N = 500)
 
 use anyhow::Result;
-use git2::{Buf, Oid, Repository};
+use gix::prelude::ObjectIdExt;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::PathBuf;
@@ -80,146 +80,46 @@ fn fake_sha(n: u64) -> String {
 ///   count = ceil(200 * u^2.5)   where u ~ Uniform(0,1)
 ///
 /// This gives roughly:
-///   P(count ≤ 10)  ≈ 55 %
-///   P(count ≤ 50)  ≈ 87 %
-///   P(count ≤ 100) ≈ 96 %
+///   P(count <= 10)  ~= 55 %
+///   P(count <= 50)  ~= 87 %
+///   P(count <= 100) ~= 96 %
 fn sample_change_count(rng: &mut u64) -> usize {
     let raw = xorshift(rng);
-    // Map to [0, 1)
     let u = (raw >> 11) as f64 / (1u64 << 53) as f64;
-    // Concave power curve
     let count = (200.0 * u.powf(2.5)).ceil() as usize;
     count.clamp(1, 200)
 }
-#[derive(Default)]
-struct Dir {
-    files: BTreeMap<String, Vec<u8>>,
-    dirs: BTreeMap<String, Dir>,
-}
 
-fn insert_path(dir: &mut Dir, parts: &[&str], content: Vec<u8>) {
-    if parts.len() == 1 {
-        dir.files.insert(parts[0].to_string(), content);
-    } else {
-        let child = dir.dirs.entry(parts[0].to_string()).or_default();
-        insert_path(child, &parts[1..], content);
-    }
-}
-
-fn build_dir(repo: &Repository, dir: &Dir) -> Result<Oid> {
-    let mut tb = repo.treebuilder(None)?;
-    for (name, content) in &dir.files {
-        let blob_oid = repo.blob(content)?;
-        tb.insert(name, blob_oid, 0o100644)?;
-    }
-    for (name, child) in &dir.dirs {
-        let child_oid = build_dir(repo, child)?;
-        tb.insert(name, child_oid, 0o040000)?;
-    }
-    Ok(tb.write()?)
-}
-
-/// Build a full tree from a flat path→content map.
-fn build_full_tree(repo: &Repository, files: &BTreeMap<String, Vec<u8>>) -> Result<Oid> {
-    let mut root = Dir::default();
+/// Build a full tree from a flat path-to-content map using the gix tree editor.
+fn build_full_tree(
+    repo: &gix::Repository,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<gix::ObjectId> {
+    let mut editor = repo.empty_tree().edit()?;
     for (path, content) in files {
-        let parts: Vec<&str> = path.split('/').collect();
-        insert_path(&mut root, &parts, content.clone());
+        let blob_id = repo.write_blob(content)?.detach();
+        editor.upsert(path, gix::objs::tree::EntryKind::Blob, blob_id)?;
     }
-    build_dir(repo, &root)
+    Ok(editor.write()?.detach())
 }
 
-/// Incremental tree update: reuse unchanged subtrees by OID, rewrite only the
-/// spine of paths that changed (same algorithm as fanout_bench).
+/// Incremental tree update: start from an existing tree and apply only the
+/// changed paths. The gix tree editor handles loading unchanged subtrees by
+/// OID and only rewriting the spine of paths that changed.
 fn build_tree_incremental(
-    repo: &Repository,
-    base_oid: Oid,
+    repo: &gix::Repository,
+    base_oid: gix::ObjectId,
     changed: &[(&str, Vec<u8>)],
-) -> Result<Oid> {
-    let mut by_top: BTreeMap<&str, Vec<(Vec<&str>, Vec<u8>)>> = BTreeMap::new();
-    let mut root_files: Vec<(&str, Vec<u8>)> = Vec::new();
+) -> Result<gix::ObjectId> {
+    let base_tree = base_oid.attach(repo).object()?.into_tree();
+    let mut editor = base_tree.edit()?;
 
     for (path, content) in changed {
-        let parts: Vec<&str> = path.split('/').collect();
-        if parts.len() == 1 {
-            root_files.push((parts[0], content.clone()));
-        } else {
-            by_top
-                .entry(parts[0])
-                .or_default()
-                .push((parts[1..].to_vec(), content.clone()));
-        }
+        let blob_id = repo.write_blob(content)?.detach();
+        editor.upsert(*path, gix::objs::tree::EntryKind::Blob, blob_id)?;
     }
 
-    let base_tree = repo.find_tree(base_oid)?;
-    let mut root_tb = repo.treebuilder(Some(&base_tree))?;
-
-    for (name, content) in root_files {
-        let blob_oid = repo.blob(content.as_slice())?;
-        root_tb.insert(name, blob_oid, 0o100644)?;
-    }
-
-    for (top, children) in &by_top {
-        let existing_sub: Option<Oid> = base_tree.get_name(top).and_then(|e| {
-            if e.kind() == Some(git2::ObjectType::Tree) {
-                Some(e.id())
-            } else {
-                None
-            }
-        });
-        let new_sub = apply_incremental_subtree(repo, existing_sub, children)?;
-        root_tb.insert(top, new_sub, 0o040000)?;
-    }
-
-    Ok(root_tb.write()?)
-}
-
-fn apply_incremental_subtree(
-    repo: &Repository,
-    base_oid: Option<Oid>,
-    entries: &[(Vec<&str>, Vec<u8>)],
-) -> Result<Oid> {
-    let mut by_next: BTreeMap<&str, Vec<(Vec<&str>, Vec<u8>)>> = BTreeMap::new();
-    let mut leaf_files: Vec<(&str, Vec<u8>)> = Vec::new();
-
-    for (parts, content) in entries {
-        if parts.len() == 1 {
-            leaf_files.push((parts[0], content.clone()));
-        } else {
-            by_next
-                .entry(parts[0])
-                .or_default()
-                .push((parts[1..].to_vec(), content.clone()));
-        }
-    }
-
-    let base_tree_opt = base_oid.and_then(|oid| repo.find_tree(oid).ok());
-    let mut tb = match &base_tree_opt {
-        Some(t) => repo.treebuilder(Some(t))?,
-        None => repo.treebuilder(None)?,
-    };
-
-    for (name, content) in leaf_files {
-        let blob_oid = repo.blob(content.as_slice())?;
-        tb.insert(name, blob_oid, 0o100644)?;
-    }
-
-    for (next, children) in &by_next {
-        let existing = base_tree_opt
-            .as_ref()
-            .and_then(|t| t.get_name(next))
-            .and_then(|e| {
-                if e.kind() == Some(git2::ObjectType::Tree) {
-                    Some(e.id())
-                } else {
-                    None
-                }
-            });
-        let child_oid = apply_incremental_subtree(repo, existing, children)?;
-        tb.insert(next, child_oid, 0o040000)?;
-    }
-
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
 /// Tree path for a commit-SHA target's metadata blob.
@@ -229,22 +129,31 @@ fn value_path(commit_sha: &str) -> String {
     format!("commit/{}/{}/bench/__value", &commit_sha[..2], commit_sha)
 }
 
-/// Write a commit object (no ref update — caller tracks the OID).
+/// Write a commit object (no ref update -- caller tracks the OID).
+///
+/// Uses `gix::objs::Commit` and `repo.write_object()`.
 fn write_commit(
-    repo: &Repository,
-    tree_oid: Oid,
-    parent_oid: Option<Oid>,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
+    parent_oid: Option<gix::ObjectId>,
     msg: &str,
-) -> Result<Oid> {
-    let tree = repo.find_tree(tree_oid)?;
-    let sig = git2::Signature::new("bench", "bench@bench", &git2::Time::new(0, 0))?;
-    let parents: Vec<git2::Commit> = parent_oid
-        .map(|oid| repo.find_commit(oid))
-        .transpose()?
-        .into_iter()
-        .collect();
-    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-    Ok(repo.commit(None, &sig, &sig, msg, &tree, &parent_refs)?)
+) -> Result<gix::ObjectId> {
+    let sig = gix::actor::Signature {
+        name: "bench".into(),
+        email: "bench@bench".into(),
+        time: gix::date::Time::new(0, 0),
+    };
+    let parents: Vec<gix::ObjectId> = parent_oid.into_iter().collect();
+    let commit = gix::objs::Commit {
+        message: msg.into(),
+        tree: tree_oid,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: parents.into(),
+        extra_headers: Default::default(),
+    };
+    Ok(repo.write_object(&commit)?.detach())
 }
 struct GenerationStats {
     n_normal_commits: usize,
@@ -252,34 +161,38 @@ struct GenerationStats {
     /// Total distinct SHAs ever written (the ground truth the walker must recover)
     total_shas_written: usize,
     /// OIDs of every commit in order (index 0 = root, last = tip)
-    commit_chain: Vec<Oid>,
+    commit_chain: Vec<gix::ObjectId>,
     /// How many values were live at tip
     live_count_at_tip: usize,
     elapsed_secs: f64,
 }
 
-fn generate_history(repo: &Repository, n_commits: usize, rng: &mut u64) -> Result<GenerationStats> {
+fn generate_history(
+    repo: &gix::Repository,
+    n_commits: usize,
+    rng: &mut u64,
+) -> Result<GenerationStats> {
     // Each entry represents a commit SHA (the target).  The path encodes the
     // commit SHA; the blob content is a metadata string (not another SHA).
     // "Modify" updates the blob content while the path (and therefore the commit
     // SHA) stays the same.
     //
-    // live_paths: ordered Vec of active tree paths — O(1) random index access.
-    // live_meta:  path → current metadata string (for incremental tree writes).
-    // insertion_serial: path → serial, for prune eviction ordering.
+    // live_paths: ordered Vec of active tree paths -- O(1) random index access.
+    // live_meta:  path -> current metadata string (for incremental tree writes).
+    // insertion_serial: path -> serial, for prune eviction ordering.
     let mut live_paths: Vec<String> = Vec::new();
     let mut live_meta: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut insertion_serial: BTreeMap<String, u64> = BTreeMap::new();
     let mut serial: u64 = 0;
 
     // Ground truth: all commit SHAs that were *introduced* (path added).
-    // Modifications don't add a new commit SHA — they update existing metadata.
+    // Modifications don't add a new commit SHA -- they update existing metadata.
     let mut all_commit_shas: BTreeSet<String> = BTreeSet::new();
 
     // Counter for generating unique commit SHAs (used as tree path keys).
     let mut sha_counter: u64 = 0;
 
-    // Simple metadata value generator — just a small counter string so blob
+    // Simple metadata value generator -- just a small counter string so blob
     // content changes on modify without burning another fake commit SHA.
     let mut meta_counter: u64 = 0;
     let next_meta = |c: &mut u64| -> Vec<u8> {
@@ -287,9 +200,9 @@ fn generate_history(repo: &Repository, n_commits: usize, rng: &mut u64) -> Resul
         format!("meta-value-{}", c).into_bytes()
     };
 
-    let mut commit_chain: Vec<Oid> = Vec::with_capacity(n_commits);
-    let mut parent_oid: Option<Oid> = None;
-    let mut current_tree_oid: Option<Oid> = None;
+    let mut commit_chain: Vec<gix::ObjectId> = Vec::with_capacity(n_commits);
+    let mut parent_oid: Option<gix::ObjectId> = None;
+    let mut current_tree_oid: Option<gix::ObjectId> = None;
     let mut n_normal = 0usize;
     let mut n_prune = 0usize;
 
@@ -301,7 +214,6 @@ fn generate_history(repo: &Repository, n_commits: usize, rng: &mut u64) -> Resul
 
         let tree_oid = if is_prune {
             // Keep PRUNE_KEEP newest entries by insertion serial.
-            // Sort live paths by serial, evict the oldest.
             let mut by_age: Vec<(u64, &str)> = live_paths
                 .iter()
                 .map(|p| (insertion_serial[p.as_str()], p.as_str()))
@@ -317,8 +229,6 @@ fn generate_history(repo: &Repository, n_commits: usize, rng: &mut u64) -> Resul
                 live_meta.remove(path);
                 insertion_serial.remove(path);
             }
-            // Rebuild live_paths without evicted entries (swap-remove safe here
-            // since order within live_paths doesn't matter for correctness).
             live_paths.retain(|p| !evicted.contains(p));
 
             // Rebuild full tree from surviving entries.
@@ -332,19 +242,15 @@ fn generate_history(repo: &Repository, n_commits: usize, rng: &mut u64) -> Resul
 
             for _ in 0..n_changes {
                 // 5 % chance: modify metadata on an existing commit SHA target.
-                // The path (commit SHA) is unchanged; only blob content changes.
                 let do_modify = !live_paths.is_empty() && (xorshift(rng) % 100 < 5);
 
                 if do_modify {
-                    // O(1) random pick via index into Vec
                     let idx = (xorshift(rng) as usize) % live_paths.len();
                     let path = live_paths[idx].clone();
                     let new_content = next_meta(&mut meta_counter);
                     live_meta.insert(path.clone(), new_content.clone());
-                    // Insertion serial unchanged — this target isn't "newer".
                     changed.push((path, new_content));
                 } else {
-                    // Introduce a new commit SHA target with initial metadata.
                     sha_counter += 1;
                     let commit_sha = fake_sha(sha_counter);
                     let path = value_path(&commit_sha);
@@ -434,66 +340,79 @@ struct WalkStats {
 /// Walk from `tip_oid` back to the root.
 ///
 /// At each *non-prune* commit, diff against the parent and collect the commit
-/// SHA encoded in the path of every *Added* blob (new targets only — Modified
+/// SHA encoded in the path of every *Added* blob (new targets only -- Modified
 /// means metadata update on an already-known target, Deleted means a prune
 /// removed an entry we already counted).  Prune commits are skipped entirely
 /// since they introduce no new commit SHA targets.
-fn walk_history(repo: &Repository, tip_oid: Oid) -> Result<WalkStats> {
+///
+/// Uses `git diff-tree --no-commit-id -r --name-status` subprocess for diffing,
+/// matching the pattern used in show.rs.
+fn walk_history(repo: &gix::Repository, tip_oid: gix::ObjectId) -> Result<WalkStats> {
+    use gix::bstr::ByteSlice;
+
     let mut recovered: BTreeSet<String> = BTreeSet::new();
     let mut commits_visited = 0usize;
     let mut prune_commits = 0usize;
 
     let t0 = Instant::now();
+    let git_dir = repo.path();
 
     let mut current_oid = tip_oid;
     loop {
-        let commit = repo.find_commit(current_oid)?;
+        let commit_obj = current_oid.attach(repo).object()?.into_commit();
+        let decoded = commit_obj.decode()?;
         commits_visited += 1;
 
-        let is_prune = commit.message().unwrap_or("").contains("pruned: true");
+        let message = decoded.message.to_str_lossy();
+        let is_prune = message.contains("pruned: true");
         if is_prune {
             prune_commits += 1;
-            // Prune commits only remove entries from the tree; they introduce
-            // no new commit SHA targets.  Skip the diff entirely.
         } else {
-            let current_tree = commit.tree()?;
-            let parent_tree: Option<git2::Tree> = commit.parent(0).ok().and_then(|p| p.tree().ok());
+            // Use git diff-tree subprocess to find added files
+            let output = std::process::Command::new("git")
+                .args(["--git-dir", &git_dir.to_string_lossy()])
+                .args([
+                    "diff-tree",
+                    "--no-commit-id",
+                    "-r",
+                    "--name-status",
+                    &current_oid.to_string(),
+                ])
+                .output()?;
 
-            let mut diff_opts = git2::DiffOptions::new();
-            let diff = repo.diff_tree_to_tree(
-                parent_tree.as_ref(),
-                Some(&current_tree),
-                Some(&mut diff_opts),
-            )?;
-
-            // Only Added deltas represent newly introduced commit SHA targets.
-            // The commit SHA lives in the path: commit/{first2}/{sha}/k/bench/__value
-            // Extract it as the third path component (index 2).
-            diff.foreach(
-                &mut |delta, _progress| {
-                    if delta.status() == git2::Delta::Added {
-                        if let Some(path) = delta.new_file().path() {
-                            let parts: Vec<&str> = path.to_str().unwrap_or("").split('/').collect();
-                            // path layout: commit / {first2} / {full_sha} / k / bench / __value
-                            if parts.len() >= 3 && parts[0] == "commit" {
-                                let sha = parts[2].to_string();
-                                if sha.len() == 40 {
-                                    recovered.insert(sha);
-                                }
-                            }
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    let parts_line: Vec<&str> = line.splitn(2, '\t').collect();
+                    if parts_line.len() != 2 {
+                        continue;
+                    }
+                    // Only Added deltas represent newly introduced commit SHA targets.
+                    if parts_line[0] != "A" {
+                        continue;
+                    }
+                    let path = parts_line[1];
+                    let path_parts: Vec<&str> = path.split('/').collect();
+                    // path layout: commit / {first2} / {full_sha} / bench / __value
+                    if path_parts.len() >= 3 && path_parts[0] == "commit" {
+                        let sha = path_parts[2].to_string();
+                        if sha.len() == 40 {
+                            recovered.insert(sha);
                         }
                     }
-                    true
-                },
-                None,
-                None,
-                None,
-            )?;
+                }
+            }
         }
 
-        match commit.parent_id(0) {
-            Ok(parent_oid) => current_oid = parent_oid,
-            Err(_) => break,
+        // Walk to parent
+        let parent_ids: Vec<gix::ObjectId> = decoded.parents().collect();
+        if let Some(parent_id) = parent_ids.first() {
+            current_oid = *parent_id;
+        } else {
+            break;
         }
     }
 
@@ -523,17 +442,7 @@ pub fn run(n_commits: usize) -> Result<()> {
         DIM, PRUNE_THRESHOLD, PRUNE_KEEP, RESET,
     );
 
-    // Temp bare repo with an in-memory ODB backend.
-    //
-    // By default libgit2 writes every blob and tree as a loose object file
-    // (open + zlib-compress + fdatasync + close), which costs ~1-5 ms per
-    // object on macOS.  With hundreds of objects per commit that dominates the
-    // benchmark completely.
-    //
-    // Adding a mempack backend at priority 1000 (above the default loose=1 and
-    // pack=2 backends) intercepts all writes and keeps them in memory.  The
-    // loose backend is still registered but never reached for writes.  All
-    // reads also hit mempack first, so tree lookups stay fast.
+    // Temp bare repo — gix uses on-disk ODB (no mempack equivalent).
     let tmp_path: PathBuf = std::env::temp_dir().join(format!(
         "gmeta-history-walker-{}",
         std::time::SystemTime::now()
@@ -542,15 +451,8 @@ pub fn run(n_commits: usize) -> Result<()> {
             .as_millis()
     ));
     std::fs::create_dir_all(&tmp_path)?;
-    let repo = Repository::init_bare(&tmp_path)?;
-    let odb = repo.odb()?;
-    let mempack = odb.add_new_mempack_backend(1000)?;
-    println!(
-        "{}repo: {} (mempack ODB — objects in memory){}",
-        DIM,
-        tmp_path.display(),
-        RESET
-    );
+    let repo = gix::init_bare(&tmp_path)?;
+    println!("{}repo: {} (on-disk ODB){}", DIM, tmp_path.display(), RESET);
 
     println!("\n{}generating {} commits…{}", BOLD, n_commits, RESET);
 
@@ -595,40 +497,55 @@ pub fn run(n_commits: usize) -> Result<()> {
         RESET
     );
 
-    print!("\n{}flushing mempack to packfile…{}", BOLD, RESET);
+    // Run git gc to pack loose objects (replaces the mempack flush).
+    print!("\n{}packing objects (git gc)…{}", BOLD, RESET);
     let _ = std::io::stdout().flush();
     let t_pack = Instant::now();
 
-    let mut pack_buf = Buf::new();
-    mempack.dump(&repo, &mut pack_buf)?;
-    let pack_bytes = pack_buf.len();
-    let mut packwriter = odb.packwriter()?;
-    std::io::Write::write_all(&mut packwriter, &pack_buf)?;
-    packwriter.commit()?;
-    // Now that objects are in a real packfile, mempack is no longer needed.
-    mempack.reset()?;
+    let gc_status = std::process::Command::new("git")
+        .args(["-C", &tmp_path.to_string_lossy()])
+        .args(["gc", "--quiet"])
+        .status();
 
-    // Point refs/meta/local at the tip commit and make HEAD a symbolic ref to it.
+    let pack_secs = t_pack.elapsed().as_secs_f64();
+
+    // Measure pack size
+    let pack_dir = tmp_path.join("objects").join("pack");
+    let mut pack_bytes: u64 = 0;
+    if pack_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&pack_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "pack").unwrap_or(false) {
+                    pack_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                }
+            }
+        }
+    }
+
+    if gc_status.is_ok() {
+        println!(
+            " {}done{}  {}{:.2} MB{} in {}{}{}",
+            BOLD,
+            RESET,
+            MAGENTA,
+            pack_bytes as f64 / 1_048_576.0,
+            RESET,
+            GREEN,
+            fmt_ms(pack_secs),
+            RESET,
+        );
+    } else {
+        println!(" {}skipped{} (git gc not available)", DIM, RESET);
+    }
+
+    // Point refs/meta/local at the tip commit.
     repo.reference(
         "refs/meta/local/main",
         tip_oid,
-        true,
+        gix::refs::transaction::PreviousValue::Any,
         "history-walker: generation complete",
     )?;
-    repo.set_head("refs/meta/local/main")?;
-
-    let pack_secs = t_pack.elapsed().as_secs_f64();
-    println!(
-        " {}done{}  {}{:.2} MB{} in {}{}{}",
-        BOLD,
-        RESET,
-        MAGENTA,
-        pack_bytes as f64 / 1_048_576.0,
-        RESET,
-        GREEN,
-        fmt_ms(pack_secs),
-        RESET,
-    );
 
     print!("\n{}walking history from tip…{}", BOLD, RESET);
     let _ = std::io::stdout().flush();
@@ -658,10 +575,6 @@ pub fn run(n_commits: usize) -> Result<()> {
     );
 
     // Correctness check.
-    // Modifications update blob content on an existing path — the commit SHA
-    // (encoded in the path) is unchanged and was already counted when first
-    // introduced.  The walk collects only Added deltas, so recovered should
-    // exactly equal the number of distinct commit SHAs introduced.
     let expected = gen.total_shas_written;
     let recovered = walk.shas_recovered;
     let match_str = if recovered == expected {
@@ -688,7 +601,7 @@ pub fn run(n_commits: usize) -> Result<()> {
         RESET,
     );
     println!(
-        "  {}pack flush{}   {} total  {}({:.2} MB){}",
+        "  {}pack{}          {} total  {}({:.2} MB){}",
         DIM,
         RESET,
         fmt_ms(pack_secs),

@@ -1,7 +1,9 @@
+use gix::prelude::ObjectIdExt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::context::CommandContext;
 use anyhow::Result;
+use gix::refs::transaction::PreviousValue;
 use gmeta_core::db::Db;
 use gmeta_core::git_utils;
 use gmeta_core::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
@@ -30,8 +32,8 @@ enum PlannedDbChange {
 }
 
 pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
 
     let ns = &ctx.namespace;
     let local_ref_name = ctx.local_ref();
@@ -71,9 +73,9 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             eprintln!("\n[verbose] === processing {} ===", ref_name);
         }
 
-        let remote_commit = repo.find_commit(*remote_oid)?;
-        let remote_tree = remote_commit.tree()?;
-        let remote_entries = parse_tree(repo, &remote_tree, "")?;
+        let remote_commit_obj = remote_oid.attach(repo).object()?.into_commit();
+        let remote_tree_id = remote_commit_obj.tree_id()?.detach();
+        let remote_entries = parse_tree(repo, remote_tree_id, "")?;
 
         if verbose {
             eprintln!(
@@ -108,29 +110,30 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         }
 
         // Get local commit (if any)
-        let local_commit = repo
+        let local_commit_oid = repo
             .find_reference(&local_ref_name)
             .ok()
-            .and_then(|r| r.peel_to_commit().ok());
+            .and_then(|r| r.into_fully_peeled_id().ok())
+            .map(|id| id.detach());
 
         if verbose {
-            match &local_commit {
-                Some(c) => eprintln!("[verbose] local commit: {}", &c.id().to_string()[..8]),
+            match &local_commit_oid {
+                Some(c) => eprintln!("[verbose] local commit: {}", &c.to_string()[..8]),
                 None => eprintln!("[verbose] no local commit"),
             }
         }
 
         // Check if we can fast-forward: local is None, or local is an
         // ancestor of remote (no local-only commits to preserve).
-        let can_fast_forward = match &local_commit {
+        let can_fast_forward = match &local_commit_oid {
             None => {
                 if verbose {
                     eprintln!("[verbose] no local commit -> fast-forward");
                 }
                 true
             }
-            Some(local_c) => {
-                if local_c.id() == *remote_oid {
+            Some(local_oid) => {
+                if *local_oid == *remote_oid {
                     // Already up to date
                     if dry_run {
                         println!("dry-run: {} already up to date", ref_name);
@@ -139,14 +142,14 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                     }
                     continue;
                 }
-                match repo.merge_base(local_c.id(), *remote_oid) {
+                match repo.merge_base(*local_oid, *remote_oid) {
                     Ok(base_oid) => {
-                        let is_ff = base_oid == local_c.id();
+                        let is_ff = base_oid == *local_oid;
                         if verbose {
                             eprintln!(
                                 "[verbose] merge base: {} (local={}, remote={})",
                                 &base_oid.to_string()[..8],
-                                &local_c.id().to_string()[..8],
+                                &local_oid.to_string()[..8],
                                 &remote_oid.to_string()[..8]
                             );
                             if is_ff {
@@ -168,8 +171,10 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         };
 
         if can_fast_forward {
-            let local_entries = if let Some(local_c) = &local_commit {
-                parse_tree(repo, &local_c.tree()?, "")?
+            let local_entries = if let Some(local_oid) = &local_commit_oid {
+                let lc = local_oid.attach(repo).object()?.into_commit();
+                let lt = lc.tree_id()?.detach();
+                parse_tree(repo, lt, "")?
             } else {
                 ParsedTree::default()
             };
@@ -265,19 +270,21 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
 
             // Fast-forward the ref
             repo.reference(
-                &local_ref_name,
+                local_ref_name.as_str(),
                 *remote_oid,
-                true,
+                PreviousValue::Any,
                 "fast-forward materialize",
             )?;
 
             println!("materialized {} (fast-forward)", ref_name);
         } else {
             // Need a real merge
-            let local_c = local_commit
+            let local_oid = local_commit_oid
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("expected local commit for merge but found None"))?;
-            let local_entries = parse_tree(repo, &local_c.tree()?, "")?;
+            let local_commit_obj = local_oid.attach(repo).object()?.into_commit();
+            let local_tree_id = local_commit_obj.tree_id()?.detach();
+            let local_entries = parse_tree(repo, local_tree_id, "")?;
 
             if verbose {
                 eprintln!(
@@ -289,8 +296,20 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
 
             // Get commit timestamps for conflict resolution
-            let local_timestamp = local_c.time().seconds();
-            let remote_timestamp = remote_commit.time().seconds();
+            let local_decoded = local_commit_obj.decode()?;
+            let local_timestamp = local_decoded
+                .author()
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .time()
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .seconds;
+            let remote_decoded = remote_commit_obj.decode()?;
+            let remote_timestamp = remote_decoded
+                .author()
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .time()
+                .map_err(|e| anyhow::anyhow!("{e}"))?
+                .seconds;
 
             if verbose {
                 eprintln!(
@@ -299,7 +318,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 );
             }
 
-            let merge_base_oid = repo.merge_base(local_c.id(), *remote_oid).ok();
+            let merge_base_oid = repo.merge_base(*local_oid, *remote_oid).ok();
             let mut legacy_base_values: Option<BTreeMap<Key, TreeValue>> = None;
 
             let (
@@ -310,8 +329,9 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                 conflict_decisions,
                 merge_strategy,
             ) = if let Some(base_oid) = merge_base_oid {
-                let base_commit = repo.find_commit(base_oid)?;
-                let base_entries = parse_tree(repo, &base_commit.tree()?, "")?;
+                let base_commit_obj = base_oid.object()?.into_commit();
+                let base_tree_id = base_commit_obj.tree_id()?.detach();
+                let base_entries = parse_tree(repo, base_tree_id, "")?;
 
                 if verbose {
                     eprintln!(
@@ -361,7 +381,6 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
                             },
                             (Some(_), None, None) => removed += 1,
                             (Some(_), Some(_), None) | (Some(_), None, Some(_)) => {
-                                // remove/modify
                                 conflicted += 1;
                             }
                             (None, Some(_), None) => new_local += 1,
@@ -565,32 +584,44 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             )?;
 
             if verbose {
-                let merged_tree_obj = repo.find_tree(merged_tree_oid)?;
+                let merged_tree = merged_tree_oid.attach(repo).object()?.into_tree();
                 eprintln!(
                     "[verbose] merged tree: {} ({} top-level entries)",
                     merged_tree_oid,
-                    merged_tree_obj.len()
+                    merged_tree.iter().count()
                 );
             }
 
-            let merged_tree = repo.find_tree(merged_tree_oid)?;
-            let name = git_utils::git2_get_name(repo)?;
-            let sig = git2::Signature::now(&name, email)?;
+            let name = git_utils::get_name(repo)?;
+            let sig = gix::actor::Signature {
+                name: name.into(),
+                email: email.clone().into(),
+                time: gix::date::Time::now_local_or_utc(),
+            };
 
-            let merge_commit_oid = repo.commit(
-                Some(&local_ref_name),
-                &sig,
-                &sig,
-                "materialize",
-                &merged_tree,
-                &[local_c, &remote_commit],
+            let commit = gix::objs::Commit {
+                message: "materialize".into(),
+                tree: merged_tree_oid,
+                author: sig.clone(),
+                committer: sig,
+                encoding: None,
+                parents: vec![*local_oid, *remote_oid].into(),
+                extra_headers: Default::default(),
+            };
+
+            let merge_commit_oid = repo.write_object(&commit)?.detach();
+            repo.reference(
+                local_ref_name.as_str(),
+                merge_commit_oid,
+                PreviousValue::Any,
+                "materialize merge",
             )?;
 
             if verbose {
                 eprintln!(
                     "[verbose] wrote merge commit {} (parents: {}, {})",
                     &merge_commit_oid.to_string()[..8],
-                    &local_c.id().to_string()[..8],
+                    &local_oid.to_string()[..8],
                     &remote_oid.to_string()[..8]
                 );
             }
@@ -608,7 +639,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
 
 /// Update the SQLite database from parsed tree data.
 fn update_db_from_tree(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     db: &Db,
     values: &BTreeMap<Key, TreeValue>,
     tombstones: &BTreeMap<Key, TombstoneEntry>,
@@ -625,8 +656,8 @@ fn update_db_from_tree(
             TreeValue::String(s) => {
                 if s.len() > GIT_REF_THRESHOLD {
                     // Large value: store as git blob reference
-                    let blob_oid = repo.blob(s.as_bytes())?;
-                    let oid_str = blob_oid.to_string();
+                    let blob_oid = repo.write_blob(s.as_bytes())?;
+                    let oid_str: String = blob_oid.to_string();
                     let existing = db.get(&tt, target_value, key_name)?;
                     if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&oid_str) {
                         db.set_with_git_ref(
@@ -948,26 +979,25 @@ fn format_key_for_display(key: &Key) -> String {
 }
 
 fn find_remote_refs(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     ns: &str,
     remote: Option<&str>,
-) -> Result<Vec<(String, git2::Oid)>> {
+) -> Result<Vec<(String, gix::ObjectId)>> {
     let mut results = Vec::new();
 
-    let refs = repo.references()?;
     let prefix = match remote {
         Some(r) => format!("refs/{}/{}", ns, r),
         None => format!("refs/{}/", ns),
     };
+    let local_prefix = format!("refs/{}/local/", ns);
 
-    for reference in refs {
-        let reference = reference?;
-        if let Some(name) = reference.name() {
-            let local_prefix = format!("refs/{}/local/", ns);
-            if name.starts_with(&prefix) && !name.starts_with(&local_prefix) {
-                if let Ok(commit) = reference.peel_to_commit() {
-                    results.push((name.to_string(), commit.id()));
-                }
+    let platform = repo.references()?;
+    for reference in platform.all()? {
+        let reference = reference.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let name = reference.name().as_bstr().to_string();
+        if name.starts_with(&prefix) && !name.starts_with(&local_prefix) {
+            if let Ok(id) = reference.into_fully_peeled_id() {
+                results.push((name, id.detach()));
             }
         }
     }

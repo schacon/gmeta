@@ -9,9 +9,9 @@ pub enum Error {
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
 
-    /// Git (git2) operation failed.
-    #[error(transparent)]
-    Git(#[from] git2::Error),
+    /// Git operation failed.
+    #[error("git error: {0}")]
+    Git(#[from] Box<dyn std::error::Error + Send + Sync>),
 
     /// JSON serialization or deserialization failed.
     #[error(transparent)]

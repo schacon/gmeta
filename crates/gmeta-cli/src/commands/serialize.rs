@@ -1,6 +1,9 @@
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::{Context, Result};
+use gix::refs::transaction::PreviousValue;
 use time::OffsetDateTime;
 
 use crate::commands::prune::auto::{self, parse_since_to_cutoff_ms};
@@ -41,8 +44,8 @@ fn build_commit_message(changes: &[(char, String, String)]) -> String {
 }
 
 pub fn run(verbose: bool) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
 
     let local_ref_name = ctx.local_ref();
     let last_materialized = ctx.db.get_last_materialized()?;
@@ -71,18 +74,26 @@ pub fn run(verbose: bool) -> Result<()> {
 
     // Determine if we're doing incremental or full serialization
     // If we have a previous local ref commit, start from existing tree
-    let existing_tree = repo
+    let existing_tree_oid = repo
         .find_reference(&local_ref_name)
         .ok()
-        .and_then(|r| r.peel_to_commit().ok())
-        .and_then(|c| c.tree().ok());
+        .and_then(|r| r.into_fully_peeled_id().ok())
+        .and_then(|id| {
+            id.object()
+                .ok()?
+                .into_commit()
+                .tree_id()
+                .ok()
+                .map(|t| t.detach())
+        });
 
     if verbose {
-        if let Some(ref tree) = existing_tree {
+        if let Some(ref tree_oid) = existing_tree_oid {
+            let tree = tree_oid.attach(repo).object().ok().map(|o| o.into_tree());
+            let count = tree.map(|t| t.iter().count()).unwrap_or(0);
             eprintln!(
                 "[verbose] existing tree: {} ({} top-level entries)",
-                tree.id(),
-                tree.len()
+                tree_oid, count
             );
         } else {
             eprintln!("[verbose] no existing tree (first serialize)");
@@ -108,7 +119,7 @@ pub fn run(verbose: bool) -> Result<()> {
                 modified.len()
             );
         }
-        if modified.is_empty() && existing_tree.is_some() {
+        if modified.is_empty() && existing_tree_oid.is_some() {
             eprintln!("Nothing changed since last serialize");
             return Ok(());
         }
@@ -120,7 +131,7 @@ pub fn run(verbose: bool) -> Result<()> {
                 let op_char = match op.as_str() {
                     "rm" => 'D',
                     "set" => {
-                        if existing_tree.is_some() {
+                        if existing_tree_oid.is_some() {
                             'M'
                         } else {
                             'A'
@@ -153,11 +164,6 @@ pub fn run(verbose: bool) -> Result<()> {
         let set_tombstones = ctx.db.get_all_set_tombstones()?;
         let list_tombstones = ctx.db.get_all_list_tombstones()?;
 
-        // Note: tombstone/set-tombstone targets don't need to be added to
-        // dirty_bases separately — delete operations are logged in metadata_log,
-        // so they're already captured by get_modified_since. Clean targets'
-        // tombstones are preserved via subtree reuse from the existing tree.
-
         if verbose {
             eprintln!("[verbose] dirty target bases: {}", dirty_bases.len());
             for base in &dirty_bases {
@@ -170,7 +176,7 @@ pub fn run(verbose: bool) -> Result<()> {
             tombstones,
             set_tombstones,
             list_tombstones,
-            if existing_tree.is_some() {
+            if existing_tree_oid.is_some() {
                 Some(dirty_bases)
             } else {
                 None
@@ -215,8 +221,7 @@ pub fn run(verbose: bool) -> Result<()> {
     }
 
     // If meta:prune:since is configured, drop entries older than the cutoff
-    // before building the tree. This avoids building a large tree only to
-    // prune it, and keeps the summary counts accurate.
+    // before building the tree.
     let prune_since = ctx
         .db
         .get(&TargetType::Project, "", "meta:prune:since")?
@@ -390,11 +395,16 @@ pub fn run(verbose: bool) -> Result<()> {
                 eprintln!("  {}", target);
             }
         }
+        let _ = total_meta; // suppress unused warning
     }
 
-    let name = git_utils::git2_get_name(repo)?;
-    let email = git_utils::git2_get_email(repo)?;
-    let sig = git2::Signature::now(&name, &email)?;
+    let name = git_utils::get_name(repo)?;
+    let email = git_utils::get_email(repo)?;
+    let sig = gix::actor::Signature {
+        name: name.into(),
+        email: email.into(),
+        time: gix::date::Time::now_local_or_utc(),
+    };
 
     for dest in &all_dests {
         let ref_name = ctx.destination_ref(dest);
@@ -414,7 +424,7 @@ pub fn run(verbose: bool) -> Result<()> {
 
         // Use incremental mode only for the main destination
         let (existing, dirty) = if dest == MAIN_DEST {
-            (existing_tree.as_ref(), dirty_target_bases.as_ref())
+            (existing_tree_oid, dirty_target_bases.as_ref())
         } else {
             (None, None)
         };
@@ -425,42 +435,50 @@ pub fn run(verbose: bool) -> Result<()> {
         )?;
 
         if verbose {
-            let tree = repo.find_tree(tree_oid)?;
+            let tree = tree_oid.attach(repo).object()?.into_tree();
             eprintln!(
                 "[verbose] built tree {} ({} top-level entries)",
                 tree_oid,
-                tree.len()
+                tree.iter().count()
             );
         }
 
-        let tree = repo.find_tree(tree_oid)?;
-
-        let parent = repo
+        let parent_oid = repo
             .find_reference(&ref_name)
             .ok()
-            .and_then(|r| r.peel_to_commit().ok());
+            .and_then(|r| r.into_fully_peeled_id().ok())
+            .map(|id| id.detach());
 
         if verbose {
-            if let Some(ref p) = parent {
+            if let Some(ref p) = parent_oid {
                 eprintln!(
                     "[verbose] parent commit for {}: {}",
                     ref_name,
-                    &p.id().to_string()[..8]
+                    &p.to_string()[..8]
                 );
             } else {
                 eprintln!("[verbose] no parent commit for {} (root)", ref_name);
             }
         }
 
-        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        let parents: Vec<gix::ObjectId> = parent_oid.into_iter().collect();
         let commit_message = build_commit_message(&changes);
-        let commit_oid = repo.commit(
-            Some(&ref_name),
-            &sig,
-            &sig,
-            &commit_message,
-            &tree,
-            &parents,
+        let commit = gix::objs::Commit {
+            message: commit_message.into(),
+            tree: tree_oid,
+            author: sig.clone(),
+            committer: sig.clone(),
+            encoding: None,
+            parents: parents.into(),
+            extra_headers: Default::default(),
+        };
+
+        let commit_oid = repo.write_object(&commit)?.detach();
+        repo.reference(
+            ref_name.as_str(),
+            commit_oid,
+            PreviousValue::Any,
+            "gmeta: serialize",
         )?;
 
         println!(
@@ -513,8 +531,11 @@ pub fn run(verbose: bool) -> Result<()> {
                                 prune_tree_oid, tree_oid
                             );
                         }
-                        let prune_tree = repo.find_tree(prune_tree_oid)?;
-                        let prune_parent = repo.find_reference(&ref_name)?.peel_to_commit()?;
+
+                        let prune_parent_oid = repo
+                            .find_reference(&ref_name)?
+                            .into_fully_peeled_id()?
+                            .detach();
 
                         let (keys_dropped, keys_retained) =
                             count_prune_stats(repo, tree_oid, prune_tree_oid)?;
@@ -536,13 +557,22 @@ pub fn run(verbose: bool) -> Result<()> {
                             prune_rules.since, prune_rules.since, min_size_str, keys_dropped, keys_retained
                         );
 
-                        let prune_commit_oid = repo.commit(
-                            Some(&ref_name),
-                            &sig,
-                            &sig,
-                            &message,
-                            &prune_tree,
-                            &[&prune_parent],
+                        let prune_commit = gix::objs::Commit {
+                            message: message.into(),
+                            tree: prune_tree_oid,
+                            author: sig.clone(),
+                            committer: sig.clone(),
+                            encoding: None,
+                            parents: vec![prune_parent_oid].into(),
+                            extra_headers: Default::default(),
+                        };
+
+                        let prune_commit_oid = repo.write_object(&prune_commit)?.detach();
+                        repo.reference(
+                            ref_name.as_str(),
+                            prune_commit_oid,
+                            PreviousValue::Any,
+                            "gmeta: auto-prune",
                         )?;
 
                         println!(
@@ -573,12 +603,12 @@ pub fn run(verbose: bool) -> Result<()> {
 /// Build a Git tree from pre-filtered metadata (no incremental mode).
 /// Used by `gmeta prune` to rebuild a tree from only the surviving entries.
 pub fn build_filtered_tree(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     metadata_entries: &[(String, String, String, String, ValueType, i64, bool)],
     tombstone_entries: &[(String, String, String, i64, String)],
     set_tombstone_entries: &[(String, String, String, String, String, i64, String)],
     list_tombstone_entries: &[(String, String, String, String, i64, String)],
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     build_tree(
         repo,
         metadata_entries,
@@ -592,19 +622,19 @@ pub fn build_filtered_tree(
 }
 
 /// Build a complete Git tree from all metadata entries.
-/// When `existing_tree` and `dirty_target_bases` are provided, only entries
+/// When `existing_tree_oid` and `dirty_target_bases` are provided, only entries
 /// belonging to dirty targets are processed; unchanged subtrees are reused
 /// from the existing tree by OID.
 fn build_tree(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     metadata_entries: &[(String, String, String, String, ValueType, i64, bool)],
     tombstone_entries: &[(String, String, String, i64, String)],
     set_tombstone_entries: &[(String, String, String, String, String, i64, String)],
     list_tombstone_entries: &[(String, String, String, String, i64, String)],
-    existing_tree: Option<&git2::Tree>,
+    existing_tree_oid: Option<gix::ObjectId>,
     dirty_target_bases: Option<&BTreeSet<String>>,
     verbose: bool,
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     // Collect file paths -> blob content, skipping clean targets in incremental mode
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut skipped_entries = 0u64;
@@ -618,7 +648,7 @@ fn build_tree(
             Target::parse(&format!("{}:{}", target_type, target_value))?
         };
 
-        // Skip entries for clean targets — their subtrees will be reused
+        // Skip entries for clean targets -- their subtrees will be reused
         if let Some(dirty) = dirty_target_bases {
             if !dirty.contains(&target.tree_base_path()) {
                 skipped_entries += 1;
@@ -630,16 +660,16 @@ fn build_tree(
             ValueType::String => {
                 let full_path = build_tree_path(&target, key)?;
                 if *is_git_ref {
-                    let oid = git2::Oid::from_str(value)?;
-                    let blob = repo.find_blob(oid)?;
+                    let oid = gix::ObjectId::from_hex(value.as_bytes())?;
+                    let blob = oid.attach(repo).object()?.into_blob();
                     if verbose {
                         eprintln!(
                             "[verbose] tree: {} -> <git-blob {} bytes>",
                             full_path,
-                            blob.content().len()
+                            blob.data.len()
                         );
                     }
-                    files.insert(full_path, blob.content().to_vec());
+                    files.insert(full_path, blob.data.to_vec());
                 } else {
                     let raw_value: String = match serde_json::from_str(value) {
                         Ok(s) => s,
@@ -773,14 +803,14 @@ fn build_tree(
     }
 
     // Build nested tree, reusing unchanged subtrees from existing tree
-    if let (Some(existing), Some(dirty_bases)) = (existing_tree, dirty_target_bases) {
+    if let (Some(existing_oid), Some(dirty_bases)) = (existing_tree_oid, dirty_target_bases) {
         if verbose {
             eprintln!(
                 "[verbose] incremental tree build: patching existing tree with {} dirty targets",
                 dirty_bases.len()
             );
         }
-        build_tree_incremental(repo, existing, &files, dirty_bases)
+        build_tree_incremental(repo, existing_oid, &files, dirty_bases)
     } else {
         Ok(build_tree_from_paths(repo, &files)?)
     }
@@ -789,20 +819,14 @@ fn build_tree(
 /// Incrementally build a tree by patching an existing tree.
 /// Only dirty target subtrees are rebuilt from `files`; all other subtrees
 /// are reused from the existing tree by OID.
-///
-/// Strategy:
-/// 1. Remove dirty target subtrees from the existing tree
-/// 2. Build a Dir from the dirty files
-/// 3. Merge the new Dir into the cleaned tree
 fn build_tree_incremental(
-    repo: &git2::Repository,
-    existing_tree: &git2::Tree,
+    repo: &gix::Repository,
+    existing_tree_oid: gix::ObjectId,
     files: &BTreeMap<String, Vec<u8>>,
     dirty_target_bases: &BTreeSet<String>,
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     // Step 1: Remove dirty target subtrees from existing tree
-    let cleaned_oid = remove_subtrees(repo, existing_tree, dirty_target_bases)?;
-    let cleaned_tree = repo.find_tree(cleaned_oid)?;
+    let cleaned_oid = remove_subtrees(repo, existing_tree_oid, dirty_target_bases)?;
 
     // Step 2: Build Dir from dirty files only
     let mut root = Dir::default();
@@ -812,17 +836,15 @@ fn build_tree_incremental(
     }
 
     // Step 3: Merge new content into cleaned tree
-    merge_dir_into_tree(repo, &root, &cleaned_tree)
+    merge_dir_into_tree(repo, &root, cleaned_oid)
 }
 
 /// Remove subtrees at specific paths from an existing tree.
-/// Paths like "commit/ab/abc123" are recursively navigated and the leaf
-/// entry is removed, cleaning up empty parent dirs.
 fn remove_subtrees(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     paths: &BTreeSet<String>,
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut direct_removes: BTreeSet<String> = BTreeSet::new();
 
@@ -837,98 +859,109 @@ fn remove_subtrees(
         }
     }
 
-    let mut tb = repo.treebuilder(Some(tree))?;
+    let mut editor = repo.edit_tree(tree_oid)?;
 
     for name in &direct_removes {
-        let _ = tb.remove(name);
+        // Try removing; ignore if not present
+        let _ = editor.remove(name);
     }
 
+    // For grouped paths, we need to recurse into subtrees
+    let tree = tree_oid.attach(repo).object()?.into_tree();
     for (name, sub_paths) in &grouped {
-        if let Some(entry) = tree.get_name(name) {
-            if entry.kind() == Some(git2::ObjectType::Tree) {
-                let subtree = repo.find_tree(entry.id())?;
-                let new_oid = remove_subtrees(repo, &subtree, sub_paths)?;
-                let new_tree = repo.find_tree(new_oid)?;
-                if !new_tree.is_empty() {
-                    tb.insert(name, new_oid, 0o040000)?;
-                } else {
-                    let _ = tb.remove(name);
-                }
+        let entry = tree.iter().find_map(|e| {
+            let e = e.ok()?;
+            if e.filename().to_str_lossy() == *name && e.mode().is_tree() {
+                Some(e.object_id())
+            } else {
+                None
+            }
+        });
+        if let Some(subtree_oid) = entry {
+            let new_oid = remove_subtrees(repo, subtree_oid, sub_paths)?;
+            // Check if the resulting tree is empty
+            let new_tree = new_oid.attach(repo).object()?.into_tree();
+            if new_tree.iter().count() > 0 {
+                editor.upsert(name, gix::objs::tree::EntryKind::Tree, new_oid)?;
+            } else {
+                let _ = editor.remove(name);
             }
         }
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
 /// Merge a Dir structure into an existing tree.
 /// Existing entries not present in `dir` are preserved.
 /// Entries in `dir` overwrite existing entries with the same name.
 fn merge_dir_into_tree(
-    repo: &git2::Repository,
+    repo: &gix::Repository,
     dir: &Dir,
-    existing: &git2::Tree,
-) -> Result<git2::Oid> {
-    let mut tb = repo.treebuilder(Some(existing))?;
+    existing_oid: gix::ObjectId,
+) -> Result<gix::ObjectId> {
+    let mut editor = repo.edit_tree(existing_oid)?;
 
     for (name, content) in &dir.files {
-        let blob_oid = repo.blob(content)?;
-        tb.insert(name, blob_oid, 0o100644)?;
+        let blob_oid: gix::ObjectId = repo.write_blob(content)?.into();
+        editor.upsert(name, gix::objs::tree::EntryKind::Blob, blob_oid)?;
     }
 
+    let existing_tree = existing_oid.attach(repo).object()?.into_tree();
     for (name, child_dir) in &dir.dirs {
-        let existing_child = existing
-            .get_name(name)
-            .filter(|e| e.kind() == Some(git2::ObjectType::Tree))
-            .and_then(|e| repo.find_tree(e.id()).ok());
+        let existing_child_oid = existing_tree.iter().find_map(|e| {
+            let e = e.ok()?;
+            if e.filename().to_str_lossy() == *name && e.mode().is_tree() {
+                Some(e.object_id())
+            } else {
+                None
+            }
+        });
 
-        let child_oid = if let Some(ref existing_child) = existing_child {
+        let child_oid = if let Some(existing_child) = existing_child_oid {
             merge_dir_into_tree(repo, child_dir, existing_child)?
         } else {
             build_dir(repo, child_dir)?
         };
-        tb.insert(name, child_oid, 0o040000)?;
+        editor.upsert(name, gix::objs::tree::EntryKind::Tree, child_oid)?;
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
 /// Prune a serialized tree by dropping entries older than the cutoff.
 /// Returns the OID of the new (possibly smaller) tree.
 pub fn prune_tree(
-    repo: &git2::Repository,
-    tree_oid: git2::Oid,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     rules: &auto::PruneRules,
     db: &Db,
     verbose: bool,
-) -> Result<git2::Oid> {
+) -> Result<gix::ObjectId> {
     let cutoff_ms = parse_since_to_cutoff_ms(&rules.since)?;
     let min_size = rules.min_size.unwrap_or(0);
-    let tree = repo.find_tree(tree_oid)?;
 
-    // Walk the tree and rebuild, skipping old entries.
-    // The top-level directories are target type dirs (commit, branch, path, project, change-id).
-    // "project" subtree is never pruned.
-    let mut tb = repo.treebuilder(None)?;
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    let mut editor = repo.empty_tree().edit()?;
 
-    for entry in tree.iter() {
-        let name = entry.name().unwrap_or("").to_string();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
 
         if name == "project" {
-            // Never prune project metadata
             if verbose {
                 eprintln!("[verbose] prune: keeping project/ (never pruned)");
             }
-            tb.insert(&name, entry.id(), entry.filemode())?;
+            editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
             continue;
         }
 
-        if entry.kind() == Some(git2::ObjectType::Tree) {
-            let subtree = repo.find_tree(entry.id())?;
+        if entry.mode().is_tree() {
+            let subtree_oid = entry.object_id();
 
-            // Check min-size: if the subtree is smaller than the threshold, keep it
+            // Check min-size
             if min_size > 0 {
-                let size = auto::compute_tree_size_for(repo, &subtree)?;
+                let size = auto::compute_tree_size_for(repo, subtree_oid)?;
                 if size < min_size {
                     if verbose {
                         eprintln!(
@@ -936,7 +969,7 @@ pub fn prune_tree(
                             name, size, min_size
                         );
                     }
-                    tb.insert(&name, entry.id(), entry.filemode())?;
+                    editor.upsert(&name, entry.mode().kind(), subtree_oid)?;
                     continue;
                 }
                 if verbose {
@@ -948,165 +981,157 @@ pub fn prune_tree(
             }
 
             let pruned_oid =
-                prune_target_type_tree(repo, &subtree, cutoff_ms, min_size, db, verbose, &name)?;
-            // Only include if the pruned tree is non-empty
-            let pruned_tree = repo.find_tree(pruned_oid)?;
-            if !pruned_tree.is_empty() {
-                if verbose && pruned_oid != entry.id() {
+                prune_target_type_tree(repo, subtree_oid, cutoff_ms, min_size, db, verbose, &name)?;
+            let pruned_tree = pruned_oid.attach(repo).object()?.into_tree();
+            if pruned_tree.iter().count() > 0 {
+                if verbose && pruned_oid != subtree_oid {
+                    let orig_tree = subtree_oid.attach(repo).object()?.into_tree();
                     eprintln!(
                         "[verbose] prune: {}/ reduced from {} to {} entries",
                         name,
-                        subtree.len(),
-                        pruned_tree.len()
+                        orig_tree.iter().count(),
+                        pruned_tree.iter().count()
                     );
                 }
-                tb.insert(&name, pruned_oid, entry.filemode())?;
+                editor.upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)?;
             } else if verbose {
                 eprintln!("[verbose] prune: {}/ entirely pruned (empty)", name);
             }
         } else {
-            tb.insert(&name, entry.id(), entry.filemode())?;
+            editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
         }
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
-/// Prune within a target-type directory (e.g. the "commit" dir which contains fanout dirs).
 fn prune_target_type_tree(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     cutoff_ms: i64,
     min_size: u64,
     db: &Db,
     verbose: bool,
     parent_path: &str,
-) -> Result<git2::Oid> {
-    let mut tb = repo.treebuilder(None)?;
+) -> Result<gix::ObjectId> {
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    let mut editor = repo.empty_tree().edit()?;
 
-    for entry in tree.iter() {
-        let name = entry.name().unwrap_or("").to_string();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
 
-        if entry.kind() == Some(git2::ObjectType::Tree) {
-            let subtree = repo.find_tree(entry.id())?;
+        if entry.mode().is_tree() {
+            let subtree_oid = entry.object_id();
             let pruned_oid = prune_subtree_recursive(
                 repo,
-                &subtree,
+                subtree_oid,
                 cutoff_ms,
                 min_size,
                 db,
                 verbose,
                 &format!("{}/{}", parent_path, name),
             )?;
-            let pruned_tree = repo.find_tree(pruned_oid)?;
-            if !pruned_tree.is_empty() {
-                tb.insert(&name, pruned_oid, entry.filemode())?;
+            let pruned_tree = pruned_oid.attach(repo).object()?.into_tree();
+            if pruned_tree.iter().count() > 0 {
+                editor.upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)?;
             } else if verbose {
                 eprintln!("[verbose] prune: {}/{}/ entirely pruned", parent_path, name);
             }
         } else {
-            tb.insert(&name, entry.id(), entry.filemode())?;
+            editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
         }
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
-/// Recursively prune a subtree. Drops old list entries and old tombstones.
-/// For key-level entries (__value, __set), checks the last_timestamp from the DB.
 fn prune_subtree_recursive(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     cutoff_ms: i64,
     _min_size: u64,
     _db: &Db,
     verbose: bool,
     parent_path: &str,
-) -> Result<git2::Oid> {
-    let mut tb = repo.treebuilder(None)?;
+) -> Result<gix::ObjectId> {
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    let mut editor = repo.empty_tree().edit()?;
 
-    for entry in tree.iter() {
-        let name = entry.name().unwrap_or("").to_string();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
 
-        match entry.kind() {
-            Some(git2::ObjectType::Tree) => {
-                if name == "__list" {
-                    // Prune individual list entries by timestamp in their name
-                    let list_tree = repo.find_tree(entry.id())?;
-                    let before_count = list_tree.len();
-                    let pruned_oid = prune_list_tree(repo, &list_tree, cutoff_ms)?;
-                    let pruned_tree = repo.find_tree(pruned_oid)?;
-                    if verbose && pruned_tree.len() < before_count {
-                        eprintln!(
-                            "[verbose] prune: {}/__list/ dropped {} of {} entries",
-                            parent_path,
-                            before_count - pruned_tree.len(),
-                            before_count
-                        );
-                    }
-                    if !pruned_tree.is_empty() {
-                        tb.insert(&name, pruned_oid, entry.filemode())?;
-                    }
-                } else if name == "__tombstones" {
-                    // Prune old tombstones
-                    let tomb_tree = repo.find_tree(entry.id())?;
-                    let before_count = tomb_tree.len();
-                    let pruned_oid = prune_tombstone_tree(repo, &tomb_tree, cutoff_ms)?;
-                    let pruned_tree = repo.find_tree(pruned_oid)?;
-                    if verbose && pruned_tree.len() < before_count {
-                        eprintln!(
-                            "[verbose] prune: {}/__tombstones/ dropped {} of {} entries",
-                            parent_path,
-                            before_count - pruned_tree.len(),
-                            before_count
-                        );
-                    }
-                    if !pruned_tree.is_empty() {
-                        tb.insert(&name, pruned_oid, entry.filemode())?;
-                    }
-                } else {
-                    // Recurse into key segment directories
-                    let subtree = repo.find_tree(entry.id())?;
-                    let pruned_oid = prune_subtree_recursive(
-                        repo,
-                        &subtree,
-                        cutoff_ms,
-                        _min_size,
-                        _db,
-                        verbose,
-                        &format!("{}/{}", parent_path, name),
-                    )?;
-                    let pruned_tree = repo.find_tree(pruned_oid)?;
-                    if !pruned_tree.is_empty() {
-                        tb.insert(&name, pruned_oid, entry.filemode())?;
-                    }
+        if entry.mode().is_tree() {
+            if name == "__list" {
+                let list_tree_oid = entry.object_id();
+                let list_tree = list_tree_oid.attach(repo).object()?.into_tree();
+                let before_count = list_tree.iter().count();
+                let pruned_oid = prune_list_tree(repo, list_tree_oid, cutoff_ms)?;
+                let pruned_tree = pruned_oid.attach(repo).object()?.into_tree();
+                if verbose && pruned_tree.iter().count() < before_count {
+                    eprintln!(
+                        "[verbose] prune: {}/__list/ dropped {} of {} entries",
+                        parent_path,
+                        before_count - pruned_tree.iter().count(),
+                        before_count
+                    );
+                }
+                if pruned_tree.iter().count() > 0 {
+                    editor.upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)?;
+                }
+            } else if name == "__tombstones" {
+                let tomb_tree_oid = entry.object_id();
+                let tomb_tree = tomb_tree_oid.attach(repo).object()?.into_tree();
+                let before_count = tomb_tree.iter().count();
+                let pruned_oid = prune_tombstone_tree(repo, tomb_tree_oid, cutoff_ms)?;
+                let pruned_tree = pruned_oid.attach(repo).object()?.into_tree();
+                if verbose && pruned_tree.iter().count() < before_count {
+                    eprintln!(
+                        "[verbose] prune: {}/__tombstones/ dropped {} of {} entries",
+                        parent_path,
+                        before_count - pruned_tree.iter().count(),
+                        before_count
+                    );
+                }
+                if pruned_tree.iter().count() > 0 {
+                    editor.upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)?;
+                }
+            } else {
+                let subtree_oid = entry.object_id();
+                let pruned_oid = prune_subtree_recursive(
+                    repo,
+                    subtree_oid,
+                    cutoff_ms,
+                    _min_size,
+                    _db,
+                    verbose,
+                    &format!("{}/{}", parent_path, name),
+                )?;
+                let pruned_tree = pruned_oid.attach(repo).object()?.into_tree();
+                if pruned_tree.iter().count() > 0 {
+                    editor.upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)?;
                 }
             }
-            Some(git2::ObjectType::Blob) => {
-                // Keep all blobs — __value and __set members are kept if their parent
-                // key dir survives the prune. The key-level timestamp filtering happens
-                // at the DB level during the full rebuild that prune_tree orchestrates.
-                tb.insert(&name, entry.id(), entry.filemode())?;
-            }
-            _ => {
-                tb.insert(&name, entry.id(), entry.filemode())?;
-            }
+        } else {
+            editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
         }
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
-/// Prune list entries by the timestamp encoded in their file name.
 fn prune_list_tree(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     cutoff_ms: i64,
-) -> Result<git2::Oid> {
-    let mut tb = repo.treebuilder(None)?;
+) -> Result<gix::ObjectId> {
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    let mut editor = repo.empty_tree().edit()?;
 
-    for entry in tree.iter() {
-        let name = entry.name().unwrap_or("");
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
         // Entry names are formatted as "{timestamp_ms}-{hash5}"
         if let Some((ts_str, _)) = name.split_once('-') {
             if let Ok(ts) = ts_str.parse::<i64>() {
@@ -1115,84 +1140,75 @@ fn prune_list_tree(
                 }
             }
         }
-        tb.insert(name, entry.id(), entry.filemode())?;
+        editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
-/// Prune tombstone entries by the timestamp in the __deleted blob.
 fn prune_tombstone_tree(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     cutoff_ms: i64,
-) -> Result<git2::Oid> {
-    let mut tb = repo.treebuilder(None)?;
+) -> Result<gix::ObjectId> {
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    let mut editor = repo.empty_tree().edit()?;
 
-    for entry in tree.iter() {
-        let name = entry.name().unwrap_or("").to_string();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
 
-        match entry.kind() {
-            Some(git2::ObjectType::Tree) => {
-                // Tombstone key directory — recurse to find __deleted blob
-                let subtree = repo.find_tree(entry.id())?;
-                let pruned_oid = prune_tombstone_tree(repo, &subtree, cutoff_ms)?;
-                let pruned_tree = repo.find_tree(pruned_oid)?;
-                if !pruned_tree.is_empty() {
-                    tb.insert(&name, pruned_oid, entry.filemode())?;
-                }
+        if entry.mode().is_tree() {
+            let subtree_oid = entry.object_id();
+            let pruned_oid = prune_tombstone_tree(repo, subtree_oid, cutoff_ms)?;
+            let pruned_tree = pruned_oid.attach(repo).object()?.into_tree();
+            if pruned_tree.iter().count() > 0 {
+                editor.upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)?;
             }
-            Some(git2::ObjectType::Blob) if name == "__deleted" => {
-                // Parse the tombstone blob to check timestamp
-                let blob = repo.find_blob(entry.id())?;
-                if let Ok(content) = std::str::from_utf8(blob.content()) {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
-                        if let Some(ts) = parsed.get("timestamp").and_then(|v| v.as_i64()) {
-                            if ts < cutoff_ms {
-                                continue; // Drop old tombstone
-                            }
+        } else if entry.mode().is_blob() && name == "__deleted" {
+            let blob = entry.object_id().attach(repo).object()?.into_blob();
+            if let Ok(content) = std::str::from_utf8(&blob.data) {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
+                    if let Some(ts) = parsed.get("timestamp").and_then(|v| v.as_i64()) {
+                        if ts < cutoff_ms {
+                            continue; // Drop old tombstone
                         }
                     }
                 }
-                tb.insert(&name, entry.id(), entry.filemode())?;
             }
-            _ => {
-                tb.insert(&name, entry.id(), entry.filemode())?;
-            }
+            editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
+        } else {
+            editor.upsert(&name, entry.mode().kind(), entry.object_id())?;
         }
     }
 
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
 /// Count keys in original and pruned trees to produce stats.
 pub fn count_prune_stats(
-    repo: &git2::Repository,
-    original_oid: git2::Oid,
-    pruned_oid: git2::Oid,
+    repo: &gix::Repository,
+    original_oid: gix::ObjectId,
+    pruned_oid: gix::ObjectId,
 ) -> Result<(u64, u64)> {
-    let original_tree = repo.find_tree(original_oid)?;
-    let pruned_tree = repo.find_tree(pruned_oid)?;
-
     let mut original_count = 0u64;
-    count_all_blobs(repo, &original_tree, &mut original_count)?;
+    count_all_blobs(repo, original_oid, &mut original_count)?;
 
     let mut pruned_count = 0u64;
-    count_all_blobs(repo, &pruned_tree, &mut pruned_count)?;
+    count_all_blobs(repo, pruned_oid, &mut pruned_count)?;
 
     let dropped = original_count.saturating_sub(pruned_count);
     Ok((dropped, pruned_count))
 }
 
-fn count_all_blobs(repo: &git2::Repository, tree: &git2::Tree, count: &mut u64) -> Result<()> {
-    for entry in tree.iter() {
-        match entry.kind() {
-            Some(git2::ObjectType::Blob) => *count += 1,
-            Some(git2::ObjectType::Tree) => {
-                let subtree = repo.find_tree(entry.id())?;
-                count_all_blobs(repo, &subtree, count)?;
-            }
-            _ => {}
+fn count_all_blobs(repo: &gix::Repository, tree_oid: gix::ObjectId, count: &mut u64) -> Result<()> {
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        if entry.mode().is_blob() {
+            *count += 1;
+        } else if entry.mode().is_tree() {
+            count_all_blobs(repo, entry.object_id(), count)?;
         }
     }
     Ok(())

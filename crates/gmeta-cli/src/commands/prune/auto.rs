@@ -1,4 +1,6 @@
 use anyhow::{bail, Context, Result};
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 use time::{Duration, OffsetDateTime};
 
 use gmeta_core::db::Db;
@@ -63,14 +65,12 @@ fn read_config_string(db: &Db, key: &str) -> Result<Option<String>> {
 
 /// Check whether any prune trigger is exceeded for the given tree.
 pub fn should_prune(
-    repo: &git2::Repository,
-    tree_oid: git2::Oid,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     rules: &PruneRules,
 ) -> Result<bool> {
-    let tree = repo.find_tree(tree_oid)?;
-
     if let Some(max_keys) = rules.max_keys {
-        let key_count = count_keys(repo, &tree)?;
+        let key_count = count_keys(repo, tree_oid)?;
         eprintln!(
             "Auto-prune check: {} keys (threshold: {})",
             key_count, max_keys
@@ -81,7 +81,7 @@ pub fn should_prune(
     }
 
     if let Some(max_size) = rules.max_size {
-        let total_size = compute_tree_size(repo, &tree)?;
+        let total_size = compute_tree_size(repo, tree_oid)?;
         eprintln!(
             "Auto-prune check: {} bytes (threshold: {})",
             total_size, max_size
@@ -96,56 +96,58 @@ pub fn should_prune(
 
 /// Count total metadata keys in a serialized tree.
 /// A key is identified by the presence of a terminal blob (__value) or directory (__list, __set).
-fn count_keys(repo: &git2::Repository, tree: &git2::Tree) -> Result<u64> {
+fn count_keys(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<u64> {
     let mut count = 0u64;
-    count_keys_recursive(repo, tree, &mut count)?;
+    count_keys_recursive(repo, tree_oid, &mut count)?;
     Ok(count)
 }
 
-fn count_keys_recursive(repo: &git2::Repository, tree: &git2::Tree, count: &mut u64) -> Result<()> {
-    for entry in tree.iter() {
-        let name = entry.name().unwrap_or("");
+fn count_keys_recursive(
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
+    count: &mut u64,
+) -> Result<()> {
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        let name = entry.filename().to_str_lossy().to_string();
         if name == "__value" || name == "__list" || name == "__set" {
             *count += 1;
         } else if name == "__tombstones" {
             // Don't count tombstones as keys
             continue;
-        } else if entry.kind() == Some(git2::ObjectType::Tree) {
-            let subtree = repo.find_tree(entry.id())?;
-            count_keys_recursive(repo, &subtree, count)?;
+        } else if entry.mode().is_tree() {
+            count_keys_recursive(repo, entry.object_id(), count)?;
         }
     }
     Ok(())
 }
 
 /// Compute total blob size in a serialized tree.
-fn compute_tree_size(repo: &git2::Repository, tree: &git2::Tree) -> Result<u64> {
+fn compute_tree_size(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<u64> {
     let mut total = 0u64;
-    compute_tree_size_recursive(repo, tree, &mut total)?;
+    compute_tree_size_recursive(repo, tree_oid, &mut total)?;
     Ok(total)
 }
 
 /// Public helper for computing the size of a subtree (used by serialize for min-size checks).
-pub fn compute_tree_size_for(repo: &git2::Repository, tree: &git2::Tree) -> Result<u64> {
-    compute_tree_size(repo, tree)
+pub fn compute_tree_size_for(repo: &gix::Repository, tree_oid: gix::ObjectId) -> Result<u64> {
+    compute_tree_size(repo, tree_oid)
 }
 
 fn compute_tree_size_recursive(
-    repo: &git2::Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
     total: &mut u64,
 ) -> Result<()> {
-    for entry in tree.iter() {
-        match entry.kind() {
-            Some(git2::ObjectType::Blob) => {
-                let blob = repo.find_blob(entry.id())?;
-                *total += blob.size() as u64;
-            }
-            Some(git2::ObjectType::Tree) => {
-                let subtree = repo.find_tree(entry.id())?;
-                compute_tree_size_recursive(repo, &subtree, total)?;
-            }
-            _ => {}
+    let tree = tree_oid.attach(repo).object()?.into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result?;
+        if entry.mode().is_blob() {
+            let blob = entry.object_id().attach(repo).object()?.into_blob();
+            *total += blob.data.len() as u64;
+        } else if entry.mode().is_tree() {
+            compute_tree_size_recursive(repo, entry.object_id(), total)?;
         }
     }
     Ok(())

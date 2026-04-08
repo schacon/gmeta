@@ -1,4 +1,3 @@
-use git2::Repository;
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Error, Result};
@@ -35,7 +34,7 @@ impl Db {
     /// Push a value onto a list, storing large items as git blob refs.
     pub fn list_push_with_repo(
         &self,
-        repo: Option<&Repository>,
+        repo: Option<&gix::Repository>,
         target_type: &TargetType,
         target_value: &str,
         key: &str,

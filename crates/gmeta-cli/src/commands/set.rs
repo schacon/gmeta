@@ -36,7 +36,7 @@ pub fn run(
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(timestamp)?;
+    let ctx = CommandContext::open(timestamp)?;
     ctx.resolve_target(&mut target)?;
 
     let value_type = ValueType::from_str(value_type_str)?;
@@ -56,8 +56,8 @@ pub fn run(
         from_file && matches!(value_type, ValueType::String) && raw_value.len() > GIT_REF_THRESHOLD;
 
     if use_git_ref {
-        let git2_repo = ctx.git2_repo()?;
-        let blob_oid = git2_repo.blob(raw_value.as_bytes())?;
+        let repo = ctx.repo();
+        let blob_oid: gix::ObjectId = repo.write_blob(raw_value.as_bytes())?.into();
         ctx.db.set_with_git_ref(
             None,
             &target.target_type,
@@ -108,7 +108,7 @@ pub fn run_add(
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(timestamp)?;
+    let ctx = CommandContext::open(timestamp)?;
     ctx.resolve_target(&mut target)?;
 
     ctx.db.set_add(
@@ -133,7 +133,7 @@ pub fn run_rm(
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(timestamp)?;
+    let ctx = CommandContext::open(timestamp)?;
     ctx.resolve_target(&mut target)?;
 
     ctx.db.set_rm(

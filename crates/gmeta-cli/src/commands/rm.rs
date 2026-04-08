@@ -7,7 +7,7 @@ pub fn run(target_str: &str, key: &str) -> Result<()> {
     let mut target = Target::parse(target_str)?;
     validate_key(key)?;
 
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
     ctx.resolve_target(&mut target)?;
 
     let removed = ctx.db.rm(

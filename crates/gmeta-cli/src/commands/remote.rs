@@ -6,7 +6,7 @@ use gmeta_core::git_utils;
 
 /// Expand shorthand "owner/repo" to a full GitHub SSH URL.
 fn expand_url(url: &str) -> String {
-    // Already a full URL or path — leave it alone
+    // Already a full URL or path -- leave it alone
     if url.contains(':') || url.starts_with('/') || url.starts_with('.') {
         return url.to_string();
     }
@@ -21,8 +21,8 @@ fn expand_url(url: &str) -> String {
 /// Scan ls-remote output for meta refs under a given namespace.
 /// Returns (has_match, other_namespaces) where other_namespaces are
 /// namespace prefixes that contain a "main" ref (e.g. "altmeta" from "refs/altmeta/main").
-fn check_remote_refs(repo: &git2::Repository, url: &str, ns: &str) -> Result<(bool, Vec<String>)> {
-    let output = git_utils::git2_run_git(repo, &["ls-remote", url])?;
+fn check_remote_refs(repo: &gix::Repository, url: &str, ns: &str) -> Result<(bool, Vec<String>)> {
+    let output = git_utils::run_git(repo, &["ls-remote", url])?;
 
     let expected_ref = format!("refs/{}/main", ns);
     let mut has_match = false;
@@ -56,13 +56,15 @@ fn check_remote_refs(repo: &git2::Repository, url: &str, ns: &str) -> Result<(bo
 }
 
 pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let ns = namespace_override.unwrap_or(&ctx.namespace).to_string();
     let url = expand_url(url);
 
     // Check if this remote name already exists
-    if repo.remotes()?.iter().flatten().any(|n| n == name) {
+    let config = repo.config_snapshot();
+    let remote_url_key = format!("remote.{}.url", name);
+    if config.string(&remote_url_key).is_some() {
         bail!("remote '{}' already exists", name);
     }
 
@@ -108,22 +110,36 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
         }
     }
 
-    // Write git config entries for the meta remote
-    let mut config = repo.config()?;
-    let prefix = format!("remote.{}", name);
+    // Write git config entries for the meta remote via subprocess
+    // (gix's config mutation API is limited; using git config is the reliable path)
+    let git_dir = repo.path();
+    let git_dir_str = git_dir.to_string_lossy();
+    let run = |args: &[&str]| -> Result<()> {
+        let mut full_args = vec!["--git-dir", &git_dir_str, "config"];
+        full_args.extend_from_slice(args);
+        let output = std::process::Command::new("git")
+            .args(&full_args)
+            .output()?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("git config failed: {}", stderr.trim());
+        }
+        Ok(())
+    };
 
-    config.set_str(&format!("{}.url", prefix), &url)?;
-    config.set_str(
+    let prefix = format!("remote.{}", name);
+    run(&[&format!("{}.url", prefix), &url])?;
+    run(&[
         &format!("{}.fetch", prefix),
         &format!("+refs/{ns}/main:refs/{ns}/remotes/main"),
-    )?;
-    config.set_bool(&format!("{}.meta", prefix), true)?;
-    config.set_bool(&format!("{}.promisor", prefix), true)?;
-    config.set_str(&format!("{}.partialclonefilter", prefix), "blob:none")?;
+    ])?;
+    run(&[&format!("{}.meta", prefix), "true"])?;
+    run(&[&format!("{}.promisor", prefix), "true"])?;
+    run(&[&format!("{}.partialclonefilter", prefix), "blob:none"])?;
 
     // If a non-default namespace was specified, store it so other commands can find it
     if namespace_override.is_some() {
-        config.set_str(&format!("{}.metanamespace", prefix), &ns)?;
+        run(&[&format!("{}.metanamespace", prefix), &ns])?;
     }
 
     println!("Added meta remote '{}' -> {}", name, url);
@@ -131,7 +147,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
     // Initial blobless fetch
     let fetch_refspec = format!("refs/{ns}/main:refs/{ns}/remotes/main");
     eprint!("Fetching metadata (blobless)...");
-    match git_utils::git2_run_git(repo, &["fetch", "--filter=blob:none", name, &fetch_refspec]) {
+    match git_utils::run_git(repo, &["fetch", "--filter=blob:none", name, &fetch_refspec]) {
         Ok(_) => {
             eprintln!(" done.");
 
@@ -140,11 +156,11 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             let tracking_ref_name = format!("refs/{}", remote_ref);
             match repo.find_reference(&tracking_ref_name) {
                 Ok(r) => {
-                    let tip = r.peel_to_commit()?;
+                    let tip_oid = r.into_fully_peeled_id()?.detach();
                     eprintln!(
                         "  tracking ref: {} -> {}",
                         tracking_ref_name,
-                        &tip.id().to_string()[..12]
+                        &tip_oid.to_string()[..12]
                     );
                 }
                 Err(e) => {
@@ -157,7 +173,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                 }
             }
 
-            // Hydrate tip tree blobs so libgit2 can read the metadata
+            // Hydrate tip tree blobs so gix can read the metadata
             eprint!("Hydrating tip blobs...");
             let blob_count = git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
             eprintln!(" {} blobs fetched.", blob_count);
@@ -174,9 +190,14 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
             // Index historical keys as promisor entries
             let tracking_ref_name = format!("refs/{}/remotes/main", ns);
             if let Ok(r) = repo.find_reference(&tracking_ref_name) {
-                if let Ok(tip) = r.peel_to_commit() {
-                    let count =
-                        pull::insert_promisor_entries_pub(repo, &ctx.db, tip.id(), None, false)?;
+                if let Ok(tip_id) = r.into_fully_peeled_id() {
+                    let count = pull::insert_promisor_entries_pub(
+                        repo,
+                        &ctx.db,
+                        tip_id.detach(),
+                        None,
+                        false,
+                    )?;
                     if count > 0 {
                         eprintln!("Indexed {} keys from history (available on demand).", count);
                     }
@@ -193,51 +214,69 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
 }
 
 pub fn run_remove(name: &str) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let ns = &ctx.namespace;
 
     // Verify this is a meta remote
-    let config = repo.config()?;
+    let config = repo.config_snapshot();
     let meta_key = format!("remote.{}.meta", name);
-    if !matches!(config.get_bool(&meta_key), Ok(true)) {
+    let is_meta = config.boolean(&meta_key).unwrap_or(false);
+    if !is_meta {
         bail!("'{}' is not a metadata remote (no meta = true)", name);
     }
 
-    // Remove the git config section for this remote
-    let mut config = repo.config()?;
-    config.remove_multivar(&format!("remote.{}.url", name), ".*")?;
-    config.remove_multivar(&format!("remote.{}.fetch", name), ".*")?;
-    let _ = config.remove_multivar(&format!("remote.{}.meta", name), ".*");
-    let _ = config.remove_multivar(&format!("remote.{}.promisor", name), ".*");
-    let _ = config.remove_multivar(&format!("remote.{}.partialclonefilter", name), ".*");
-    let _ = config.remove_multivar(&format!("remote.{}.metanamespace", name), ".*");
+    // Remove the git config section for this remote via subprocess
+    let git_dir = repo.path();
+    let git_dir_str = git_dir.to_string_lossy();
+    let unset = |key: &str| {
+        let _ = std::process::Command::new("git")
+            .args(["--git-dir", &git_dir_str, "config", "--unset-all", key])
+            .output();
+    };
+
+    unset(&format!("remote.{}.url", name));
+    unset(&format!("remote.{}.fetch", name));
+    unset(&format!("remote.{}.meta", name));
+    unset(&format!("remote.{}.promisor", name));
+    unset(&format!("remote.{}.partialclonefilter", name));
+    unset(&format!("remote.{}.metanamespace", name));
 
     // Delete refs under refs/{ns}/remotes/
     let ref_prefix = format!("refs/{}/remotes/", ns);
-    let references: Vec<String> = repo
-        .references_glob(&format!("{}*", ref_prefix))?
-        .filter_map(|r| r.ok())
-        .filter_map(|r| r.name().map(String::from))
-        .collect();
+    let mut refs_to_delete = Vec::new();
 
-    for refname in &references {
-        let mut reference = repo.find_reference(refname)?;
-        reference.delete()?;
+    let platform = repo.references()?;
+    for reference in platform.all()? {
+        let reference = reference.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let name_str = reference.name().as_bstr().to_string();
+        if name_str.starts_with(&ref_prefix) {
+            refs_to_delete.push(name_str);
+        }
+    }
+
+    for refname in &refs_to_delete {
+        let reference = repo.find_reference(refname)?;
+        reference.delete().map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("Deleted ref {}", refname);
     }
 
     // Also delete refs under refs/{ns}/local/
     let local_prefix = format!("refs/{}/local/", ns);
-    let local_refs: Vec<String> = repo
-        .references_glob(&format!("{}*", local_prefix))?
-        .filter_map(|r| r.ok())
-        .filter_map(|r| r.name().map(String::from))
-        .collect();
+    let mut local_refs_to_delete = Vec::new();
 
-    for refname in &local_refs {
-        let mut reference = repo.find_reference(refname)?;
-        reference.delete()?;
+    let platform = repo.references()?;
+    for reference in platform.all()? {
+        let reference = reference.map_err(|e| anyhow::anyhow!("{e}"))?;
+        let name_str = reference.name().as_bstr().to_string();
+        if name_str.starts_with(&local_prefix) {
+            local_refs_to_delete.push(name_str);
+        }
+    }
+
+    for refname in &local_refs_to_delete {
+        let reference = repo.find_reference(refname)?;
+        reference.delete().map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("Deleted ref {}", refname);
     }
 
@@ -246,8 +285,8 @@ pub fn run_remove(name: &str) -> Result<()> {
 }
 
 pub fn run_list() -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
     let remotes = git_utils::list_meta_remotes(repo)?;
 
     if remotes.is_empty() {

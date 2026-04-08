@@ -6,6 +6,8 @@
 //! metadata entries (string, list, set) older than the cutoff.
 
 use anyhow::Result;
+use gix::prelude::ObjectIdExt;
+use gix::refs::transaction::PreviousValue;
 
 use super::auto::parse_since_to_cutoff_ms;
 use crate::commands::serialize::{build_filtered_tree, count_prune_stats};
@@ -15,10 +17,10 @@ use gmeta_core::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
 use gmeta_core::types::TargetType;
 
 pub fn run(dry_run: bool) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
 
-    // Read prune rules — need at least meta:prune:since
+    // Read prune rules -- need at least meta:prune:since
     let since = match ctx.db.get(&TargetType::Project, "", "meta:prune:since")? {
         Some((value, _, _)) => {
             let s: String = serde_json::from_str(&value)?;
@@ -50,23 +52,28 @@ pub fn run(dry_run: bool) -> Result<()> {
 
     // Find the current serialized tree
     let ref_name = ctx.local_ref();
-    let Some(current_commit) = repo
+    let current_commit_oid = match repo
         .find_reference(&ref_name)
         .ok()
-        .and_then(|r| r.peel_to_commit().ok())
-    else {
-        eprintln!(
-            "No serialized metadata found at {}. Run `gmeta serialize` first.",
-            ref_name
-        );
-        return Ok(());
+        .and_then(|r| r.into_fully_peeled_id().ok())
+        .map(|id| id.detach())
+    {
+        Some(oid) => oid,
+        None => {
+            eprintln!(
+                "No serialized metadata found at {}. Run `gmeta serialize` first.",
+                ref_name
+            );
+            return Ok(());
+        }
     };
 
-    let tree_oid = current_commit.tree()?.id();
+    let current_commit_obj = current_commit_oid.attach(repo).object()?.into_commit();
+    let tree_oid = current_commit_obj.tree_id()?.detach();
     let (_, current_keys) = count_prune_stats(repo, tree_oid, tree_oid)?;
 
     eprintln!(
-        "Pruning {} (cutoff: {} — entries older than {})",
+        "Pruning {} (cutoff: {} -- entries older than {})",
         ref_name, cutoff_date, since
     );
     eprintln!("  current tree: {} keys", current_keys);
@@ -129,7 +136,7 @@ pub fn run(dry_run: bool) -> Result<()> {
 
     let total_pruned = pruned_meta + pruned_tombs;
     if total_pruned == 0 {
-        println!("Nothing to prune — all entries are within the retention window.");
+        println!("Nothing to prune -- all entries are within the retention window.");
         return Ok(());
     }
 
@@ -163,27 +170,39 @@ pub fn run(dry_run: bool) -> Result<()> {
     }
 
     // Commit the pruned tree
-    let name = git_utils::git2_get_name(repo)?;
-    let email = git_utils::git2_get_email(repo)?;
-    let sig = git2::Signature::now(&name, &email)?;
-    let pruned_tree = repo.find_tree(pruned_tree_oid)?;
+    let name = git_utils::get_name(repo)?;
+    let email = git_utils::get_email(repo)?;
+    let sig = gix::actor::Signature {
+        name: name.into(),
+        email: email.into(),
+        time: gix::date::Time::now_local_or_utc(),
+    };
 
     let message = format!(
         "gmeta: prune --since={}\n\npruned: true\nsince: {}\nkeys-dropped: {}\nkeys-retained: {}",
         since, since, keys_dropped, keys_retained
     );
 
-    let commit_oid = repo.commit(
-        Some(&ref_name),
-        &sig,
-        &sig,
-        &message,
-        &pruned_tree,
-        &[&current_commit],
+    let commit = gix::objs::Commit {
+        message: message.into(),
+        tree: pruned_tree_oid,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: vec![current_commit_oid].into(),
+        extra_headers: Default::default(),
+    };
+
+    let commit_oid = repo.write_object(&commit)?.detach();
+    repo.reference(
+        ref_name.as_str(),
+        commit_oid,
+        PreviousValue::Any,
+        "gmeta: prune",
     )?;
 
     println!(
-        "pruned to {} ({}) — dropped {} keys, retained {}",
+        "pruned to {} ({}) -- dropped {} keys, retained {}",
         ref_name,
         &commit_oid.to_string()[..8],
         keys_dropped,

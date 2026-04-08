@@ -5,7 +5,7 @@ use anyhow::Result;
 use crate::context::CommandContext;
 
 pub fn run() -> Result<()> {
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
 
     let rows = ctx.db.stats_by_target_type_and_key()?;
 

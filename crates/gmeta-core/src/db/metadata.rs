@@ -1,4 +1,3 @@
-use git2::Repository;
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::{Error, Result};
@@ -40,7 +39,7 @@ impl Db {
     /// For list values, repo is used to store large items as git blob refs.
     pub fn set_with_git_ref(
         &self,
-        repo: Option<&Repository>,
+        repo: Option<&gix::Repository>,
         target_type: &TargetType,
         target_value: &str,
         key: &str,

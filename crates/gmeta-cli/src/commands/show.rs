@@ -1,9 +1,10 @@
 //! `gmeta show <commit-sha>` — display commit details with any associated metadata.
 
+use gix::bstr::ByteSlice;
+use gix::prelude::ObjectIdExt;
 use std::process::Command;
 
 use anyhow::{Context, Result};
-use git2::Repository;
 use time::OffsetDateTime;
 
 use crate::context::CommandContext;
@@ -18,17 +19,15 @@ const CYAN: &str = "\x1b[36m";
 const BLUE: &str = "\x1b[34m";
 
 pub fn run(commit_ref: &str) -> Result<()> {
-    let ctx = CommandContext::open_git2(None)?;
-    let repo = ctx.git2_repo()?;
+    let ctx = CommandContext::open(None)?;
+    let repo = ctx.repo();
 
     // Resolve the ref to a full commit SHA
-    let obj = repo
-        .revparse_single(commit_ref)
+    let spec = repo
+        .rev_parse_single(commit_ref)
         .with_context(|| format!("could not resolve: {}", commit_ref))?;
-    let commit = obj
-        .peel_to_commit()
-        .with_context(|| format!("'{}' does not point to a commit", commit_ref))?;
-    let sha = commit.id().to_string();
+    let commit_obj = spec.object()?.peel_tags_to_end()?.into_commit();
+    let sha = commit_obj.id().to_string();
 
     println!("{YELLOW}Commit:{RESET}     {CYAN}{sha}{RESET}");
 
@@ -39,17 +38,34 @@ pub fn run(commit_ref: &str) -> Result<()> {
     }
 
     // Author
-    let author = commit.author();
-    let author_name = author.name().unwrap_or("unknown");
-    let author_email = author.email().unwrap_or("");
+    let decoded = commit_obj.decode()?;
+    let author_name = decoded
+        .author()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .name
+        .to_str_lossy();
+    let author_email = decoded
+        .author()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .email
+        .to_str_lossy();
     println!("{YELLOW}Author:{RESET}     {GREEN}{author_name} <{author_email}>{RESET}");
 
     // Date with relative time
-    let epoch = commit.time().seconds();
-    let offset_minutes = commit.time().offset_minutes();
-    let offset_secs = (offset_minutes as i64) * 60;
+    let epoch = decoded
+        .author()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .time()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .seconds;
+    let offset_secs = decoded
+        .author()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .time()
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .offset;
     let utc_offset =
-        time::UtcOffset::from_whole_seconds(offset_secs as i32).unwrap_or(time::UtcOffset::UTC);
+        time::UtcOffset::from_whole_seconds(offset_secs).unwrap_or(time::UtcOffset::UTC);
     let local_time = OffsetDateTime::from_unix_timestamp(epoch)
         .unwrap_or(OffsetDateTime::UNIX_EPOCH)
         .to_offset(utc_offset);
@@ -65,43 +81,40 @@ pub fn run(commit_ref: &str) -> Result<()> {
     println!("{YELLOW}Date:{RESET}       {GREEN}{date_fmt}{RESET} {DIM}({relative}){RESET}");
 
     println!();
-    if let Some(message) = commit.message() {
-        for line in message.trim_end().lines() {
-            println!("{line}");
-        }
+    let message = decoded.message.to_str_lossy();
+    for line in message.trim_end().lines() {
+        println!("{line}");
     }
 
-    let parent = commit.parent(0).ok();
-    let parent_tree = parent.as_ref().and_then(|p| p.tree().ok());
-    let commit_tree = commit.tree()?;
+    // Show diff stats using git subprocess (gix diff API is complex, this is simpler)
+    let git_dir = repo.path();
+    let diff_output = Command::new("git")
+        .args(["--git-dir", &git_dir.to_string_lossy()])
+        .args(["diff-tree", "--no-commit-id", "-r", "--name-status", &sha])
+        .output()
+        .ok();
 
-    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&commit_tree), None)?;
-
-    let deltas: Vec<_> = diff.deltas().collect();
-    if !deltas.is_empty() {
-        println!();
-        println!("{BOLD}Files changed:{RESET}");
-        for delta in &deltas {
-            let status_char = match delta.status() {
-                git2::Delta::Added => 'A',
-                git2::Delta::Deleted => 'D',
-                git2::Delta::Modified => 'M',
-                git2::Delta::Renamed => 'R',
-                git2::Delta::Copied => 'C',
-                _ => '?',
-            };
-            let path = delta
-                .new_file()
-                .path()
-                .or_else(|| delta.old_file().path())
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| "???".to_string());
-            let status_color = match delta.status() {
-                git2::Delta::Added => GREEN,
-                git2::Delta::Deleted => "\x1b[31m", // red
-                _ => YELLOW,
-            };
-            println!("  {status_color}{status_char}{RESET} {path}");
+    if let Some(output) = diff_output {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let lines: Vec<&str> = stdout.lines().filter(|l| !l.is_empty()).collect();
+            if !lines.is_empty() {
+                println!();
+                println!("{BOLD}Files changed:{RESET}");
+                for line in &lines {
+                    let parts: Vec<&str> = line.splitn(2, '\t').collect();
+                    if parts.len() == 2 {
+                        let status_char = parts[0].chars().next().unwrap_or('?');
+                        let path = parts[1];
+                        let status_color = match status_char {
+                            'A' => GREEN,
+                            'D' => "\x1b[31m", // red
+                            _ => YELLOW,
+                        };
+                        println!("  {status_color}{status_char}{RESET} {path}");
+                    }
+                }
+            }
         }
     }
 
@@ -167,28 +180,29 @@ fn format_meta_value(value: &str, value_type: &ValueType) -> String {
 
 /// Get a change-id for a commit. First tries `but show --json`, then falls back
 /// to looking for a Change-Id trailer in the commit message.
-fn get_change_id(repo: &Repository, sha: &str) -> Option<String> {
+fn get_change_id(repo: &gix::Repository, sha: &str) -> Option<String> {
     // Try GitButler CLI first
-    if let Some(workdir) = repo.workdir() {
-        let output = Command::new("but")
-            .args(["show", sha, "--json"])
-            .current_dir(workdir)
-            .output()
-            .ok()?;
+    let workdir = repo.workdir()?;
+    let output = Command::new("but")
+        .args(["show", sha, "--json"])
+        .current_dir(workdir)
+        .output()
+        .ok()?;
 
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
-                if let Some(cid) = json["changeId"].as_str() {
-                    return Some(cid.to_string());
-                }
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(cid) = json["changeId"].as_str() {
+                return Some(cid.to_string());
             }
         }
     }
 
     // Fall back: look for a Change-Id trailer in the commit message
-    let commit = repo.find_commit(git2::Oid::from_str(sha).ok()?).ok()?;
-    let message = commit.message()?;
+    let oid = gix::ObjectId::from_hex(sha.as_bytes()).ok()?;
+    let commit_obj = oid.attach(repo).object().ok()?.into_commit();
+    let decoded = commit_obj.decode().ok()?;
+    let message = decoded.message.to_str_lossy();
     for line in message.lines().rev() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("Change-Id:") {

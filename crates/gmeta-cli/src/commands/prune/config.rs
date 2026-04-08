@@ -6,7 +6,7 @@ use crate::context::CommandContext;
 use gmeta_core::types::{TargetType, ValueType};
 
 pub fn run() -> Result<()> {
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
 
     let existing = read_prune_rules(&ctx.db)?;
 

@@ -10,7 +10,7 @@
 //! Usage:  gmeta fanout-bench [--objects N]   (default N = 1_000_000)
 
 use anyhow::{Context, Result};
-use git2::{Oid, Repository};
+use gix::prelude::ObjectIdExt;
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
@@ -60,182 +60,106 @@ impl Scheme {
         }
     }
 }
-#[derive(Default)]
-struct Dir {
-    files: BTreeMap<String, Vec<u8>>,
-    dirs: BTreeMap<String, Dir>,
-}
 
-fn insert_path(dir: &mut Dir, parts: &[&str], content: Vec<u8>) {
-    if parts.len() == 1 {
-        dir.files.insert(parts[0].to_string(), content);
-    } else {
-        let child = dir.dirs.entry(parts[0].to_string()).or_default();
-        insert_path(child, &parts[1..], content);
-    }
-}
-
-fn build_dir(repo: &Repository, dir: &Dir) -> Result<Oid> {
-    let mut tb = repo.treebuilder(None)?;
-    for (name, content) in &dir.files {
-        let blob_oid = repo.blob(content)?;
-        tb.insert(name, blob_oid, 0o100644)?;
-    }
-    for (name, child) in &dir.dirs {
-        let child_oid = build_dir(repo, child)?;
-        tb.insert(name, child_oid, 0o040000)?;
-    }
-    Ok(tb.write()?)
-}
-
-/// Full build from scratch — used only for the initial base tree population.
-fn build_tree(repo: &Repository, files: &BTreeMap<String, Vec<u8>>) -> Result<Oid> {
-    let mut root = Dir::default();
-    for (path, content) in files {
-        let parts: Vec<&str> = path.split('/').collect();
-        insert_path(&mut root, &parts, content.clone());
-    }
-    build_dir(repo, &root)
-}
-
-/// Incremental build: start from an existing tree and apply only the changed
-/// paths. For each changed path we walk down the live tree, clone only the
-/// subtrees along the affected spine, and rewrite them bottom-up. Subtrees
-/// that are not touched are reused by OID — no ODB read, no rewrite.
+/// Build a full tree from a flat path-to-content map using the gix tree editor.
 ///
-/// This is what a correct implementation of gmeta's serialize would do (S1 fix).
+/// Each path is split on `/` and upserted into the editor, which handles
+/// creating intermediate tree objects automatically.
+///
+/// # Parameters
+///
+/// - `repo`: the gix repository to write objects into
+/// - `files`: mapping from slash-separated paths to blob content
+///
+/// # Returns
+///
+/// The OID of the root Git tree object.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+fn build_tree(repo: &gix::Repository, files: &BTreeMap<String, Vec<u8>>) -> Result<gix::ObjectId> {
+    let mut editor = repo.empty_tree().edit()?;
+    for (path, content) in files {
+        let blob_id = repo.write_blob(content)?.detach();
+        editor.upsert(path, gix::objs::tree::EntryKind::Blob, blob_id)?;
+    }
+    Ok(editor.write()?.detach())
+}
+
+/// Incremental tree update: start from an existing tree and apply only the
+/// changed paths. The gix tree editor handles loading unchanged subtrees by
+/// OID and only rewriting the spine of paths that changed.
+///
+/// # Parameters
+///
+/// - `repo`: the gix repository to write objects into
+/// - `base_oid`: OID of the base tree to start from
+/// - `new_entries`: list of (path, content) pairs to upsert
+///
+/// # Returns
+///
+/// The OID of the updated root Git tree object.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 fn build_tree_incremental(
-    repo: &Repository,
-    base_oid: Oid,
-    new_entries: &[(&str, Vec<u8>)], // (path, content)
-) -> Result<Oid> {
-    // Group new entries by their top-level path component so we can open each
-    // affected subtree once and batch-apply all changes within it.
-    // Structure: top_component → [ (rest_of_path_parts, content) ]
-    let mut by_top: BTreeMap<&str, Vec<(Vec<&str>, Vec<u8>)>> = BTreeMap::new();
-    // Also track entries that land at the root level (single-component paths).
-    let mut root_files: Vec<(&str, Vec<u8>)> = Vec::new();
+    repo: &gix::Repository,
+    base_oid: gix::ObjectId,
+    new_entries: &[(&str, Vec<u8>)],
+) -> Result<gix::ObjectId> {
+    let base_tree = base_oid.attach(repo).object()?.into_tree();
+    let mut editor = base_tree.edit()?;
 
     for (path, content) in new_entries {
-        let parts: Vec<&str> = path.split('/').collect();
-        if parts.len() == 1 {
-            root_files.push((parts[0], content.clone()));
-        } else {
-            by_top
-                .entry(parts[0])
-                .or_default()
-                .push((parts[1..].to_vec(), content.clone()));
-        }
+        let blob_id = repo.write_blob(content)?.detach();
+        editor.upsert(*path, gix::objs::tree::EntryKind::Blob, blob_id)?;
     }
 
-    // Load the base tree and clone it into a treebuilder so we can mutate it.
-    let base_tree = repo.find_tree(base_oid)?;
-    let mut root_tb = repo.treebuilder(Some(&base_tree))?;
-
-    // Apply root-level file changes directly.
-    for (name, content) in root_files {
-        let blob_oid = repo.blob(content.as_slice())?;
-        root_tb.insert(name, blob_oid, 0o100644)?;
-    }
-
-    // For each touched top-level directory, recurse.
-    for (top, children) in &by_top {
-        // Find the existing subtree OID for this component (if any).
-        let existing_sub_oid: Option<Oid> = base_tree.get_name(top).and_then(|e| {
-            if e.kind() == Some(git2::ObjectType::Tree) {
-                Some(e.id())
-            } else {
-                None
-            }
-        });
-
-        let new_sub_oid = apply_incremental_subtree(repo, existing_sub_oid, children)?;
-        root_tb.insert(top, new_sub_oid, 0o040000)?;
-    }
-
-    Ok(root_tb.write()?)
-}
-
-/// Recursively apply a list of `(remaining_path_parts, content)` changes into
-/// a subtree (identified by `base_oid`, or None for a new subtree).
-fn apply_incremental_subtree(
-    repo: &Repository,
-    base_oid: Option<Oid>,
-    entries: &[(Vec<&str>, Vec<u8>)],
-) -> Result<Oid> {
-    // Group by next component, same as above.
-    let mut by_next: BTreeMap<&str, Vec<(Vec<&str>, Vec<u8>)>> = BTreeMap::new();
-    let mut leaf_files: Vec<(&str, Vec<u8>)> = Vec::new();
-
-    for (parts, content) in entries {
-        if parts.len() == 1 {
-            leaf_files.push((parts[0], content.clone()));
-        } else {
-            by_next
-                .entry(parts[0])
-                .or_default()
-                .push((parts[1..].to_vec(), content.clone()));
-        }
-    }
-
-    let base_tree_opt = base_oid.and_then(|oid| repo.find_tree(oid).ok());
-
-    let mut tb = match &base_tree_opt {
-        Some(t) => repo.treebuilder(Some(t))?,
-        None => repo.treebuilder(None)?,
-    };
-
-    // Apply leaf files.
-    for (name, content) in leaf_files {
-        let blob_oid = repo.blob(content.as_slice())?;
-        tb.insert(name, blob_oid, 0o100644)?;
-    }
-
-    // Recurse into sub-directories.
-    for (next, children) in &by_next {
-        let existing_oid = base_tree_opt
-            .as_ref()
-            .and_then(|t| t.get_name(next))
-            .and_then(|e| {
-                if e.kind() == Some(git2::ObjectType::Tree) {
-                    Some(e.id())
-                } else {
-                    None
-                }
-            });
-
-        let child_oid = apply_incremental_subtree(repo, existing_oid, children)?;
-        tb.insert(next, child_oid, 0o040000)?;
-    }
-
-    Ok(tb.write()?)
+    Ok(editor.write()?.detach())
 }
 
 /// Write a minimal commit object pointing at the given tree, with optional parent.
-fn write_commit(repo: &Repository, tree_oid: Oid, parent_oid: Option<Oid>) -> Result<Oid> {
-    let tree = repo.find_tree(tree_oid)?;
-    let sig = git2::Signature::new("bench", "bench@bench", &git2::Time::new(0, 0))?;
-    let parents: Vec<git2::Commit> = parent_oid
-        .map(|oid| repo.find_commit(oid))
-        .transpose()?
-        .into_iter()
-        .collect();
-    let parent_refs: Vec<&git2::Commit> = parents.iter().collect();
-    Ok(repo.commit(None, &sig, &sig, "bench", &tree, &parent_refs)?)
+///
+/// Uses `gix::objs::Commit` and `repo.write_object()` to create the commit
+/// without updating any refs.
+///
+/// # Parameters
+///
+/// - `repo`: the gix repository
+/// - `tree_oid`: OID of the tree to commit
+/// - `parent_oid`: optional parent commit OID
+///
+/// # Returns
+///
+/// The OID of the newly written commit.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+fn write_commit(
+    repo: &gix::Repository,
+    tree_oid: gix::ObjectId,
+    parent_oid: Option<gix::ObjectId>,
+) -> Result<gix::ObjectId> {
+    let sig = gix::actor::Signature {
+        name: "bench".into(),
+        email: "bench@bench".into(),
+        time: gix::date::Time::new(0, 0),
+    };
+    let parents: Vec<gix::ObjectId> = parent_oid.into_iter().collect();
+    let commit = gix::objs::Commit {
+        message: "bench".into(),
+        tree: tree_oid,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: parents.into(),
+        extra_headers: Default::default(),
+    };
+    Ok(repo.write_object(&commit)?.detach())
 }
 
-//
-// Deterministic fake SHAs: we hash an integer with a simple xor-shift so every
-// "SHA" looks like a real 40-hex-char commit hash and has uniform distribution
-// across all prefix bytes.
-
+/// Deterministic fake SHAs: we hash an integer with a simple xor-shift so every
+/// "SHA" looks like a real 40-hex-char commit hash and has uniform distribution
+/// across all prefix bytes.
 fn fake_sha(n: u64) -> String {
-    // xor-shift-64 to spread bits
     let mut x = n.wrapping_add(0x9e3779b97f4a7c15);
     x = (x ^ (x >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
     x = (x ^ (x >> 27)).wrapping_mul(0x94d049bb133111eb);
     x ^= x >> 31;
-    // produce 40 hex chars from two u64s
     let y = x
         .wrapping_mul(0x6c62272e07bb0142)
         .wrapping_add(0x62b821756295c58d);
@@ -260,12 +184,42 @@ fn bar(value: f64, max: f64, width: usize, color: &str) -> String {
     let filled = ((value / max) * width as f64).round() as usize;
     format!("{}{}{}", color, "█".repeat(filled.min(width)), RESET)
 }
-fn diff_trees(repo: &Repository, base_oid: Oid, new_oid: Oid) -> Result<usize> {
-    let base_tree = repo.find_tree(base_oid)?;
-    let new_tree = repo.find_tree(new_oid)?;
-    let mut diff_opts = git2::DiffOptions::new();
-    let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&new_tree), Some(&mut diff_opts))?;
-    Ok(diff.deltas().count())
+
+/// Diff two trees using `git diff-tree` subprocess.
+///
+/// Returns the number of changed paths between the two trees.
+///
+/// # Parameters
+///
+/// - `repo_path`: path to the bare git repository
+/// - `base_oid`: OID of the base tree
+/// - `new_oid`: OID of the new tree
+///
+/// # Returns
+///
+/// The count of changed entries.
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+fn diff_trees(
+    repo_path: &std::path::Path,
+    base_oid: gix::ObjectId,
+    new_oid: gix::ObjectId,
+) -> Result<usize> {
+    let output = std::process::Command::new("git")
+        .args(["--git-dir", &repo_path.to_string_lossy()])
+        .args([
+            "diff-tree",
+            "-r",
+            "--name-only",
+            &base_oid.to_string(),
+            &new_oid.to_string(),
+        ])
+        .output()
+        .context("failed to run git diff-tree")?;
+    if !output.status.success() {
+        anyhow::bail!("git diff-tree failed");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout.lines().filter(|l| !l.is_empty()).count())
 }
 fn pack_size_bytes(repo_path: &std::path::Path) -> Result<u64> {
     let pack_dir = repo_path.join("objects").join("pack");
@@ -318,7 +272,7 @@ struct SchemeResult {
     scheme: Scheme,
     /// Batch write: incremental tree update inserting SAMPLE entries at once
     write_batch_secs: f64,
-    /// Sequential write: 1 entry → commit (with parent) × SAMPLE, total time
+    /// Sequential write: 1 entry -> commit (with parent) x SAMPLE, total time
     write_seq_secs: f64,
     read_1k_secs: f64,
     pack_bytes: u64,
@@ -334,6 +288,7 @@ fn entry_content(sha: &str) -> Vec<u8> {
     format!("{{\"sha\":\"{}\"}}", sha).into_bytes()
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 fn bench_scheme(
     scheme: Scheme,
     n_base: usize,
@@ -348,7 +303,7 @@ fn bench_scheme(
         Scheme::First2Next2 => "first2next2",
     });
     std::fs::create_dir_all(&repo_path)?;
-    let repo = Repository::init_bare(&repo_path)?;
+    let repo = gix::init_bare(&repo_path)?;
 
     let base_files: BTreeMap<String, Vec<u8>> = shas[..n_base]
         .iter()
@@ -396,7 +351,7 @@ fn bench_scheme(
 
     // Add 1 entry, write an incremental tree, write a commit with the previous
     // commit as parent — repeat SAMPLE times. Models frequent single-change
-    // serializes (e.g. one gmeta set → serialize per user action).
+    // serializes (e.g. one gmeta set -> serialize per user action).
     let t0 = Instant::now();
     let mut prev_tree_oid = base_tree_oid;
     let mut prev_commit_oid = base_commit_oid;
@@ -422,12 +377,14 @@ fn bench_scheme(
         .take(SAMPLE)
         .collect();
 
-    let base_tree = repo.find_tree(base_tree_oid)?;
+    // Read test: look up entries by traversing the tree path
+    let base_tree = base_tree_oid.attach(&repo).object()?.into_tree();
     let t0 = Instant::now();
     let mut read_hits = 0usize;
     for sha in &read_shas {
         let path = scheme.shard_path(sha);
-        if base_tree.get_path(std::path::Path::new(&path)).is_ok() {
+        // Walk the tree path component by component
+        if find_entry_in_tree(&repo, base_tree.id().detach(), &path)? {
             read_hits += 1;
         }
     }
@@ -442,7 +399,7 @@ fn bench_scheme(
     ));
 
     let t0 = Instant::now();
-    let diff_count = diff_trees(&repo, base_tree_oid, batch_tree_oid)?;
+    let diff_count = diff_trees(&repo_path, base_tree_oid, batch_tree_oid)?;
     let diff_secs = t0.elapsed().as_secs_f64();
     log.push(format!(
         "    diff  base vs +1 000           {}{}{}  ({} changed paths)",
@@ -480,12 +437,45 @@ fn bench_scheme(
         log,
     })
 }
+
+/// Look up a path in a tree by walking component by component.
+///
+/// Returns `true` if the full path resolves to an existing blob entry.
+fn find_entry_in_tree(repo: &gix::Repository, tree_oid: gix::ObjectId, path: &str) -> Result<bool> {
+    use gix::prelude::ObjectIdExt;
+    let parts: Vec<&str> = path.split('/').collect();
+    let mut current_tree_oid = tree_oid;
+
+    for (i, part) in parts.iter().enumerate() {
+        let tree = current_tree_oid.attach(repo).object()?.into_tree();
+        let mut found = false;
+        for entry_result in tree.iter() {
+            let entry = entry_result?;
+            let name = std::str::from_utf8(entry.filename()).unwrap_or("");
+            if name == *part {
+                if i == parts.len() - 1 {
+                    // Last component — we found the entry
+                    return Ok(true);
+                }
+                if entry.mode().is_tree() {
+                    current_tree_oid = entry.object_id();
+                    found = true;
+                    break;
+                }
+                return Ok(false);
+            }
+        }
+        if !found && i < parts.len() - 1 {
+            return Ok(false);
+        }
+    }
+    Ok(false)
+}
 fn print_report(results: &[SchemeResult], n_base: usize) {
     print_header("RESULTS SUMMARY");
 
     let bar_w = 28usize;
 
-    // helper: find max across results for a metric
     macro_rules! maxf {
         ($field:ident) => {
             results
@@ -571,7 +561,7 @@ fn print_report(results: &[SchemeResult], n_base: usize) {
 
     println!("\n{}Diff base tree vs base + 1 000 changes{}", BOLD, RESET);
     println!(
-        "  {}(lower = faster; git diff_tree_to_tree){}  [changed blobs: {}{}{}]",
+        "  {}(lower = faster; git diff-tree subprocess){}  [changed blobs: {}{}{}]",
         DIM,
         RESET,
         CYAN,

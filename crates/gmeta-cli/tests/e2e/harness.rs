@@ -8,6 +8,7 @@
 //!   dates, and disables gpgsign so tests are reproducible across machines.
 
 use assert_cmd::Command;
+use gix::refs::transaction::PreviousValue;
 use sha1::{Digest, Sha1};
 use std::path::Path;
 use tempfile::TempDir;
@@ -96,14 +97,10 @@ pub fn writable_fixture_with_args(
 
 /// Extract the HEAD commit SHA from a git repository at `path`.
 fn head_sha(path: &std::path::Path) -> String {
-    let repo = git2::Repository::open(path).expect("fixture should be a valid git repo");
-    let oid = repo
-        .head()
+    let repo = gix::open_opts(path, test_open_opts()).expect("fixture should be a valid git repo");
+    repo.head_id()
         .expect("fixture repo should have HEAD")
-        .peel_to_commit()
-        .expect("HEAD should point to a commit")
-        .id();
-    oid.to_string()
+        .to_string()
 }
 /// Build a `commit:<sha>` target string.
 pub fn commit_target(sha: &str) -> String {
@@ -125,27 +122,50 @@ pub fn target_fanout(value: &str) -> String {
 /// content, or multi-repo scenarios).
 pub fn setup_repo() -> (TempDir, String) {
     let dir = TempDir::new().expect("should be able to create temp dir");
-    let repo = git2::Repository::init(dir.path()).expect("should be able to init repo");
+    let _init = gix::init(dir.path()).expect("should be able to init repo");
 
-    let mut config = repo.config().expect("should be able to get config");
-    config
-        .set_str("user.email", "test@example.com")
-        .expect("should be able to set email");
-    config
-        .set_str("user.name", "Test User")
-        .expect("should be able to set name");
+    // Set user config via git subprocess (gix config mutation API is limited)
+    git_config(dir.path(), "user.email", "test@example.com");
+    git_config(dir.path(), "user.name", "Test User");
 
-    let sig =
-        git2::Signature::now("Test User", "test@example.com").expect("should create signature");
+    // Reopen with test config overrides so committer info is available
+    let repo = gix::open_opts(dir.path(), test_open_opts()).expect("should reopen repo");
+
+    let sig = gix::actor::Signature {
+        name: "Test User".into(),
+        email: "test@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
     let tree_oid = repo
-        .treebuilder(None)
-        .expect("should create treebuilder")
+        .empty_tree()
+        .edit()
+        .expect("should create tree editor")
         .write()
-        .expect("should write tree");
-    let tree = repo.find_tree(tree_oid).expect("should find tree");
+        .expect("should write empty tree")
+        .detach();
+    let commit = gix::objs::Commit {
+        message: "initial".into(),
+        tree: tree_oid,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
     let commit_oid = repo
-        .commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
-        .expect("should create commit");
+        .write_object(&commit)
+        .expect("should create commit")
+        .detach();
+    repo.reference(
+        "refs/heads/main",
+        commit_oid,
+        PreviousValue::Any,
+        "initial commit",
+    )
+    .expect("should create main ref");
+    // Point HEAD at refs/heads/main
+    repo.reference("HEAD", commit_oid, PreviousValue::Any, "initial commit")
+        .expect("should update HEAD");
 
     (dir, commit_oid.to_string())
 }
@@ -156,41 +176,51 @@ pub fn setup_repo() -> (TempDir, String) {
 /// Used as a remote for push/pull tests.
 pub fn setup_bare_with_meta(ns: &str) -> TempDir {
     let bare_dir = TempDir::new().expect("should be able to create temp dir");
-    let bare =
-        git2::Repository::init_bare(bare_dir.path()).expect("should be able to init bare repo");
+    let _init = gix::init_bare(bare_dir.path()).expect("should be able to init bare repo");
+    let bare = gix::open_opts(bare_dir.path(), test_open_opts()).expect("should reopen bare repo");
 
-    let sig =
-        git2::Signature::now("Test User", "test@example.com").expect("should create signature");
-    let mut tb = bare
-        .treebuilder(None)
-        .expect("should create root treebuilder");
+    let sig = gix::actor::Signature {
+        name: "Test User".into(),
+        email: "test@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
 
     // Build tree: project/testing/__value (blob: "hello")
-    let blob_oid = bare.blob(b"\"hello\"").expect("should create blob");
-    let mut sub_tb = bare
-        .treebuilder(None)
-        .expect("should create value treebuilder");
-    sub_tb
-        .insert("__value", blob_oid, 0o100644)
-        .expect("should insert __value");
-    let sub_tree_oid = sub_tb.write().expect("should write value tree");
-
-    let mut project_tb = bare
-        .treebuilder(None)
-        .expect("should create project treebuilder");
-    project_tb
-        .insert("testing", sub_tree_oid, 0o040000)
-        .expect("should insert testing subtree");
-    let project_tree_oid = project_tb.write().expect("should write project tree");
-
-    tb.insert("project", project_tree_oid, 0o040000)
-        .expect("should insert project tree");
-    let tree_oid = tb.write().expect("should write root tree");
-    let tree = bare.find_tree(tree_oid).expect("should find root tree");
+    let blob_oid = bare
+        .write_blob(b"\"hello\"")
+        .expect("should create blob")
+        .detach();
+    let mut editor = bare.empty_tree().edit().expect("should create tree editor");
+    editor
+        .upsert(
+            "project/testing/__value",
+            gix::objs::tree::EntryKind::Blob,
+            blob_oid,
+        )
+        .expect("should insert project/testing/__value");
+    let tree_oid = editor.write().expect("should write tree").detach();
 
     let ref_name = format!("refs/{ns}/main");
-    bare.commit(Some(&ref_name), &sig, &sig, "initial meta", &tree, &[])
-        .expect("should create meta commit");
+    let commit = gix::objs::Commit {
+        message: "initial meta".into(),
+        tree: tree_oid,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let commit_oid = bare
+        .write_object(&commit)
+        .expect("should create meta commit")
+        .detach();
+    bare.reference(
+        ref_name.as_str(),
+        commit_oid,
+        PreviousValue::Any,
+        "initial meta",
+    )
+    .expect("should create ref");
 
     bare_dir
 }
@@ -202,81 +232,80 @@ pub fn setup_bare_with_meta(ns: &str) -> TempDir {
 ///   - Commit 2 (tip):   `project/testing/__value = "hello"` (old_key removed)
 pub fn setup_bare_with_history() -> TempDir {
     let bare_dir = TempDir::new().expect("should be able to create temp dir");
-    let bare =
-        git2::Repository::init_bare(bare_dir.path()).expect("should be able to init bare repo");
-    let sig =
-        git2::Signature::now("Test User", "test@example.com").expect("should create signature");
+    let _init = gix::init_bare(bare_dir.path()).expect("should be able to init bare repo");
+    let bare = gix::open_opts(bare_dir.path(), test_open_opts()).expect("should reopen bare repo");
+    let sig = gix::actor::Signature {
+        name: "Test User".into(),
+        email: "test@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
 
     // --- Commit 1: project/old_key/__value = "old_value" ---
-    let blob1 = bare.blob(b"\"old_value\"").expect("should create blob");
-    let mut val_tb = bare
-        .treebuilder(None)
-        .expect("should create value treebuilder");
-    val_tb
-        .insert("__value", blob1, 0o100644)
-        .expect("should insert __value");
-    let val_tree = val_tb.write().expect("should write value tree");
-
-    let mut proj_tb = bare
-        .treebuilder(None)
-        .expect("should create project treebuilder");
-    proj_tb
-        .insert("old_key", val_tree, 0o040000)
+    let blob1 = bare
+        .write_blob(b"\"old_value\"")
+        .expect("should create blob")
+        .detach();
+    let mut editor1 = bare.empty_tree().edit().expect("should create tree editor");
+    editor1
+        .upsert(
+            "project/old_key/__value",
+            gix::objs::tree::EntryKind::Blob,
+            blob1,
+        )
         .expect("should insert old_key");
-    let proj_tree = proj_tb.write().expect("should write project tree");
-
-    let mut root_tb = bare
-        .treebuilder(None)
-        .expect("should create root treebuilder");
-    root_tb
-        .insert("project", proj_tree, 0o040000)
-        .expect("should insert project tree");
-    let root_tree_oid = root_tb.write().expect("should write root tree");
-    let root_tree = bare.find_tree(root_tree_oid).expect("should find tree");
+    let root_tree_oid1 = editor1.write().expect("should write tree").detach();
 
     let commit1_msg = "gmeta: serialize (1 changes)\n\nA\tproject\told_key";
-    let commit1 = bare
-        .commit(None, &sig, &sig, commit1_msg, &root_tree, &[])
-        .expect("should create commit 1");
-    let commit1_obj = bare.find_commit(commit1).expect("should find commit 1");
+    let commit1_obj = gix::objs::Commit {
+        message: commit1_msg.into(),
+        tree: root_tree_oid1,
+        author: sig.clone(),
+        committer: sig.clone(),
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let commit1_oid = bare
+        .write_object(&commit1_obj)
+        .expect("should create commit 1")
+        .detach();
 
     // --- Commit 2 (tip): project/testing/__value = "hello" (old_key removed) ---
-    let blob2 = bare.blob(b"\"hello\"").expect("should create blob");
-    let mut val_tb2 = bare
-        .treebuilder(None)
-        .expect("should create value treebuilder");
-    val_tb2
-        .insert("__value", blob2, 0o100644)
-        .expect("should insert __value");
-    let val_tree2 = val_tb2.write().expect("should write value tree");
-
-    let mut proj_tb2 = bare
-        .treebuilder(None)
-        .expect("should create project treebuilder");
-    proj_tb2
-        .insert("testing", val_tree2, 0o040000)
+    let blob2 = bare
+        .write_blob(b"\"hello\"")
+        .expect("should create blob")
+        .detach();
+    let mut editor2 = bare.empty_tree().edit().expect("should create tree editor");
+    editor2
+        .upsert(
+            "project/testing/__value",
+            gix::objs::tree::EntryKind::Blob,
+            blob2,
+        )
         .expect("should insert testing");
-    let proj_tree2 = proj_tb2.write().expect("should write project tree");
-
-    let mut root_tb2 = bare
-        .treebuilder(None)
-        .expect("should create root treebuilder");
-    root_tb2
-        .insert("project", proj_tree2, 0o040000)
-        .expect("should insert project tree");
-    let root_tree_oid2 = root_tb2.write().expect("should write root tree");
-    let root_tree2 = bare.find_tree(root_tree_oid2).expect("should find tree");
+    let root_tree_oid2 = editor2.write().expect("should write tree").detach();
 
     let commit2_msg = "gmeta: serialize (1 changes)\n\nA\tproject\ttesting";
-    bare.commit(
-        Some("refs/meta/main"),
-        &sig,
-        &sig,
-        commit2_msg,
-        &root_tree2,
-        &[&commit1_obj],
+    let commit2_obj = gix::objs::Commit {
+        message: commit2_msg.into(),
+        tree: root_tree_oid2,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: vec![commit1_oid].into(),
+        extra_headers: Default::default(),
+    };
+    let commit2_oid = bare
+        .write_object(&commit2_obj)
+        .expect("should create commit 2")
+        .detach();
+    bare.reference(
+        "refs/meta/main",
+        commit2_oid,
+        PreviousValue::Any,
+        "commit 2",
     )
-    .expect("should create commit 2");
+    .expect("should create ref");
 
     bare_dir
 }
@@ -287,91 +316,94 @@ pub fn setup_bare_with_history() -> TempDir {
 /// its tree alongside `testing`. The tip commit message only mentions `testing`.
 pub fn setup_bare_with_history_retained() -> TempDir {
     let bare_dir = TempDir::new().expect("should be able to create temp dir");
-    let bare =
-        git2::Repository::init_bare(bare_dir.path()).expect("should be able to init bare repo");
-    let sig =
-        git2::Signature::now("Test User", "test@example.com").expect("should create signature");
+    let _init = gix::init_bare(bare_dir.path()).expect("should be able to init bare repo");
+    let bare = gix::open_opts(bare_dir.path(), test_open_opts()).expect("should reopen bare repo");
+    let sig = gix::actor::Signature {
+        name: "Test User".into(),
+        email: "test@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
 
     // --- Commit 1: project/old_key/__value = "old_value" ---
-    let blob1 = bare.blob(b"\"old_value\"").expect("should create blob");
-    let mut val_tb = bare
-        .treebuilder(None)
-        .expect("should create value treebuilder");
-    val_tb
-        .insert("__value", blob1, 0o100644)
-        .expect("should insert __value");
-    let val_tree = val_tb.write().expect("should write value tree");
-
-    let mut proj_tb = bare
-        .treebuilder(None)
-        .expect("should create project treebuilder");
-    proj_tb
-        .insert("old_key", val_tree, 0o040000)
+    let blob1 = bare
+        .write_blob(b"\"old_value\"")
+        .expect("should create blob")
+        .detach();
+    let mut editor1 = bare.empty_tree().edit().expect("should create tree editor");
+    editor1
+        .upsert(
+            "project/old_key/__value",
+            gix::objs::tree::EntryKind::Blob,
+            blob1,
+        )
         .expect("should insert old_key");
-    let proj_tree = proj_tb.write().expect("should write project tree");
-
-    let mut root_tb = bare
-        .treebuilder(None)
-        .expect("should create root treebuilder");
-    root_tb
-        .insert("project", proj_tree, 0o040000)
-        .expect("should insert project tree");
-    let root_tree_oid = root_tb.write().expect("should write root tree");
-    let root_tree = bare.find_tree(root_tree_oid).expect("should find tree");
+    let root_tree_oid1 = editor1.write().expect("should write tree").detach();
 
     let commit1_msg = "gmeta: serialize (1 changes)\n\nA\tproject\told_key";
-    let commit1 = bare
-        .commit(None, &sig, &sig, commit1_msg, &root_tree, &[])
-        .expect("should create commit 1");
-    let commit1_obj = bare.find_commit(commit1).expect("should find commit 1");
+    let commit1_obj = gix::objs::Commit {
+        message: commit1_msg.into(),
+        tree: root_tree_oid1,
+        author: sig.clone(),
+        committer: sig.clone(),
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let commit1_oid = bare
+        .write_object(&commit1_obj)
+        .expect("should create commit 1")
+        .detach();
 
     // --- Commit 2 (tip): both old_key and testing ---
-    let blob2 = bare.blob(b"\"hello\"").expect("should create blob");
-    let mut val_tb2 = bare
-        .treebuilder(None)
-        .expect("should create value treebuilder");
-    val_tb2
-        .insert("__value", blob2, 0o100644)
-        .expect("should insert __value");
-    let val_tree2 = val_tb2.write().expect("should write value tree");
-
-    let mut proj_tb2 = bare
-        .treebuilder(None)
-        .expect("should create project treebuilder");
-    proj_tb2
-        .insert("old_key", val_tree, 0o040000)
+    let blob2 = bare
+        .write_blob(b"\"hello\"")
+        .expect("should create blob")
+        .detach();
+    let mut editor2 = bare.empty_tree().edit().expect("should create tree editor");
+    editor2
+        .upsert(
+            "project/old_key/__value",
+            gix::objs::tree::EntryKind::Blob,
+            blob1,
+        )
         .expect("should insert old_key");
-    proj_tb2
-        .insert("testing", val_tree2, 0o040000)
+    editor2
+        .upsert(
+            "project/testing/__value",
+            gix::objs::tree::EntryKind::Blob,
+            blob2,
+        )
         .expect("should insert testing");
-    let proj_tree2 = proj_tb2.write().expect("should write project tree");
-
-    let mut root_tb2 = bare
-        .treebuilder(None)
-        .expect("should create root treebuilder");
-    root_tb2
-        .insert("project", proj_tree2, 0o040000)
-        .expect("should insert project tree");
-    let root_tree_oid2 = root_tb2.write().expect("should write root tree");
-    let root_tree2 = bare.find_tree(root_tree_oid2).expect("should find tree");
+    let root_tree_oid2 = editor2.write().expect("should write tree").detach();
 
     let commit2_msg = "gmeta: serialize (1 changes)\n\nA\tproject\ttesting";
-    bare.commit(
-        Some("refs/meta/main"),
-        &sig,
-        &sig,
-        commit2_msg,
-        &root_tree2,
-        &[&commit1_obj],
+    let commit2_obj = gix::objs::Commit {
+        message: commit2_msg.into(),
+        tree: root_tree_oid2,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: vec![commit1_oid].into(),
+        extra_headers: Default::default(),
+    };
+    let commit2_oid = bare
+        .write_object(&commit2_obj)
+        .expect("should create commit 2")
+        .detach();
+    bare.reference(
+        "refs/meta/main",
+        commit2_oid,
+        PreviousValue::Any,
+        "commit 2",
     )
-    .expect("should create commit 2");
+    .expect("should create ref");
 
     bare_dir
 }
 /// Copy all git objects from `src` repo into a bare repo at `bare_dir`.
 ///
 /// Simulates a push by copying loose objects and pack files.
-pub fn copy_meta_objects(src: &git2::Repository, bare_dir: &TempDir) {
+pub fn copy_meta_objects(src: &gix::Repository, bare_dir: &TempDir) {
     let src_objects = src.path().join("objects");
     let dst_objects = bare_dir.path().join("objects");
     copy_dir_contents(&src_objects, &dst_objects);
@@ -380,7 +412,7 @@ pub fn copy_meta_objects(src: &git2::Repository, bare_dir: &TempDir) {
 /// Copy all git objects from a bare repo at `bare_dir` into `dst` repo.
 ///
 /// Simulates a fetch by copying loose objects and pack files.
-pub fn copy_meta_objects_from(bare_dir: &TempDir, dst: &git2::Repository) {
+pub fn copy_meta_objects_from(bare_dir: &TempDir, dst: &gix::Repository) {
     let src_objects = bare_dir.path().join("objects");
     let dst_objects = dst.path().join("objects");
     copy_dir_contents(&src_objects, &dst_objects);
@@ -402,4 +434,41 @@ fn copy_dir_contents(src: &std::path::Path, dst: &std::path::Path) {
             std::fs::copy(&src_path, &dst_path).ok();
         }
     }
+}
+
+/// Set a git config value using the `git` subprocess.
+///
+/// Used in tests because gix's config mutation API is limited.
+fn git_config(repo_path: &Path, key: &str, value: &str) {
+    let output = std::process::Command::new("git")
+        .args(["-C", &repo_path.to_string_lossy(), "config", key, value])
+        .output()
+        .expect("should be able to run git config");
+    assert!(output.status.success(), "git config {key} {value} failed");
+}
+
+/// Open a gix repository at the given path with test-friendly config overrides.
+///
+/// Uses isolated config (no system/global) with stable author/committer identity,
+/// so reference operations work even in CI where no global git config exists.
+pub fn open_repo(path: &Path) -> gix::Repository {
+    gix::open_opts(path, test_open_opts()).expect("should be able to open repo")
+}
+
+/// Returns gix open options with isolated config and test identity overrides.
+///
+/// Ensures committer/author info is available for reference operations
+/// even when no global git config is present (e.g. in CI).
+fn test_open_opts() -> gix::open::Options {
+    gix::open::Options::isolated()
+        .config_overrides(["user.name=Test User", "user.email=test@example.com"])
+}
+
+/// Resolve a reference to a commit OID (fully peeled).
+pub fn ref_to_commit_oid(repo: &gix::Repository, ref_name: &str) -> gix::ObjectId {
+    repo.find_reference(ref_name)
+        .unwrap()
+        .into_fully_peeled_id()
+        .unwrap()
+        .detach()
 }

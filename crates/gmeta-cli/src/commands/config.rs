@@ -7,7 +7,7 @@ use gmeta_core::types::{validate_key, TargetType, ValueType};
 const CONFIG_PREFIX: &str = "meta:";
 
 pub fn run(list: bool, unset: bool, key: Option<&str>, value: Option<&str>) -> Result<()> {
-    let ctx = CommandContext::open_gix(None)?;
+    let ctx = CommandContext::open(None)?;
 
     if list {
         return run_list(&ctx.db);

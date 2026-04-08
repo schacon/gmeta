@@ -1,59 +1,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use git2::Repository;
-
 use crate::error::{Error, Result};
-
-/// Discover the Git repository from the current directory (git2).
-pub fn git2_discover_repo() -> Result<Repository> {
-    let repo = Repository::discover(".").map_err(|_| Error::NotARepository)?;
-    Ok(repo)
-}
-
-/// Get the path to the gmeta SQLite database (git2).
-pub fn git2_db_path(repo: &Repository) -> Result<PathBuf> {
-    let git_dir = repo.path(); // .git/
-    Ok(git_dir.join("gmeta.sqlite"))
-}
-
-/// Get the user's email from Git config (git2).
-pub fn git2_get_email(repo: &Repository) -> Result<String> {
-    let config = repo.config()?;
-    let email = config
-        .get_string("user.email")
-        .unwrap_or_else(|_| "unknown".to_string());
-    Ok(email)
-}
-
-/// Get the user's name from Git config (git2).
-pub fn git2_get_name(repo: &Repository) -> Result<String> {
-    let config = repo.config()?;
-    let name = config
-        .get_string("user.name")
-        .unwrap_or_else(|_| "unknown".to_string());
-    Ok(name)
-}
-
-/// Get the meta namespace from Git config (git2).
-pub fn git2_get_namespace(repo: &Repository) -> Result<String> {
-    let config = repo.config()?;
-    let ns = config
-        .get_string("meta.namespace")
-        .unwrap_or_else(|_| "meta".to_string());
-    Ok(ns)
-}
-
-/// Expand a partial commit SHA to the full 40-char hex string (git2).
-pub fn git2_resolve_commit_sha(repo: &Repository, partial: &str) -> Result<String> {
-    let obj = repo
-        .revparse_single(partial)
-        .map_err(|_| Error::ResolveError(partial.to_string()))?;
-    let commit = obj
-        .peel_to_commit()
-        .map_err(|_| Error::ResolveError(format!("{partial} does not point to a commit")))?;
-    Ok(commit.id().to_string())
-}
 
 /// Check if a tree entry name looks like a list entry (timestamp-hash format).
 pub fn is_list_entry_name(name: &str) -> bool {
@@ -68,16 +16,31 @@ pub fn is_list_entry_name(name: &str) -> bool {
     }
 }
 
-/// Run a git CLI command in the repository's working directory (git2).
-pub fn git2_run_git(repo: &Repository, args: &[&str]) -> Result<String> {
-    git2_run_git_inner(repo, args)
+/// Resolve the working or git directory from a gix repository for subprocess calls.
+fn repo_dir(repo: &gix::Repository) -> Result<&std::path::Path> {
+    repo.workdir()
+        .unwrap_or_else(|| repo.git_dir())
+        .canonicalize()
+        .ok();
+    Ok(repo.workdir().unwrap_or_else(|| repo.git_dir()))
 }
 
-fn git2_run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
-    let workdir = repo
-        .workdir()
-        .or_else(|| Some(repo.path()))
-        .ok_or_else(|| Error::Other("cannot determine repository directory".into()))?;
+/// Run a git CLI command in the repository's working directory.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository whose working directory is used as `cwd`
+/// - `args`: the arguments to pass to `git`
+///
+/// # Returns
+///
+/// The stdout output of the command as a string.
+///
+/// # Errors
+///
+/// Returns an error if the subprocess fails to spawn or exits with a non-zero status.
+pub fn run_git(repo: &gix::Repository, args: &[&str]) -> Result<String> {
+    let workdir = repo_dir(repo)?;
 
     let output = Command::new("git")
         .args(args)
@@ -98,19 +61,29 @@ fn git2_run_git_inner(repo: &Repository, args: &[&str]) -> Result<String> {
 }
 
 /// List all git remotes that have `meta = true` in their config.
-/// Returns a vec of (name, url) pairs.
-pub fn list_meta_remotes(repo: &Repository) -> Result<Vec<(String, String)>> {
-    let config = repo.config()?;
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository to query
+///
+/// # Returns
+///
+/// A vec of `(name, url)` pairs for each remote with `remote.<name>.meta = true`.
+///
+/// # Errors
+///
+/// Returns an error if reading the git config fails.
+pub fn list_meta_remotes(repo: &gix::Repository) -> Result<Vec<(String, String)>> {
+    let config = repo.config_snapshot();
+    let remote_names = repo.remote_names();
     let mut remotes = Vec::new();
 
-    // Get all remote names from the repo
-    let remote_names = repo.remotes()?;
-    for name in remote_names.iter().flatten() {
+    for name in &remote_names {
         let meta_key = format!("remote.{}.meta", name);
-        if let Ok(true) = config.get_bool(&meta_key) {
+        if config.boolean(&meta_key) == Some(true) {
             let url_key = format!("remote.{}.url", name);
-            if let Ok(url) = config.get_string(&url_key) {
-                remotes.push((name.to_string(), url));
+            if let Some(url) = config.string(&url_key) {
+                remotes.push((name.to_string(), url.to_string()));
             }
         }
     }
@@ -119,27 +92,49 @@ pub fn list_meta_remotes(repo: &Repository) -> Result<Vec<(String, String)>> {
 }
 
 /// Hydrate tip tree blobs for a blobless-fetched ref.
-/// This fetches all blob objects referenced by the tip tree so libgit2 can read them.
-pub fn hydrate_tip_blobs(repo: &Repository, remote_name: &str, ref_name: &str) -> Result<()> {
+///
+/// This fetches all blob objects referenced by the tip tree so gix can read them.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository to operate on
+/// - `remote_name`: the remote to fetch blobs from
+/// - `ref_name`: the ref whose tree blobs should be fetched
+///
+/// # Errors
+///
+/// Returns an error if the ls-tree or fetch subprocess fails.
+pub fn hydrate_tip_blobs(repo: &gix::Repository, remote_name: &str, ref_name: &str) -> Result<()> {
     hydrate_tip_blobs_counted(repo, remote_name, ref_name)?;
     Ok(())
 }
 
-/// Like hydrate_tip_blobs but returns the number of blobs fetched.
+/// Like [`hydrate_tip_blobs`] but returns the number of blobs fetched.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository to operate on
+/// - `remote_name`: the remote to fetch blobs from
+/// - `ref_name`: the ref whose tree blobs should be fetched
+///
+/// # Returns
+///
+/// The number of blob OIDs discovered in the tree.
+///
+/// # Errors
+///
+/// Returns an error if the ls-tree or fetch subprocess fails.
 pub fn hydrate_tip_blobs_counted(
-    repo: &Repository,
+    repo: &gix::Repository,
     remote_name: &str,
     ref_name: &str,
 ) -> Result<usize> {
-    let blob_list = git2_run_git(repo, &["ls-tree", "-r", "--object-only", ref_name]);
+    let blob_list = run_git(repo, &["ls-tree", "-r", "--object-only", ref_name]);
 
     match blob_list {
         Ok(blobs) if !blobs.trim().is_empty() => {
             let count = blobs.lines().count();
-            let workdir = repo
-                .workdir()
-                .or_else(|| Some(repo.path()))
-                .ok_or_else(|| Error::Other("cannot determine repository directory".into()))?;
+            let workdir = repo_dir(repo)?;
 
             let mut child = Command::new("git")
                 .args([
@@ -188,49 +183,84 @@ pub fn hydrate_tip_blobs_counted(
 }
 
 /// Look up a blob OID in a git tree by following a slash-separated path.
-/// Returns None if any path segment is missing. Trees are local (fetched even
+///
+/// Returns `None` if any path segment is missing. Trees are local (fetched even
 /// in blobless clones), so this works without network access.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository containing the tree
+/// - `tree_id`: the root tree object ID to start from
+/// - `path`: slash-separated path to the blob (e.g. `"a/b/file.txt"`)
+///
+/// # Returns
+///
+/// `Some(ObjectId)` of the blob at the path, or `None` if not found.
+///
+/// # Errors
+///
+/// Returns an error if reading tree objects from the repository fails.
 pub fn find_blob_oid_in_tree(
-    repo: &Repository,
-    tree: &git2::Tree,
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
     path: &str,
-) -> Result<Option<git2::Oid>> {
+) -> Result<Option<gix::ObjectId>> {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     if segments.is_empty() {
         return Ok(None);
     }
 
-    let mut current_tree = tree.clone();
+    let mut current_tree_id = tree_id;
+
     for (i, segment) in segments.iter().enumerate() {
-        let (entry_id, entry_kind) = match current_tree.get_name(segment) {
-            Some(e) => (e.id(), e.kind()),
+        let tree = repo
+            .find_tree(current_tree_id)
+            .map_err(|e| Error::Other(format!("{e}")))?;
+        let entry = match tree.find_entry(*segment) {
+            Some(e) => e,
             None => return Ok(None),
         };
+
+        let entry_id = entry.object_id();
+        let is_tree = entry.mode().is_tree();
 
         if i == segments.len() - 1 {
             return Ok(Some(entry_id));
         }
 
-        if entry_kind != Some(git2::ObjectType::Tree) {
+        if !is_tree {
             return Ok(None);
         }
-        current_tree = repo.find_tree(entry_id)?;
+        current_tree_id = entry_id;
     }
 
     Ok(None)
 }
 
-/// Fetch specific blob OIDs from a remote. Similar to hydrate_tip_blobs but
-/// takes an explicit list of OIDs instead of discovering them via ls-tree.
-pub fn fetch_blob_oids(repo: &Repository, remote_name: &str, oids: &[git2::Oid]) -> Result<()> {
+/// Fetch specific blob OIDs from a remote.
+///
+/// Similar to [`hydrate_tip_blobs`] but takes an explicit list of OIDs
+/// instead of discovering them via ls-tree.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository to operate on
+/// - `remote_name`: the remote to fetch blobs from
+/// - `oids`: the blob OIDs to fetch
+///
+/// # Errors
+///
+/// Returns an error if the fetch subprocess fails.
+pub fn fetch_blob_oids(
+    repo: &gix::Repository,
+    remote_name: &str,
+    oids: &[gix::ObjectId],
+) -> Result<()> {
     if oids.is_empty() {
         return Ok(());
     }
 
-    let workdir = repo
-        .workdir()
-        .or_else(|| Some(repo.path()))
-        .ok_or_else(|| Error::Other("cannot determine repository directory".into()))?;
+    let workdir = repo_dir(repo)?;
 
     let oid_list: String = oids.iter().map(|o| format!("{}\n", o)).collect();
 
@@ -271,7 +301,21 @@ pub fn fetch_blob_oids(repo: &Repository, remote_name: &str, oids: &[git2::Oid])
 }
 
 /// Resolve a meta remote by name, or pick the first one if no name given.
-pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<String> {
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository to query
+/// - `remote`: optional remote name; if `None`, returns the first meta remote
+///
+/// # Returns
+///
+/// The name of the resolved meta remote.
+///
+/// # Errors
+///
+/// Returns [`Error::NoRemotes`] if no meta remotes are configured, or
+/// [`Error::RemoteNotFound`] if the specified name is not a meta remote.
+pub fn resolve_meta_remote(repo: &gix::Repository, remote: Option<&str>) -> Result<String> {
     let meta_remotes = list_meta_remotes(repo)?;
 
     if meta_remotes.is_empty() {
@@ -289,6 +333,7 @@ pub fn resolve_meta_remote(repo: &Repository, remote: Option<&str>) -> Result<St
         None => Ok(meta_remotes[0].0.clone()),
     }
 }
+
 fn gix_config_string(repo: &gix::Repository, key: &str, default: &str) -> String {
     let config = repo.config_snapshot();
     config
@@ -298,27 +343,82 @@ fn gix_config_string(repo: &gix::Repository, key: &str, default: &str) -> String
 }
 
 /// Discover the Git repository from the current directory.
+///
+/// # Errors
+///
+/// Returns [`Error::NotARepository`] if no git repository is found.
 pub fn discover_repo() -> Result<gix::Repository> {
     let repo = gix::discover(".").map_err(|_| Error::NotARepository)?;
     Ok(repo)
 }
 
 /// Get the path to the gmeta SQLite database.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository
+///
+/// # Returns
+///
+/// The path to `gmeta.sqlite` inside the git directory.
 pub fn db_path(repo: &gix::Repository) -> Result<PathBuf> {
     Ok(repo.git_dir().join("gmeta.sqlite"))
 }
 
 /// Get the user's email from Git config.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository
+///
+/// # Returns
+///
+/// The configured `user.email`, or `"unknown"` if not set.
 pub fn get_email(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "user.email", "unknown"))
 }
 
+/// Get the user's name from Git config.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository
+///
+/// # Returns
+///
+/// The configured `user.name`, or `"unknown"` if not set.
+pub fn get_name(repo: &gix::Repository) -> Result<String> {
+    Ok(gix_config_string(repo, "user.name", "unknown"))
+}
+
 /// Get the meta namespace from Git config (defaults to "meta").
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository
+///
+/// # Returns
+///
+/// The configured `meta.namespace`, or `"meta"` if not set.
 pub fn get_namespace(repo: &gix::Repository) -> Result<String> {
     Ok(gix_config_string(repo, "meta.namespace", "meta"))
 }
 
 /// Expand a partial commit SHA to the full 40-char hex string.
+///
+/// # Parameters
+///
+/// - `repo`: the Git repository
+/// - `partial`: a partial (or full) commit SHA or ref name
+///
+/// # Returns
+///
+/// The full 40-character hex SHA of the commit.
+///
+/// # Errors
+///
+/// Returns [`Error::ResolveError`] if the partial SHA cannot be resolved,
+/// or [`Error::Other`] if the resolved object is not a commit.
 pub fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Result<String> {
     let obj = repo
         .rev_parse_single(partial.as_bytes())

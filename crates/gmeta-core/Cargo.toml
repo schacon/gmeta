@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-git2 = { workspace = true }
 gix = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }
