@@ -21,10 +21,7 @@ pub fn run(
     count: usize,            // max commits to show
     metadata_only: bool,     // skip commits with no metadata
 ) -> Result<()> {
-    let mut ctx = CommandContext::open(None)?;
-    // Attach a repo to the Store so blob-ref values are resolved during reads.
-    let git_dir = ctx.session.repo().git_dir().to_owned();
-    ctx.session.store_mut().set_repo(gix::open(git_dir)?);
+    let ctx = CommandContext::open(None)?;
     let repo = ctx.session.repo();
 
     // Resolve start ref -> OID

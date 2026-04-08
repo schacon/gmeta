@@ -1,9 +1,9 @@
 use anyhow::Result;
 use dialoguer::{Confirm, Input, Select};
 
-use super::auto::{parse_size, read_prune_rules};
 use crate::context::CommandContext;
-use gmeta_core::types::{TargetType, ValueType};
+use gmeta_core::prune::{parse_size, read_prune_rules};
+use gmeta_core::types::{MetaValue, Target, TargetType};
 
 pub fn run() -> Result<()> {
     let ctx = CommandContext::open(None)?;
@@ -172,40 +172,25 @@ pub fn run() -> Result<()> {
     // -- write --
     set_config(&ctx, "meta:prune:since", &since)?;
 
+    let project = project_target();
+    let handle = ctx.session.target(&project);
+
     match max_keys {
         Some(ref v) => set_config(&ctx, "meta:prune:max-keys", v)?,
         None => {
-            ctx.session.store().remove(
-                &TargetType::Project,
-                "",
-                "meta:prune:max-keys",
-                ctx.session.email(),
-                ctx.timestamp,
-            )?;
+            handle.remove("meta:prune:max-keys")?;
         }
     }
     match max_size {
         Some(ref v) => set_config(&ctx, "meta:prune:max-size", v)?,
         None => {
-            ctx.session.store().remove(
-                &TargetType::Project,
-                "",
-                "meta:prune:max-size",
-                ctx.session.email(),
-                ctx.timestamp,
-            )?;
+            handle.remove("meta:prune:max-size")?;
         }
     }
     match min_size {
         Some(ref v) => set_config(&ctx, "meta:prune:min-size", v)?,
         None => {
-            ctx.session.store().remove(
-                &TargetType::Project,
-                "",
-                "meta:prune:min-size",
-                ctx.session.email(),
-                ctx.timestamp,
-            )?;
+            handle.remove("meta:prune:min-size")?;
         }
     }
 
@@ -213,17 +198,18 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
+fn project_target() -> Target {
+    Target {
+        target_type: TargetType::Project,
+        value: None,
+    }
+}
+
 fn set_config(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
-    let stored = serde_json::to_string(value)?;
-    ctx.session.store().set(
-        &TargetType::Project,
-        "",
-        key,
-        &stored,
-        &ValueType::String,
-        ctx.session.email(),
-        ctx.timestamp,
-    )?;
+    let meta_value = MetaValue::String(value.to_string());
+    ctx.session
+        .target(&project_target())
+        .set_value(key, &meta_value)?;
     Ok(())
 }
 

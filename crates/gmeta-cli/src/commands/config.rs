@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 
 use crate::context::CommandContext;
-use gmeta_core::types::{validate_key, TargetType, ValueType};
+use gmeta_core::types::{validate_key, Target, TargetType, ValueType};
 use gmeta_core::Store;
 
 const CONFIG_PREFIX: &str = "meta:";
@@ -40,18 +40,18 @@ fn validate_config_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-fn run_set(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
-    let stored_value = serde_json::to_string(value)?;
+fn project_target() -> Target {
+    Target {
+        target_type: TargetType::Project,
+        value: None,
+    }
+}
 
-    ctx.session.store().set(
-        &TargetType::Project,
-        "",
-        key,
-        &stored_value,
-        &ValueType::String,
-        ctx.session.email(),
-        ctx.timestamp,
-    )?;
+fn run_set(ctx: &CommandContext, key: &str, value: &str) -> Result<()> {
+    let meta_value = gmeta_core::types::MetaValue::String(value.to_string());
+    ctx.session
+        .target(&project_target())
+        .set_value(key, &meta_value)?;
     Ok(())
 }
 
@@ -82,13 +82,7 @@ fn run_list(db: &Store) -> Result<()> {
 }
 
 fn run_unset(ctx: &CommandContext, key: &str) -> Result<()> {
-    let removed = ctx.session.store().remove(
-        &TargetType::Project,
-        "",
-        key,
-        ctx.session.email(),
-        ctx.timestamp,
-    )?;
+    let removed = ctx.session.target(&project_target()).remove(key)?;
     if !removed {
         eprintln!("key '{}' not found", key);
     }

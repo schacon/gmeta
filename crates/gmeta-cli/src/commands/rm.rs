@@ -10,13 +10,7 @@ pub fn run(target_str: &str, key: &str) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     ctx.session.resolve_target(&mut target)?;
 
-    let removed = ctx.session.store().remove(
-        &target.target_type,
-        target.value_str(),
-        key,
-        ctx.session.email(),
-        ctx.timestamp,
-    )?;
+    let removed = ctx.session.target(&target).remove(key)?;
 
     if !removed {
         eprintln!("key '{}' not found", key);

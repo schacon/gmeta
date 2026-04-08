@@ -53,7 +53,7 @@ fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.session.repo();
     let email = ctx.session.email();
-    let fallback_ts = ctx.timestamp;
+    let fallback_ts = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
 
     let db = if dry_run {
         None
