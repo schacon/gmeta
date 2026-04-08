@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
+use sha1::{Digest, Sha1};
 
 use crate::error::{Error, Result};
 
@@ -90,7 +90,7 @@ pub fn make_entry_name(entry: &ListEntry) -> String {
 
 /// Build a deterministic entry name from a timestamp and value content hash.
 pub fn make_entry_name_from_parts(timestamp: i64, value: &str) -> String {
-    let mut hasher = Sha256::new();
+    let mut hasher = Sha1::new();
     hasher.update(value.as_bytes());
     let hash = format!("{:x}", hasher.finalize());
     format!("{}-{}", timestamp, &hash[..5])
