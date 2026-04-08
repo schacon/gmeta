@@ -1,9 +1,13 @@
+use std::collections::{BTreeMap, BTreeSet};
+
 use rusqlite::{params, OptionalExtension};
 
 use crate::error::Result;
+use crate::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
+use crate::tree::model::{Key, TombstoneEntry, TreeValue};
+use crate::types::{set_member_id, TargetType, ValueType, GIT_REF_THRESHOLD};
 
 use super::{encode_list_entries_by_metadata_id, encode_set_values_by_metadata_id, Db};
-use crate::types::ValueType;
 
 impl Db {
     /// Get all metadata entries (for serialization).
@@ -139,6 +143,151 @@ impl Db {
             "UPDATE sync_state SET last_materialized = ?1 WHERE id = 1",
             params![timestamp],
         )?;
+        Ok(())
+    }
+
+    /// Apply parsed tree data to the database.
+    ///
+    /// Takes the structured output of [`crate::tree::format::parse_tree`] and writes it
+    /// to SQLite: string/list/set values are upserted, tombstones are applied for keys
+    /// that exist only in the tombstone map. List entries and set members that have
+    /// corresponding tombstones are filtered out before writing.
+    ///
+    /// Large string values (exceeding [`GIT_REF_THRESHOLD`]) are stored as git blob
+    /// references if a repository is attached to this `Db` instance.
+    pub fn apply_tree(
+        &self,
+        values: &BTreeMap<Key, TreeValue>,
+        tombstones: &BTreeMap<Key, TombstoneEntry>,
+        set_tombstones: &BTreeMap<(Key, String), String>,
+        list_tombstones: &BTreeMap<(Key, String), TombstoneEntry>,
+        email: &str,
+        now: i64,
+    ) -> Result<()> {
+        for ((target_type, target_value, key_name), tree_val) in values {
+            let tt = TargetType::from_str(target_type)?;
+            match tree_val {
+                TreeValue::String(s) => {
+                    if s.len() > GIT_REF_THRESHOLD {
+                        if let Some(repo) = &self.repo {
+                            let blob_oid = repo
+                                .write_blob(s.as_bytes())
+                                .map_err(|e| {
+                                    crate::error::Error::Other(format!("failed to write blob: {e}"))
+                                })?
+                                .to_string();
+                            let existing = self.get(&tt, target_value, key_name)?;
+                            if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&blob_oid) {
+                                self.set_with_git_ref(
+                                    None,
+                                    &tt,
+                                    target_value,
+                                    key_name,
+                                    &blob_oid,
+                                    &ValueType::String,
+                                    email,
+                                    now,
+                                    true,
+                                )?;
+                            }
+                        }
+                    } else {
+                        let json_val = serde_json::to_string(s)?;
+                        let existing = self.get(&tt, target_value, key_name)?;
+                        if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
+                            self.set(
+                                &tt,
+                                target_value,
+                                key_name,
+                                &json_val,
+                                &ValueType::String,
+                                email,
+                                now,
+                            )?;
+                        }
+                    }
+                }
+                TreeValue::List(list_entries) => {
+                    let key = (target_type.clone(), target_value.clone(), key_name.clone());
+                    let tombstoned_names: BTreeSet<String> = list_tombstones
+                        .iter()
+                        .filter_map(|((k, entry_name), _)| {
+                            if *k == key {
+                                Some(entry_name.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let mut items: Vec<ListEntry> = Vec::with_capacity(list_entries.len());
+                    for (entry_name, content) in list_entries {
+                        if tombstoned_names.contains(entry_name) {
+                            continue;
+                        }
+                        let timestamp = parse_timestamp_from_entry_name(entry_name)
+                            .unwrap_or(items.len() as i64);
+                        items.push(ListEntry {
+                            value: content.clone(),
+                            timestamp,
+                        });
+                    }
+                    let json_val = encode_entries(&items)?;
+                    let existing = self.get(&tt, target_value, key_name)?;
+                    if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
+                        self.set(
+                            &tt,
+                            target_value,
+                            key_name,
+                            &json_val,
+                            &ValueType::List,
+                            email,
+                            now,
+                        )?;
+                    }
+                }
+                TreeValue::Set(set_members) => {
+                    let key = (target_type.clone(), target_value.clone(), key_name.clone());
+                    let tombstoned: BTreeSet<String> = set_tombstones
+                        .iter()
+                        .filter_map(|((k, member_id), _)| {
+                            if *k == key {
+                                Some(member_id.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let mut visible: Vec<String> = set_members
+                        .values()
+                        .filter(|member| !tombstoned.contains(&set_member_id(member)))
+                        .cloned()
+                        .collect();
+                    visible.sort();
+                    let json_val = serde_json::to_string(&visible)?;
+                    let existing = self.get(&tt, target_value, key_name)?;
+                    if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
+                        self.set(
+                            &tt,
+                            target_value,
+                            key_name,
+                            &json_val,
+                            &ValueType::Set,
+                            email,
+                            now,
+                        )?;
+                    }
+                }
+            }
+        }
+
+        for (key, tombstone) in tombstones {
+            if values.contains_key(key) {
+                continue;
+            }
+            let tt = TargetType::from_str(&key.0)?;
+            self.apply_tombstone(&tt, &key.1, &key.2, &tombstone.email, tombstone.timestamp)?;
+        }
+
         Ok(())
     }
 }

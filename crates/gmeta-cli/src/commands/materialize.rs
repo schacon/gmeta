@@ -13,7 +13,7 @@ use gmeta_core::tree::merge::{
     two_way_merge_no_common_ancestor, ConflictDecision,
 };
 use gmeta_core::tree::model::{Key, ParsedTree, TombstoneEntry, TreeValue};
-use gmeta_core::types::{set_member_id, TargetType, ValueType};
+use gmeta_core::types::TargetType;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlannedDbChange {
@@ -240,9 +240,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             }
 
             // Fast-forward: update SQLite from remote tree first.
-            update_db_from_tree(
-                repo,
-                &ctx.db,
+            ctx.db.apply_tree(
                 &remote_entries.values,
                 &remote_entries.tombstones,
                 &remote_entries.set_tombstones,
@@ -541,9 +539,7 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
             if verbose {
                 eprintln!("[verbose] updating SQLite database...");
             }
-            update_db_from_tree(
-                repo,
-                &ctx.db,
+            ctx.db.apply_tree(
                 &merged_values,
                 &merged_tombstones,
                 &merged_set_tombstones,
@@ -632,142 +628,6 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
 
     if !dry_run {
         ctx.db.set_last_materialized(now)?;
-    }
-
-    Ok(())
-}
-
-/// Update the SQLite database from parsed tree data.
-fn update_db_from_tree(
-    repo: &gix::Repository,
-    db: &Db,
-    values: &BTreeMap<Key, TreeValue>,
-    tombstones: &BTreeMap<Key, TombstoneEntry>,
-    set_tombstones: &BTreeMap<(Key, String), String>,
-    list_tombstones: &BTreeMap<(Key, String), TombstoneEntry>,
-    email: &str,
-    now: i64,
-) -> Result<()> {
-    use gmeta_core::types::GIT_REF_THRESHOLD;
-
-    for ((target_type, target_value, key_name), tree_val) in values {
-        let tt = TargetType::from_str(target_type)?;
-        match tree_val {
-            TreeValue::String(s) => {
-                if s.len() > GIT_REF_THRESHOLD {
-                    // Large value: store as git blob reference
-                    let blob_oid = repo.write_blob(s.as_bytes())?;
-                    let oid_str: String = blob_oid.to_string();
-                    let existing = db.get(&tt, target_value, key_name)?;
-                    if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&oid_str) {
-                        db.set_with_git_ref(
-                            None,
-                            &tt,
-                            target_value,
-                            key_name,
-                            &oid_str,
-                            &ValueType::String,
-                            email,
-                            now,
-                            true,
-                        )?;
-                    }
-                } else {
-                    let json_val = serde_json::to_string(s)?;
-                    let existing = db.get(&tt, target_value, key_name)?;
-                    if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
-                        db.set(
-                            &tt,
-                            target_value,
-                            key_name,
-                            &json_val,
-                            &ValueType::String,
-                            email,
-                            now,
-                        )?;
-                    }
-                }
-            }
-            TreeValue::List(list_entries) => {
-                let key = (target_type.clone(), target_value.clone(), key_name.clone());
-                let tombstoned_names: BTreeSet<String> = list_tombstones
-                    .iter()
-                    .filter_map(|((k, entry_name), _)| {
-                        if *k == key {
-                            Some(entry_name.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let mut items: Vec<ListEntry> = Vec::with_capacity(list_entries.len());
-                for (entry_name, content) in list_entries {
-                    if tombstoned_names.contains(entry_name) {
-                        continue;
-                    }
-                    let timestamp =
-                        parse_timestamp_from_entry_name(entry_name).unwrap_or(items.len() as i64);
-                    items.push(ListEntry {
-                        value: content.clone(),
-                        timestamp,
-                    });
-                }
-                let json_val = encode_entries(&items)?;
-                let existing = db.get(&tt, target_value, key_name)?;
-                if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
-                    db.set(
-                        &tt,
-                        target_value,
-                        key_name,
-                        &json_val,
-                        &ValueType::List,
-                        email,
-                        now,
-                    )?;
-                }
-            }
-            TreeValue::Set(set_members) => {
-                let key = (target_type.clone(), target_value.clone(), key_name.clone());
-                let tombstoned: BTreeSet<String> = set_tombstones
-                    .iter()
-                    .filter_map(|((k, member_id), _)| {
-                        if *k == key {
-                            Some(member_id.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-                let mut visible: Vec<String> = set_members
-                    .values()
-                    .filter(|member| !tombstoned.contains(&set_member_id(member)))
-                    .cloned()
-                    .collect();
-                visible.sort();
-                let json_val = serde_json::to_string(&visible)?;
-                let existing = db.get(&tt, target_value, key_name)?;
-                if existing.as_ref().map(|(v, _, _)| v.as_str()) != Some(&json_val) {
-                    db.set(
-                        &tt,
-                        target_value,
-                        key_name,
-                        &json_val,
-                        &ValueType::Set,
-                        email,
-                        now,
-                    )?;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    for (key, tombstone) in tombstones {
-        if values.contains_key(key) {
-            continue;
-        }
-        let tt = TargetType::from_str(&key.0)?;
-        db.apply_tombstone(&tt, &key.1, &key.2, &tombstone.email, tombstone.timestamp)?;
     }
 
     Ok(())
