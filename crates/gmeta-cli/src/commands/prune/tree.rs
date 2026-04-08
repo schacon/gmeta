@@ -116,11 +116,11 @@ pub fn run(dry_run: bool) -> Result<()> {
     let mut pruned_tombs = 0u64;
     let tombstones: Vec<_> = all_tombstones
         .into_iter()
-        .filter(|(tt, _, key, ts, _)| {
-            if !is_main_dest(key) {
+        .filter(|r| {
+            if !is_main_dest(&r.key) {
                 return false;
             }
-            if tt != "project" && *ts < cutoff_ms {
+            if r.target_type != "project" && r.timestamp < cutoff_ms {
                 pruned_tombs += 1;
                 return false;
             }
@@ -129,13 +129,15 @@ pub fn run(dry_run: bool) -> Result<()> {
         .collect();
     let set_tombstones: Vec<_> = all_set_tombstones
         .into_iter()
-        .filter(|(tt, _, key, _, _, ts, _)| {
-            (tt == "project" || *ts >= cutoff_ms) && is_main_dest(key)
+        .filter(|r| {
+            (r.target_type == "project" || r.timestamp >= cutoff_ms) && is_main_dest(&r.key)
         })
         .collect();
     let list_tombstones: Vec<_> = all_list_tombstones
         .into_iter()
-        .filter(|(tt, _, key, _, ts, _)| (tt == "project" || *ts >= cutoff_ms) && is_main_dest(key))
+        .filter(|r| {
+            (r.target_type == "project" || r.timestamp >= cutoff_ms) && is_main_dest(&r.key)
+        })
         .collect();
 
     let total_pruned = pruned_meta + pruned_tombs;

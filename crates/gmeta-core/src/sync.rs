@@ -131,7 +131,7 @@ pub(crate) fn insert_promisor_entries(
                     if change.op == 'D' {
                         continue;
                     }
-                    let target_type = TargetType::from_str(&change.target_type)?;
+                    let target_type = change.target_type.parse::<TargetType>()?;
                     if store.insert_promised(
                         &target_type,
                         &change.target_value,
@@ -152,7 +152,7 @@ pub(crate) fn insert_promisor_entries(
                         .detach();
                     let keys = extract_keys_from_tree(repo, tree_id)?;
                     for (target_type_str, target_value, key) in &keys {
-                        let target_type = TargetType::from_str(target_type_str)?;
+                        let target_type = target_type_str.parse::<TargetType>()?;
                         if store.insert_promised(
                             &target_type,
                             target_value,

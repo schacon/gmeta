@@ -5,18 +5,41 @@
 
 use std::collections::BTreeMap;
 
+use crate::types::{Target, TargetType};
+
 /// A key uniquely identifying a metadata entry.
 ///
-/// Composed of the target type (e.g. `"commit"`), the target value
+/// Composed of the target type (e.g. [`TargetType::Commit`]), the target value
 /// (e.g. a SHA), and the metadata key name (e.g. `"agent:model"`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Key {
-    /// The target type, e.g. `"commit"`, `"branch"`, `"path"`.
-    pub target_type: String,
+    /// The kind of object this metadata is attached to.
+    pub target_type: TargetType,
     /// The target value, e.g. a commit SHA or branch name.
     pub target_value: String,
     /// The metadata key name, e.g. `"agent:model"`.
     pub key: String,
+}
+
+impl Key {
+    /// Convert this key's target information into a [`Target`].
+    ///
+    /// For [`TargetType::Project`] targets, the returned [`Target`] has no value.
+    /// For all other target types, the target value is included.
+    #[must_use]
+    pub fn to_target(&self) -> Target {
+        if self.target_type == TargetType::Project {
+            Target {
+                target_type: TargetType::Project,
+                value: None,
+            }
+        } else {
+            Target {
+                target_type: self.target_type.clone(),
+                value: Some(self.target_value.clone()),
+            }
+        }
+    }
 }
 
 /// A parsed metadata entry from a Git tree.
@@ -44,7 +67,7 @@ pub struct Tombstone {
 }
 
 /// The fully parsed contents of a serialized gmeta Git tree.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ParsedTree {
     /// Metadata values keyed by `(target_type, target_value, key)`.
     pub values: BTreeMap<Key, TreeValue>,

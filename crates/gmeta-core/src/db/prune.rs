@@ -31,8 +31,9 @@ impl Store {
     /// Count tombstone rows that would be pruned (non-project, older than cutoff).
     pub fn count_tombstones_before(&self, cutoff_ms: i64) -> Result<u64> {
         Ok(self.conn.query_row(
-            "SELECT COUNT(*) FROM metadata_tombstones
-             WHERE target_type != 'project' AND timestamp < ?1",
+            "SELECT COUNT(*) FROM tombstones
+             WHERE tombstone_type = 'metadata'
+               AND target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
             |row| row.get(0),
         )?)
@@ -41,8 +42,9 @@ impl Store {
     /// Count set tombstone rows that would be pruned (non-project, older than cutoff).
     pub fn count_set_tombstones_before(&self, cutoff_ms: i64) -> Result<u64> {
         Ok(self.conn.query_row(
-            "SELECT COUNT(*) FROM set_tombstones
-             WHERE target_type != 'project' AND timestamp < ?1",
+            "SELECT COUNT(*) FROM tombstones
+             WHERE tombstone_type = 'set_member'
+               AND target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
             |row| row.get(0),
         )?)
@@ -131,8 +133,9 @@ impl Store {
     /// Prune tombstone rows older than cutoff. Returns the number deleted.
     pub fn prune_tombstones_before(&self, cutoff_ms: i64) -> Result<u64> {
         let deleted = self.conn.execute(
-            "DELETE FROM metadata_tombstones
-             WHERE target_type != 'project' AND timestamp < ?1",
+            "DELETE FROM tombstones
+             WHERE tombstone_type = 'metadata'
+               AND target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
         )?;
         Ok(deleted as u64)
@@ -141,8 +144,9 @@ impl Store {
     /// Prune set tombstone rows older than cutoff. Returns the number deleted.
     pub fn prune_set_tombstones_before(&self, cutoff_ms: i64) -> Result<u64> {
         let deleted = self.conn.execute(
-            "DELETE FROM set_tombstones
-             WHERE target_type != 'project' AND timestamp < ?1",
+            "DELETE FROM tombstones
+             WHERE tombstone_type = 'set_member'
+               AND target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
         )?;
         Ok(deleted as u64)

@@ -13,7 +13,9 @@ use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 use gix::refs::transaction::PreviousValue;
 
-use crate::db::types::SerializableEntry;
+use crate::db::types::{
+    ListTombstoneRecord, SerializableEntry, SetTombstoneRecord, TombstoneRecord,
+};
 use crate::db::Store;
 use crate::error::{Error, Result};
 use crate::list_value::{make_entry_name, parse_entries};
@@ -31,6 +33,7 @@ const MAX_COMMIT_CHANGES: usize = 1000;
 ///
 /// Contains all the information needed by a CLI or other consumer
 /// to report what happened, without performing any I/O itself.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SerializeOutput {
     /// Number of metadata changes serialized (total entries across all destinations).
     pub changes: usize,
@@ -99,8 +102,8 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
 
         let changes: Vec<(char, String, String)> = modified
             .iter()
-            .map(|(target_type, target_value, key, op, _val, _vtype)| {
-                let op_char = match op.as_str() {
+            .map(|entry| {
+                let op_char = match entry.operation.as_str() {
                     "rm" => 'D',
                     "set" => {
                         if existing_tree_oid.is_some() {
@@ -111,22 +114,22 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
                     }
                     _ => 'M',
                 };
-                let target_label = if target_type == "project" {
+                let target_label = if entry.target_type == "project" {
                     "project".to_string()
                 } else {
-                    format!("{target_type}:{target_value}")
+                    format!("{}:{}", entry.target_type, entry.target_value)
                 };
-                (op_char, target_label, key.clone())
+                (op_char, target_label, entry.key.clone())
             })
             .collect();
 
         // Compute dirty target base paths from modified entries
         let mut dirty_bases: BTreeSet<String> = BTreeSet::new();
-        for (target_type, target_value, _key, _op, _val, _vtype) in &modified {
-            let target = if target_type == "project" {
+        for entry in &modified {
+            let target = if entry.target_type == "project" {
                 Target::parse("project")?
             } else {
-                Target::parse(&format!("{target_type}:{target_value}"))?
+                Target::parse(&format!("{}:{}", entry.target_type, entry.target_value))?
             };
             dirty_bases.insert(target.tree_base_path());
         }
@@ -211,14 +214,10 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     // Route entries through filter rules to destinations
     let filter_rules = parse_filter_rules(session.store())?;
 
-    type TombEntry = (String, String, String, i64, String);
-    type SetTombEntry = (String, String, String, String, String, i64, String);
-    type ListTombEntry = (String, String, String, String, i64, String);
-
     let mut dest_metadata: BTreeMap<String, Vec<SerializableEntry>> = BTreeMap::new();
-    let mut dest_tombstones: BTreeMap<String, Vec<TombEntry>> = BTreeMap::new();
-    let mut dest_set_tombstones: BTreeMap<String, Vec<SetTombEntry>> = BTreeMap::new();
-    let mut dest_list_tombstones: BTreeMap<String, Vec<ListTombEntry>> = BTreeMap::new();
+    let mut dest_tombstones: BTreeMap<String, Vec<TombstoneRecord>> = BTreeMap::new();
+    let mut dest_set_tombstones: BTreeMap<String, Vec<SetTombstoneRecord>> = BTreeMap::new();
+    let mut dest_list_tombstones: BTreeMap<String, Vec<ListTombstoneRecord>> = BTreeMap::new();
 
     for entry in &metadata_entries {
         let key = &entry.key;
@@ -230,8 +229,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     }
 
     for entry in &tombstone_entries {
-        let key = &entry.2;
-        if let Some(dests) = classify_key(key, &filter_rules) {
+        if let Some(dests) = classify_key(&entry.key, &filter_rules) {
             for dest in dests {
                 dest_tombstones.entry(dest).or_default().push(entry.clone());
             }
@@ -239,8 +237,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     }
 
     for entry in &set_tombstone_entries {
-        let key = &entry.2;
-        if let Some(dests) = classify_key(key, &filter_rules) {
+        if let Some(dests) = classify_key(&entry.key, &filter_rules) {
             for dest in dests {
                 dest_set_tombstones
                     .entry(dest)
@@ -251,8 +248,7 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     }
 
     for entry in &list_tombstone_entries {
-        let key = &entry.2;
-        if let Some(dests) = classify_key(key, &filter_rules) {
+        if let Some(dests) = classify_key(&entry.key, &filter_rules) {
             for dest in dests {
                 dest_list_tombstones
                     .entry(dest)
@@ -287,9 +283,9 @@ pub fn run(session: &Session, now: i64) -> Result<SerializeOutput> {
     for dest in &all_dests {
         let ref_name = session.destination_ref(dest);
         let empty_meta: Vec<SerializableEntry> = Vec::new();
-        let empty_tomb: Vec<TombEntry> = Vec::new();
-        let empty_set_tomb: Vec<SetTombEntry> = Vec::new();
-        let empty_list_tomb: Vec<ListTombEntry> = Vec::new();
+        let empty_tomb: Vec<TombstoneRecord> = Vec::new();
+        let empty_set_tomb: Vec<SetTombstoneRecord> = Vec::new();
+        let empty_list_tomb: Vec<ListTombstoneRecord> = Vec::new();
 
         let meta = dest_metadata.get(dest).unwrap_or(&empty_meta);
         let tombs = dest_tombstones.get(dest).unwrap_or(&empty_tomb);
@@ -453,9 +449,9 @@ fn build_commit_message(changes: &[(char, String, String)]) -> String {
 pub fn build_filtered_tree(
     repo: &gix::Repository,
     metadata_entries: &[SerializableEntry],
-    tombstone_entries: &[(String, String, String, i64, String)],
-    set_tombstone_entries: &[(String, String, String, String, String, i64, String)],
-    list_tombstone_entries: &[(String, String, String, String, i64, String)],
+    tombstone_entries: &[TombstoneRecord],
+    set_tombstone_entries: &[SetTombstoneRecord],
+    list_tombstone_entries: &[ListTombstoneRecord],
 ) -> Result<gix::ObjectId> {
     build_tree(
         repo,
@@ -476,9 +472,9 @@ pub fn build_filtered_tree(
 fn build_tree(
     repo: &gix::Repository,
     metadata_entries: &[SerializableEntry],
-    tombstone_entries: &[(String, String, String, i64, String)],
-    set_tombstone_entries: &[(String, String, String, String, String, i64, String)],
-    list_tombstone_entries: &[(String, String, String, String, i64, String)],
+    tombstone_entries: &[TombstoneRecord],
+    set_tombstone_entries: &[SetTombstoneRecord],
+    list_tombstone_entries: &[ListTombstoneRecord],
     existing_tree_oid: Option<gix::ObjectId>,
     dirty_target_bases: Option<&BTreeSet<String>>,
 ) -> Result<gix::ObjectId> {
@@ -541,11 +537,11 @@ fn build_tree(
         }
     }
 
-    for (target_type, target_value, key, timestamp, email) in tombstone_entries {
-        let target = if target_type == "project" {
+    for record in tombstone_entries {
+        let target = if record.target_type == "project" {
             Target::parse("project")?
         } else {
-            Target::parse(&format!("{target_type}:{target_value}"))?
+            Target::parse(&format!("{}:{}", record.target_type, record.target_value))?
         };
 
         if let Some(dirty) = dirty_target_bases {
@@ -554,21 +550,19 @@ fn build_tree(
             }
         }
 
-        let full_path = target.tombstone_path(key)?;
+        let full_path = target.tombstone_path(&record.key)?;
         let payload = serde_json::to_vec(&Tombstone {
-            timestamp: *timestamp,
-            email: email.clone(),
+            timestamp: record.timestamp,
+            email: record.email.clone(),
         })?;
         files.insert(full_path, payload);
     }
 
-    for (target_type, target_value, key, member_id, value, _timestamp, _email) in
-        set_tombstone_entries
-    {
-        let target = if target_type == "project" {
+    for record in set_tombstone_entries {
+        let target = if record.target_type == "project" {
             Target::parse("project")?
         } else {
-            Target::parse(&format!("{target_type}:{target_value}"))?
+            Target::parse(&format!("{}:{}", record.target_type, record.target_value))?
         };
 
         if let Some(dirty) = dirty_target_bases {
@@ -577,15 +571,15 @@ fn build_tree(
             }
         }
 
-        let full_path = target.set_member_tombstone_path(key, member_id)?;
-        files.insert(full_path, value.as_bytes().to_vec());
+        let full_path = target.set_member_tombstone_path(&record.key, &record.member_id)?;
+        files.insert(full_path, record.value.as_bytes().to_vec());
     }
 
-    for (target_type, target_value, key, entry_name, timestamp, email) in list_tombstone_entries {
-        let target = if target_type == "project" {
+    for record in list_tombstone_entries {
+        let target = if record.target_type == "project" {
             Target::parse("project")?
         } else {
-            Target::parse(&format!("{target_type}:{target_value}"))?
+            Target::parse(&format!("{}:{}", record.target_type, record.target_value))?
         };
 
         if let Some(dirty) = dirty_target_bases {
@@ -594,10 +588,10 @@ fn build_tree(
             }
         }
 
-        let full_path = target.list_entry_tombstone_path(key, entry_name)?;
+        let full_path = target.list_entry_tombstone_path(&record.key, &record.entry_name)?;
         let payload = serde_json::to_vec(&Tombstone {
-            timestamp: *timestamp,
-            email: email.clone(),
+            timestamp: record.timestamp,
+            email: record.email.clone(),
         })?;
         files.insert(full_path, payload);
     }

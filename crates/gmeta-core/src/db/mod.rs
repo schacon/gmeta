@@ -617,13 +617,13 @@ mod tests {
         assert_eq!(tombstones.len(), 1);
         assert_eq!(
             tombstones[0],
-            (
-                "commit".to_string(),
-                "abc123".to_string(),
-                "key".to_string(),
-                2000,
-                "a@b.com".to_string()
-            )
+            types::TombstoneRecord {
+                target_type: "commit".to_string(),
+                target_value: "abc123".to_string(),
+                key: "key".to_string(),
+                timestamp: 2000,
+                email: "a@b.com".to_string(),
+            }
         );
     }
 

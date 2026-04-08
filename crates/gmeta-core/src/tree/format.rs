@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use super::model::{Key, ParsedTree, Tombstone, TreeValue};
 use crate::git_utils;
 use crate::types::{
-    decode_key_path_segments, decode_path_target_segments, Target, LIST_VALUE_DIR,
+    decode_key_path_segments, decode_path_target_segments, TargetType, LIST_VALUE_DIR,
     PATH_TARGET_SEPARATOR, SET_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_BLOB, TOMBSTONE_ROOT,
 };
 
@@ -400,18 +400,21 @@ fn collect_blobs(
 /// # Errors
 ///
 /// Returns an error if the path is too short or missing required separators.
-pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a [&'a str])> {
+pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(TargetType, String, &'a [&'a str])> {
     if parts.is_empty() {
         return Err(Error::InvalidTreePath("empty path".into()));
     }
 
-    let target_type = parts[0];
+    let target_type_str = parts[0];
+    let target_type: TargetType = target_type_str
+        .parse()
+        .map_err(|_| Error::InvalidTreePath(format!("unknown target type: {target_type_str:?}")))?;
 
-    if target_type == "project" {
-        return Ok(("project".to_string(), "".to_string(), &parts[1..]));
+    if target_type == TargetType::Project {
+        return Ok((TargetType::Project, String::new(), &parts[1..]));
     }
 
-    if target_type == "path" {
+    if target_type == TargetType::Path {
         let separator_index = parts
             .iter()
             .position(|part| *part == PATH_TARGET_SEPARATOR)
@@ -426,11 +429,7 @@ pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a
         }
 
         let target_value = decode_path_target_segments(&parts[1..separator_index])?;
-        return Ok((
-            target_type.to_string(),
-            target_value,
-            &parts[separator_index + 1..],
-        ));
+        return Ok((target_type, target_value, &parts[separator_index + 1..]));
     }
 
     if parts.len() < 4 {
@@ -440,7 +439,7 @@ pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(String, String, &'a
     }
 
     let target_value = parts[2].to_string();
-    Ok((target_type.to_string(), target_value, &parts[3..]))
+    Ok((target_type, target_value, &parts[3..]))
 }
 
 /// Build a Git tree from merged metadata values and tombstones.
@@ -473,11 +472,7 @@ pub fn build_merged_tree(
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
 
     for (k, tree_val) in values {
-        let target = if k.target_type == "project" {
-            Target::parse("project")?
-        } else {
-            Target::parse(&format!("{}:{}", k.target_type, k.target_value))?
-        };
+        let target = k.to_target();
 
         match tree_val {
             TreeValue::String(s) => {
@@ -502,11 +497,7 @@ pub fn build_merged_tree(
     }
 
     for (k, tombstone) in tombstones {
-        let target = if k.target_type == "project" {
-            Target::parse("project")?
-        } else {
-            Target::parse(&format!("{}:{}", k.target_type, k.target_value))?
-        };
+        let target = k.to_target();
         let full_path = target.tombstone_path(&k.key)?;
         let payload = serde_json::to_vec(&Tombstone {
             timestamp: tombstone.timestamp,
@@ -516,21 +507,13 @@ pub fn build_merged_tree(
     }
 
     for ((k, member_id), tombstone_value) in set_tombstones {
-        let target = if k.target_type == "project" {
-            Target::parse("project")?
-        } else {
-            Target::parse(&format!("{}:{}", k.target_type, k.target_value))?
-        };
+        let target = k.to_target();
         let full_path = target.set_member_tombstone_path(&k.key, member_id)?;
         files.insert(full_path, tombstone_value.as_bytes().to_vec());
     }
 
     for ((k, entry_name), tombstone) in list_tombstones {
-        let target = if k.target_type == "project" {
-            Target::parse("project")?
-        } else {
-            Target::parse(&format!("{}:{}", k.target_type, k.target_value))?
-        };
+        let target = k.to_target();
         let full_path = target.list_entry_tombstone_path(&k.key, entry_name)?;
         let payload = serde_json::to_vec(&Tombstone {
             timestamp: tombstone.timestamp,
@@ -559,7 +542,7 @@ mod tests {
             "__value",
         ];
         let (target_type, target_value, key_parts) = parse_path_parts(&parts).unwrap();
-        assert_eq!(target_type, "path");
+        assert_eq!(target_type, TargetType::Path);
         assert_eq!(target_value, "src/__generated/file.rs");
         assert_eq!(key_parts, &["owner", "__value"]);
     }

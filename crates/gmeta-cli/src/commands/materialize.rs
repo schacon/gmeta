@@ -17,14 +17,14 @@ use gmeta_core::Store;
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PlannedDbChange {
     Set {
-        target_type: String,
+        target_type: TargetType,
         target_value: String,
         key: String,
         value_type: String,
         value_preview: String,
     },
     Remove {
-        target_type: String,
+        target_type: TargetType,
         target_value: String,
         key: String,
     },
@@ -112,7 +112,7 @@ fn run_dry_run(ctx: &CommandContext, remote: Option<&str>, verbose: bool) -> Res
         let remote_entries = parse_tree(repo, remote_tree_id, "")?;
 
         if verbose {
-            print_verbose_tree_info(&remote_entries)?;
+            print_verbose_tree_info(&remote_entries);
         }
 
         // Get local commit (if any)
@@ -456,7 +456,7 @@ fn dry_run_merge(
     Ok(())
 }
 
-fn print_verbose_tree_info(entries: &ParsedTree) -> Result<()> {
+fn print_verbose_tree_info(entries: &ParsedTree) {
     eprintln!(
         "[verbose] remote tree: {} values, {} tombstones, {} set tombstones",
         entries.values.len(),
@@ -464,8 +464,7 @@ fn print_verbose_tree_info(entries: &ParsedTree) -> Result<()> {
         entries.set_tombstones.len()
     );
     for (mk, val) in &entries.values {
-        let target =
-            format_target_for_display(&TargetType::from_str(&mk.target_type)?, &mk.target_value);
+        let target = format_target_for_display(&mk.target_type, &mk.target_value);
         let val_desc = match val {
             TreeValue::String(s) => {
                 if s.len() > 50 {
@@ -481,14 +480,12 @@ fn print_verbose_tree_info(entries: &ParsedTree) -> Result<()> {
         eprintln!("  {} {} -> {}", target, mk.key, val_desc);
     }
     for (mk, tomb) in &entries.tombstones {
-        let target =
-            format_target_for_display(&TargetType::from_str(&mk.target_type)?, &mk.target_value);
+        let target = format_target_for_display(&mk.target_type, &mk.target_value);
         eprintln!(
             "  {} {} -> tombstone [ts={}, by={}]",
             target, mk.key, tomb.timestamp, tomb.email
         );
     }
-    Ok(())
 }
 
 fn print_verbose_ff_delta(local_entries: &ParsedTree, remote_entries: &ParsedTree) {
@@ -581,11 +578,10 @@ fn collect_db_changes_from_tree(
     let mut planned = Vec::new();
 
     for (mk, tree_val) in values {
-        let tt = TargetType::from_str(&mk.target_type)?;
         match tree_val {
             TreeValue::String(s) => {
                 let json_val = serde_json::to_string(s)?;
-                let existing = db.get(&tt, &mk.target_value, &mk.key)?;
+                let existing = db.get(&mk.target_type, &mk.target_value, &mk.key)?;
                 if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: mk.target_type.clone(),
@@ -620,7 +616,7 @@ fn collect_db_changes_from_tree(
                     });
                 }
                 let json_val = encode_entries(&items)?;
-                let existing = db.get(&tt, &mk.target_value, &mk.key)?;
+                let existing = db.get(&mk.target_type, &mk.target_value, &mk.key)?;
                 if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: mk.target_type.clone(),
@@ -654,7 +650,7 @@ fn collect_db_changes_from_tree(
                     .collect();
                 visible.sort();
                 let json_val = serde_json::to_string(&visible)?;
-                let existing = db.get(&tt, &mk.target_value, &mk.key)?;
+                let existing = db.get(&mk.target_type, &mk.target_value, &mk.key)?;
                 if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                     planned.push(PlannedDbChange::Set {
                         target_type: mk.target_type.clone(),
@@ -729,11 +725,7 @@ fn print_dry_run_report(
                     value_type,
                     value_preview,
                 } => {
-                    let target_display = if target_type == "project" {
-                        "project".to_string()
-                    } else {
-                        format!("{}:{}", target_type, target_value)
-                    };
+                    let target_display = format_target_for_display(target_type, target_value);
                     println!(
                         "  set {} {} ({}) = {}",
                         target_display, key, value_type, value_preview
@@ -744,11 +736,7 @@ fn print_dry_run_report(
                     target_value,
                     key,
                 } => {
-                    let target_display = if target_type == "project" {
-                        "project".to_string()
-                    } else {
-                        format!("{}:{}", target_type, target_value)
-                    };
+                    let target_display = format_target_for_display(target_type, target_value);
                     println!("  rm {} {}", target_display, key);
                 }
             }
@@ -760,15 +748,11 @@ fn format_target_for_display(target_type: &TargetType, target_value: &str) -> St
     if *target_type == TargetType::Project {
         "project".to_string()
     } else {
-        format!("{}:{}", target_type.as_str(), target_value)
+        format!("{}:{}", target_type, target_value)
     }
 }
 
 fn format_key_for_display(key: &Key) -> String {
-    let target_display = if key.target_type == "project" {
-        "project".to_string()
-    } else {
-        format!("{}:{}", key.target_type, key.target_value)
-    };
+    let target_display = format_target_for_display(&key.target_type, &key.target_value);
     format!("{} {}", target_display, key.key)
 }

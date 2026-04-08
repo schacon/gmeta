@@ -48,7 +48,7 @@ pub fn run() -> Result<()> {
         let grouped = group_keys_by_integer_pattern(keys);
 
         let total: u64 = grouped.values().sum();
-        let tt = gmeta_core::types::TargetType::from_str(target_type)?;
+        let tt = target_type.parse::<gmeta_core::types::TargetType>()?;
         let plural = tt.pluralize();
         println!("{}: {} keys", plural, total);
 

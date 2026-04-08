@@ -5,7 +5,7 @@ use rusqlite::{params, OptionalExtension};
 use crate::error::Result;
 use crate::list_value::{encode_entries, parse_timestamp_from_entry_name, ListEntry};
 use crate::tree::model::{Key, Tombstone, TreeValue};
-use crate::types::{set_member_id, TargetType, ValueType, GIT_REF_THRESHOLD};
+use crate::types::{set_member_id, ValueType, GIT_REF_THRESHOLD};
 
 use super::{encode_list_entries_by_metadata_id, encode_set_values_by_metadata_id, Store};
 
@@ -45,7 +45,7 @@ impl Store {
                 last_timestamp,
                 is_git_ref,
             ) = row?;
-            let vt = ValueType::from_str(&value_type_str)?;
+            let vt = value_type_str.parse::<ValueType>()?;
             match vt {
                 ValueType::List => {
                     let encoded = encode_list_entries_by_metadata_id(
@@ -92,10 +92,8 @@ impl Store {
     }
 
     /// Get entries modified since a given timestamp (for incremental serialization).
-    pub fn get_modified_since(
-        &self,
-        since: i64,
-    ) -> Result<Vec<(String, String, String, String, String, String)>> {
+    pub fn get_modified_since(&self, since: i64) -> Result<Vec<super::types::ModifiedEntry>> {
+        use super::types::ModifiedEntry;
         let mut stmt = self.conn.prepare(
             "SELECT DISTINCT ml.target_type, ml.target_value, ml.key, ml.operation,
                     COALESCE(m.value, ''), COALESCE(m.value_type, '')
@@ -107,14 +105,14 @@ impl Store {
         )?;
 
         let rows = stmt.query_map(params![since], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, String>(5)?,
-            ))
+            Ok(ModifiedEntry {
+                target_type: row.get(0)?,
+                target_value: row.get(1)?,
+                key: row.get(2)?,
+                operation: row.get(3)?,
+                value: row.get(4)?,
+                value_type: row.get(5)?,
+            })
         })?;
 
         let mut results = Vec::new();
@@ -163,7 +161,7 @@ impl Store {
         now: i64,
     ) -> Result<()> {
         for (k, tree_val) in values {
-            let tt = TargetType::from_str(&k.target_type)?;
+            let tt = &k.target_type;
             match tree_val {
                 TreeValue::String(s) => {
                     if s.len() > GIT_REF_THRESHOLD {
@@ -174,11 +172,11 @@ impl Store {
                                     crate::error::Error::Other(format!("failed to write blob: {e}"))
                                 })?
                                 .to_string();
-                            let existing = self.get(&tt, &k.target_value, &k.key)?;
+                            let existing = self.get(tt, &k.target_value, &k.key)?;
                             if existing.as_ref().map(|e| e.value.as_str()) != Some(&blob_oid) {
                                 self.set_with_git_ref(
                                     None,
-                                    &tt,
+                                    tt,
                                     &k.target_value,
                                     &k.key,
                                     &blob_oid,
@@ -191,10 +189,10 @@ impl Store {
                         }
                     } else {
                         let json_val = serde_json::to_string(s)?;
-                        let existing = self.get(&tt, &k.target_value, &k.key)?;
+                        let existing = self.get(tt, &k.target_value, &k.key)?;
                         if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                             self.set(
-                                &tt,
+                                tt,
                                 &k.target_value,
                                 &k.key,
                                 &json_val,
@@ -229,10 +227,10 @@ impl Store {
                         });
                     }
                     let json_val = encode_entries(&items)?;
-                    let existing = self.get(&tt, &k.target_value, &k.key)?;
+                    let existing = self.get(tt, &k.target_value, &k.key)?;
                     if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                         self.set(
-                            &tt,
+                            tt,
                             &k.target_value,
                             &k.key,
                             &json_val,
@@ -260,10 +258,10 @@ impl Store {
                         .collect();
                     visible.sort();
                     let json_val = serde_json::to_string(&visible)?;
-                    let existing = self.get(&tt, &k.target_value, &k.key)?;
+                    let existing = self.get(tt, &k.target_value, &k.key)?;
                     if existing.as_ref().map(|e| e.value.as_str()) != Some(&json_val) {
                         self.set(
-                            &tt,
+                            tt,
                             &k.target_value,
                             &k.key,
                             &json_val,
@@ -280,9 +278,8 @@ impl Store {
             if values.contains_key(key) {
                 continue;
             }
-            let tt = TargetType::from_str(&key.target_type)?;
             self.apply_tombstone(
-                &tt,
+                &key.target_type,
                 &key.target_value,
                 &key.key,
                 &tombstone.email,
