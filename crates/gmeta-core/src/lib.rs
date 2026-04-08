@@ -35,7 +35,7 @@ pub mod tree;
 pub mod types;
 
 // Re-export the most commonly used types at the crate root for convenience.
-pub use db::{Batch, Store};
+pub use db::Store;
 pub use error::{Error, Result};
 pub use materialize::{MaterializeOutput, MaterializeRefResult, MaterializeStrategy};
 pub use pull::PullOutput;

@@ -1,5 +1,3 @@
-/// Batch API for atomic multi-writes.
-mod batch;
 mod lists;
 mod metadata;
 mod promised;
@@ -12,8 +10,6 @@ mod tombstones;
 /// Named return types for database query methods.
 pub mod types;
 mod value_ops;
-
-pub use batch::Batch;
 
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
