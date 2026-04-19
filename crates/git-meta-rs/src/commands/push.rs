@@ -102,7 +102,7 @@ This repository stores structured metadata for the project at:
 
     {origin_url}
 
-It is managed by [git meta](https://github.com/schacon/gmeta), a tool for associating
+It is managed by [git meta](https://github.com/git-meta/git-meta), a tool for associating
 key-value metadata with Git objects (commits, branches, paths, and more) and syncing
 them across repositories.
 
@@ -117,7 +117,7 @@ metadata remote in your local checkout of the main project.
 
 ## Setup
 
-1. Install git meta (see the [git meta README](https://github.com/schacon/gmeta) for details).
+1. Install git meta (see the [git meta README](https://github.com/git-meta/git-meta) for details).
 
 2. In your local clone of the main project, add this repository as a metadata remote:
 

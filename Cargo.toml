@@ -6,7 +6,7 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/schacon/gmeta"
+repository = "https://github.com/git-meta/git-meta"
 
 [workspace.dependencies]
 anyhow = "1"
