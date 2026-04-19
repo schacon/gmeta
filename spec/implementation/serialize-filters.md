@@ -121,15 +121,15 @@ No new commands are needed. Filter rules are managed with the existing `set` com
 
 ```sh
 # Add a filter rule
-gmeta set:add project meta:filter "exclude draft:**"
-gmeta set:add project meta:local:filter "route myteam:** private"
-gmeta set:add project meta:local:filter "route acme:** vendor"
+git meta set:add project meta:filter "exclude draft:**"
+git meta set:add project meta:local:filter "route myteam:** private"
+git meta set:add project meta:local:filter "route acme:** vendor"
 
 # View current filter rules
-gmeta get project meta:local:filter
+git meta get project meta:local:filter
 
 # Remove a filter rule
-gmeta set:rm project meta:filter "exclude draft:**"
+git meta set:rm project meta:filter "exclude draft:**"
 ```
 
 ## Examples
@@ -137,33 +137,33 @@ gmeta set:rm project meta:filter "exclude draft:**"
 ### Keep draft notes local
 
 ```sh
-gmeta set:add project meta:local:filter "exclude draft:**"
-gmeta add commit:abc123 draft:summary "WIP: still thinking about this"
-gmeta serialize   # draft:summary is not in the git tree
+git meta set:add project meta:local:filter "exclude draft:**"
+git meta add commit:abc123 draft:summary "WIP: still thinking about this"
+git meta serialize   # draft:summary is not in the git tree
 ```
 
 ### Route personal annotations to a separate ref
 
 ```sh
-gmeta set:add project meta:local:filter "route myname:** mine"
-gmeta set commit:abc123 myname:review-note "looks good but check error handling"
-gmeta serialize   # review-note goes to refs/meta/local/mine, not refs/meta/local/main
+git meta set:add project meta:local:filter "route myname:** mine"
+git meta set commit:abc123 myname:review-note "looks good but check error handling"
+git meta serialize   # review-note goes to refs/meta/local/mine, not refs/meta/local/main
 ```
 
 ### Route different namespaces to different refs
 
 ```sh
-gmeta set:add project meta:local:filter "route myname:** mine"
-gmeta set:add project meta:local:filter "route acme:** vendor"
-gmeta serialize   # myname:* keys go to refs/meta/local/mine
+git meta set:add project meta:local:filter "route myname:** mine"
+git meta set:add project meta:local:filter "route acme:** vendor"
+git meta serialize   # myname:* keys go to refs/meta/local/mine
                   # acme:* keys go to refs/meta/local/vendor
 ```
 
 ### Always-local scratch space
 
 ```sh
-gmeta set commit:abc123 meta:local:cursor-pos "line 42"
-gmeta serialize   # meta:local:cursor-pos is never serialized, no filter needed
+git meta set commit:abc123 meta:local:cursor-pos "line 42"
+git meta serialize   # meta:local:cursor-pos is never serialized, no filter needed
 ```
 
 ## Non-goals

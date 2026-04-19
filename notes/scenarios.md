@@ -18,7 +18,7 @@ One repo uses a non-default namespace (for example `meta.namespace=notes`) or wa
 How gmeta handles it:
 - Serialize writes to `refs/<namespace>/local`.
 - Materialize scans `refs/<namespace>/*` (excluding `local`).
-- `gmeta materialize <remote>` narrows to `refs/<namespace>/<remote>`.
+- `git meta materialize <remote>` narrows to `refs/<namespace>/<remote>`.
 
 ## 3) No-op materialize cases
 
@@ -105,6 +105,6 @@ How gmeta handles it:
 A user wants to inspect what materialize would do before changing refs/SQLite.
 
 How gmeta handles it:
-- `gmeta materialize --dry-run` prints strategy, conflict resolutions, and planned SQLite operations.
+- `git meta materialize --dry-run` prints strategy, conflict resolutions, and planned SQLite operations.
 - It does not mutate SQLite.
 - It does not move `refs/<namespace>/local`.

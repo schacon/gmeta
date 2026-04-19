@@ -1,4 +1,4 @@
-//! `gmeta log` — walk the commit history and print metadata for each commit,
+//! `git meta log` — walk the commit history and print metadata for each commit,
 //! matching the output of scripts/log.rb.
 
 use anyhow::{Context, Result};

@@ -1,6 +1,6 @@
-//! End-to-end tests for gmeta.
+//! End-to-end tests for git meta.
 //!
-//! These tests exercise the `gmeta` CLI binary against real git repositories,
+//! These tests exercise the `git-meta` CLI binary against real git repositories,
 //! verifying the full round-trip of metadata operations. The test harness
 //! provides environment isolation and fixture-based repo setup inspired by
 //! GitButler's `but-testsupport` crate.

@@ -1,4 +1,4 @@
-//! `gmeta prune` — create a prune commit on the serialized ref tree,
+//! `git meta prune` — create a prune commit on the serialized ref tree,
 //! dropping entries older than the configured retention window.
 //!
 //! Unlike auto-prune (which only drops list entries and tombstones from the
@@ -33,7 +33,7 @@ pub fn run(dry_run: bool) -> Result<()> {
             eprintln!("No prune rules configured (meta:prune:since is required).");
             eprintln!();
             eprintln!("Set a retention window first:");
-            eprintln!("  gmeta config meta:prune:since 6m");
+            eprintln!("  git meta config meta:prune:since 6m");
             return Ok(());
         }
     };
@@ -62,7 +62,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         .and_then(|r| r.into_fully_peeled_id().ok())
         .map(gix::Id::detach)
     else {
-        eprintln!("No serialized metadata found at {ref_name}. Run `gmeta serialize` first.");
+        eprintln!("No serialized metadata found at {ref_name}. Run `git meta serialize` first.");
         return Ok(());
     };
 
@@ -171,7 +171,7 @@ pub fn run(dry_run: bool) -> Result<()> {
     };
 
     let message = format!(
-        "gmeta: prune --since={since}\n\npruned: true\nsince: {since}\nkeys-dropped: {keys_dropped}\nkeys-retained: {keys_retained}"
+        "git-meta: prune --since={since}\n\npruned: true\nsince: {since}\nkeys-dropped: {keys_dropped}\nkeys-retained: {keys_retained}"
     );
 
     let commit = gix::objs::Commit {
@@ -189,7 +189,7 @@ pub fn run(dry_run: bool) -> Result<()> {
         ref_name.as_str(),
         commit_oid,
         PreviousValue::Any,
-        "gmeta: prune",
+        "git-meta: prune",
     )?;
 
     println!(

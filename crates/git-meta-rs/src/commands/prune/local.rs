@@ -31,10 +31,10 @@ pub fn run(dry_run: bool, skip_date: bool) -> Result<()> {
                     None => {
                         eprintln!("No prune rules configured.");
                         eprintln!();
-                        eprintln!("Run `gmeta config:prune` to set up auto-prune rules, or set them manually:");
-                        eprintln!("  gmeta config meta:prune:since 6m");
-                        eprintln!("  gmeta config meta:prune:max-keys 10000");
-                        eprintln!("  gmeta config meta:prune:max-size 10m");
+                        eprintln!("Run `git meta config:prune` to set up auto-prune rules, or set them manually:");
+                        eprintln!("  git meta config meta:prune:since 6m");
+                        eprintln!("  git meta config meta:prune:max-keys 10000");
+                        eprintln!("  git meta config meta:prune:max-size 10m");
                         return Ok(());
                     }
                 }

@@ -45,9 +45,9 @@ Queries that hit this table:
 - `get_authorship` (`db.rs:163`) — `ORDER BY timestamp DESC LIMIT 1`: **full table scan per key**
 - `get_locally_modified_keys` (`db.rs:365`) — `WHERE timestamp > ?1`: **full table scan**
 
-After 1M operations, every authorship lookup scans all 1M rows. `gmeta get --json --with-authorship` for a target with 50 keys triggers 50 sequential full-table scans.
+After 1M operations, every authorship lookup scans all 1M rows. `git meta get --json --with-authorship` for a target with 50 keys triggers 50 sequential full-table scans.
 
-**Impact**: Authorship queries become O(log_size) per key. Get-with-authorship becomes O(keys × log_size). At 1M+ log entries, `gmeta get --with-authorship` for a single target could take seconds.
+**Impact**: Authorship queries become O(log_size) per key. Get-with-authorship becomes O(keys × log_size). At 1M+ log entries, `git meta get --with-authorship` for a single target could take seconds.
 
 **Fix direction**: Add indexes:
 ```sql
@@ -106,7 +106,7 @@ The code opens SQLite with default settings. Missing optimizations:
 - **No WAL mode**: Default journal mode uses rollback journals, which serialize readers and writers. `PRAGMA journal_mode=WAL` would allow concurrent reads during writes.
 - **No synchronous tuning**: Default `synchronous=FULL` fsyncs on every commit. `synchronous=NORMAL` with WAL is safe and much faster.
 - **No page cache sizing**: Default cache is small. `PRAGMA cache_size=-8000` (8MB) would help with large datasets.
-- **No busy timeout**: Multiple processes (e.g., concurrent `gmeta set` calls) will get immediate `SQLITE_BUSY` errors instead of retrying.
+- **No busy timeout**: Multiple processes (e.g., concurrent `git meta set` calls) will get immediate `SQLITE_BUSY` errors instead of retrying.
 
 **Impact**: Poor throughput under any concurrent access. Unnecessary I/O overhead for every operation.
 
@@ -120,9 +120,9 @@ In a large monorepo with 50k+ refs (branches, tags, PRs), this iterates all of t
 
 **Fix direction**: Use `repo.references_glob("refs/meta/*")` or the equivalent prefix-filtered iterator from libgit2.
 
-### S9. No pagination for gmeta get
+### S9. No pagination for git meta get
 
-`gmeta get <target>` with no key returns all key/value pairs for a target. If a target has thousands of keys, this dumps everything to stdout in one shot. The JSON variant builds the entire nested structure in memory before printing.
+`git meta get <target>` with no key returns all key/value pairs for a target. If a target has thousands of keys, this dumps everything to stdout in one shot. The JSON variant builds the entire nested structure in memory before printing.
 
 **Impact**: Unusable output for targets with many keys. Memory spike for JSON rendering.
 

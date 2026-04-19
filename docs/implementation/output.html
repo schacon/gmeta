@@ -46,24 +46,24 @@
         </header>
         <article class="doc-content">
           <p>This document describes implementation-level query behavior and display choices.</p>
-<p>The exchange format defines what data means on the wire; this document defines how a specific implementation may expose that data through commands like <code>gmeta get</code>.</p>
+<p>The exchange format defines what data means on the wire; this document defines how a specific implementation may expose that data through commands like <code>git meta get</code>.</p>
 <h2 id="query-forms">Query forms</h2>
-<p><code>gmeta get</code> should support three basic forms:</p>
-<pre><code>gmeta get &lt;target&gt;
-gmeta get &lt;target&gt; &lt;key&gt;
-gmeta get &lt;target&gt; &lt;partial-key&gt;</code></pre>
+<p><code>git meta get</code> should support three basic forms:</p>
+<pre><code>git meta get &lt;target&gt;
+git meta get &lt;target&gt; &lt;key&gt;
+git meta get &lt;target&gt; &lt;partial-key&gt;</code></pre>
 <p>Behavior:</p>
 <ul><li>with only a target, return all visible keys for that target</li><li>with an exact key, return that key if present</li><li>with a partial key, return matching keys in that namespace subtree</li></ul>
 <h2 id="human-readable-output">Human-readable output</h2>
 <p>Example:</p>
-<pre><code>❯ gmeta get commit:13a7d29cde8f8557b54fd6474f547a56822180ae
+<pre><code>❯ git meta get commit:13a7d29cde8f8557b54fd6474f547a56822180ae
 agent:model  claude-4.6
 agent:provider  anthropic</code></pre>
 <p>Human-readable output should be stable and easy to scan, but exact formatting is an implementation detail.</p>
 <h2 id="json-output">JSON output</h2>
 <p><code>--json</code> should return a structured object representation.</p>
 <p>Example:</p>
-<pre><code>❯ gmeta get --json commit:13a7d29cde8f8557b54fd6474f547a56822180ae
+<pre><code>❯ git meta get --json commit:13a7d29cde8f8557b54fd6474f547a56822180ae
 {
   &quot;agent&quot;: {
     &quot;model&quot;: &quot;claude-4.6&quot;,
@@ -73,7 +73,7 @@ agent:provider  anthropic</code></pre>
 <h2 id="json-with-authorship">JSON with authorship</h2>
 <p><code>--with-authorship</code> augments JSON values with provenance metadata for the last visible mutation.</p>
 <p>Example:</p>
-<pre><code>❯ gmeta get --json --with-authorship commit:13a7d29cde8f8557b54fd6474f547a56822180ae
+<pre><code>❯ git meta get --json --with-authorship commit:13a7d29cde8f8557b54fd6474f547a56822180ae
 {
   &quot;agent&quot;: {
     &quot;model&quot;: {

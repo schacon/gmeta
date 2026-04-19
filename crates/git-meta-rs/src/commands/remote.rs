@@ -83,7 +83,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                         "no metadata refs found on {url}\n\n\
                          The remote does not have refs/{ns}/main or any other recognizable metadata refs.\n\
                          If this is a new remote that will receive metadata via push, use:\n  \
-                         gmeta remote add {url} --name {name} --namespace {ns}",
+                         git meta remote add {url} --name {name} --namespace {ns}",
                     );
                 } else {
                     let found_refs = other_namespaces
@@ -93,7 +93,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                         .join("\n");
                     let suggestions = other_namespaces
                         .iter()
-                        .map(|alt| format!("  gmeta remote add {url} --namespace={alt}"))
+                        .map(|alt| format!("  git meta remote add {url} --namespace={alt}"))
                         .collect::<Vec<_>>()
                         .join("\n");
                     bail!(
@@ -170,7 +170,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                     eprintln!(
                         "  warning: tracking ref {tracking_ref_name} not found after fetch: {e}"
                     );
-                    eprintln!("You can try again with: gmeta pull");
+                    eprintln!("You can try again with: git meta pull");
                     return Ok(());
                 }
             }
@@ -208,7 +208,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
         }
         Err(e) => {
             eprintln!("\nWarning: initial fetch failed: {e}");
-            eprintln!("You can fetch later with: gmeta pull");
+            eprintln!("You can fetch later with: git meta pull");
         }
     }
 
@@ -292,7 +292,7 @@ pub fn run_list() -> Result<()> {
 
     if remotes.is_empty() {
         println!("No metadata remotes configured.");
-        println!("Add one with: gmeta remote add <url>");
+        println!("Add one with: git meta remote add <url>");
     } else {
         for (name, url) in &remotes {
             println!("{name}\t{url}");

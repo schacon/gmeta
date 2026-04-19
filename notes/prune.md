@@ -1,8 +1,8 @@
-# gmeta prune
+# git meta prune
 
 ## Overview
 
-`gmeta prune` re-materializes the serialized meta tree, keeping only values written within a
+`git meta prune` re-materializes the serialized meta tree, keeping only values written within a
 specified date range. It is designed to shrink a long-lived `refs/meta/local` history so that
 a shallow fetch/clone is all most users need, while the full history remains available by
 deepening the clone or fetching the pre-prune commit(s) explicitly.
@@ -10,7 +10,7 @@ deepening the clone or fetching the pre-prune commit(s) explicitly.
 ## Command
 
 ```
-gmeta prune --since=<date> [--min-size=<bytes>]
+git meta prune --since=<date> [--min-size=<bytes>]
 ```
 
 - `--since=<date>` — retain only entries whose most-recent log timestamp is on or after this date.
@@ -41,7 +41,7 @@ gmeta prune --since=<date> [--min-size=<bytes>]
 ## Commit message format
 
 ```
-gmeta: prune --since=2025-01-01
+git-meta: prune --since=2025-01-01
 
 pruned: true
 since: 2025-01-01T00:00:00Z
@@ -61,18 +61,18 @@ is still accessible:
 - `git fetch --depth=1` gives only the pruned, compact tree — the common case.
 - `git fetch --unshallow` or `git fetch --deepen=N` retrieves older meta commits, including the
   full pre-prune tree, without any special tooling.
-- `gmeta materialize` already operates on whatever commits are locally available; if older commits
-  are deepened in, a subsequent `gmeta materialize` can incorporate them.
+- `git meta materialize` already operates on whatever commits are locally available; if older commits
+  are deepened in, a subsequent `git meta materialize` can incorporate them.
 
 ## Caveats
 
 - Prune is a lossy operation on the live ref. It does not archive or rename the old ref — the
   older data is preserved only in git history, accessible via deepen. If you want a permanent
   named snapshot of the pre-prune state, tag the current head before running prune.
-- Running `gmeta prune` and then `gmeta serialize` in quick succession is safe: serialize checks
+- Running `git meta prune` and then `git meta serialize` in quick succession is safe: serialize checks
   the prune epoch in SQLite and will not re-emit keys that were pruned unless they have been
   written again locally since the prune.
-- Conflict resolution during a subsequent `gmeta materialize` from a remote that has not yet
+- Conflict resolution during a subsequent `git meta materialize` from a remote that has not yet
   pruned falls back to the normal merge rules. Keys the remote still carries that were locally
   pruned will be re-introduced via the merge — this is intentional, since the remote is the
   authoritative source for those values.

@@ -324,7 +324,7 @@ pub enum Commands {
         skip_date: bool,
     },
 
-    /// Remove the gmeta database and all meta refs
+    /// Remove the git meta database and all meta refs
     #[command(display_order = 44)]
     Teardown,
 

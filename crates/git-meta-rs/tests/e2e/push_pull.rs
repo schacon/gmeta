@@ -11,19 +11,22 @@ fn push_simple() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
     let target = commit_target(&sha);
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["push"])
         .assert()
         .success()
@@ -45,21 +48,27 @@ fn push_up_to_date() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
     let target = commit_target(&sha);
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path()).args(["push"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["push"])
+        .assert()
+        .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["push"])
         .assert()
         .success()
@@ -72,22 +81,28 @@ fn push_commit_message_format() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
     let target = commit_target(&sha);
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:cost", "0.05"])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["push"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["push"])
+        .assert()
+        .success();
 
     let bare = open_repo(bare_dir.path());
     let tip_oid = ref_to_commit_oid(&bare, "refs/meta/main");
@@ -111,40 +126,40 @@ fn push_conflict_produces_no_merge_commits() {
     let (dir_a, sha_a) = setup_repo();
     let (dir_b, sha_b) = setup_repo();
 
-    harness::gmeta(dir_a.path())
+    harness::git_meta(dir_a.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir_b.path())
+    harness::git_meta(dir_b.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
 
-    harness::gmeta(dir_a.path())
+    harness::git_meta(dir_a.path())
         .args(["pull"])
         .assert()
         .success();
-    harness::gmeta(dir_b.path())
+    harness::git_meta(dir_b.path())
         .args(["pull"])
         .assert()
         .success();
 
     let target_a = commit_target(&sha_a);
-    harness::gmeta(dir_a.path())
+    harness::git_meta(dir_a.path())
         .args(["set", &target_a, "from:a", "value-a"])
         .assert()
         .success();
-    harness::gmeta(dir_a.path())
+    harness::git_meta(dir_a.path())
         .args(["push"])
         .assert()
         .success();
 
     let target_b = commit_target(&sha_b);
-    harness::gmeta(dir_b.path())
+    harness::git_meta(dir_b.path())
         .args(["set", &target_b, "from:b", "value-b"])
         .assert()
         .success();
-    harness::gmeta(dir_b.path())
+    harness::git_meta(dir_b.path())
         .args(["push"])
         .assert()
         .success();
@@ -174,14 +189,17 @@ fn pull_simple() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
 
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "testing"])
         .assert()
         .success()
@@ -194,14 +212,17 @@ fn pull_up_to_date() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
 
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["pull"])
         .assert()
         .success()
@@ -215,24 +236,27 @@ fn pull_merges_with_local_data() {
     let bare_path = bare_dir.path().to_str().unwrap();
 
     let target = commit_target(&sha);
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "local:key", "local-value"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "local:key"])
         .assert()
         .success()
         .stdout(predicate::str::contains("local-value"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "testing"])
         .assert()
         .success()

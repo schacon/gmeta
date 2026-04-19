@@ -14,7 +14,7 @@ fn remote_add_no_meta_refs() {
 
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .failure()
@@ -27,7 +27,7 @@ fn remote_add_meta_refs_in_different_namespace() {
     let bare_dir = setup_bare_with_meta("altmeta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .failure()
@@ -41,7 +41,7 @@ fn remote_add_with_namespace_override() {
     let bare_dir = setup_bare_with_meta("altmeta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path, "--namespace=altmeta"])
         .assert()
         .success()
@@ -67,7 +67,7 @@ fn remote_add_with_namespace_override() {
 fn remote_add_shorthand_url_expansion() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", "nonexistent-user-xyz/nonexistent-repo-xyz"])
         .assert()
         .success()
@@ -92,25 +92,25 @@ fn remote_list_and_remove() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "list"])
         .assert()
         .success()
         .stdout(predicate::str::contains("meta\t"))
         .stdout(predicate::str::contains(bare_path));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "remove", "meta"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Removed meta remote"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "list"])
         .assert()
         .success()

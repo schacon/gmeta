@@ -1,11 +1,11 @@
 //! Serialize benchmark.
 //!
-//! Creates a temporary bare git repo with a fresh gmeta SQLite database,
+//! Creates a temporary bare git repo with a fresh git meta SQLite database,
 //! then runs N rounds of: insert 10–1000 random keys -> serialize to git ref.
 //! Reports per-round and aggregate timing, plus git ODB statistics (loose
 //! objects, blob/tree counts, total size).
 //!
-//! Usage:  gmeta serialize-bench [--rounds N]   (default N = 10)
+//! Usage:  git meta serialize-bench [--rounds N]   (default N = 10)
 
 use anyhow::{Context, Result};
 use gix::prelude::ObjectIdExt;
@@ -248,11 +248,11 @@ fn build_tree_from_paths(
 pub fn run(rounds: usize) -> Result<()> {
     let mut rng = Rng(0xdeadbeef_cafebabe);
 
-    println!("\n{BOLD}gmeta serialize benchmark{RESET}  —  {CYAN}{rounds} rounds{RESET}");
+    println!("\n{BOLD}git meta serialize benchmark{RESET}  —  {CYAN}{rounds} rounds{RESET}");
 
     // Create temp directory
     let tmp_path = std::env::temp_dir().join(format!(
-        "gmeta-serialize-bench-{}",
+        "git-meta-serialize-bench-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -266,7 +266,7 @@ pub fn run(rounds: usize) -> Result<()> {
     // Init bare repo
     let repo = gix::init_bare(&repo_path)?;
 
-    // Open gmeta database inside the bare repo
+    // Open git meta database inside the bare repo
     let db_path = repo_path.join("git-meta.sqlite");
     let db = Store::open(&db_path)?;
 

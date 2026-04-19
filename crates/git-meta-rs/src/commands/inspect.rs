@@ -1,8 +1,8 @@
-//! `gmeta inspect` — browse metadata keys and values.
+//! `git meta inspect` — browse metadata keys and values.
 //!
 //! - No arguments: show count of keys per target type
-//! - `gmeta inspect <target-type>`: list all keys for that target type
-//! - `gmeta inspect <target-type> <term>`: fuzzy-match keys/targets on term
+//! - `git meta inspect <target-type>`: list all keys for that target type
+//! - `git meta inspect <target-type> <term>`: fuzzy-match keys/targets on term
 
 use std::collections::BTreeMap;
 

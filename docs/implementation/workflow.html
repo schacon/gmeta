@@ -63,7 +63,7 @@
 <ul><li>local writes stay in SQLite or another efficient local store</li><li>metadata is only converted into Git trees when exchange is needed</li><li>repeated local edits do not require repeated Git object writes</li><li>the host tool can apply destination filters before publishing</li></ul>
 <h3 id="typical-push-flow">Typical push flow</h3>
 <p>A host tool might implement push roughly as:</p>
-<ol><li>prepare the code push</li><li>gather shareable metadata for the destination</li><li>run <code>gmeta serialize</code></li><li>attempt to push the metadata ref</li><li>if the metadata ref advanced remotely, fetch that metadata head, merge/retry, and push again</li><li>complete the overall push once both code and metadata are in the desired state</li></ol>
+<ol><li>prepare the code push</li><li>gather shareable metadata for the destination</li><li>run <code>git meta serialize</code></li><li>attempt to push the metadata ref</li><li>if the metadata ref advanced remotely, fetch that metadata head, merge/retry, and push again</li><li>complete the overall push once both code and metadata are in the desired state</li></ol>
 <p>The metadata history should usually remain linear even if the source-code history is not.</p>
 <h2 id="pull-integration">Pull integration</h2>
 <p>A common integration model is to materialize metadata as part of pull, fetch, sync, or checkout update.</p>
@@ -75,7 +75,7 @@
 <ul><li>UI and CLI queries do not have to walk Git trees every time</li><li>conflict decisions are applied once during materialization</li><li>provenance and current visible state can be indexed locally</li><li>multiple metadata sources can be combined into one local view</li></ul>
 <h3 id="typical-pull-flow">Typical pull flow</h3>
 <p>A host tool might implement pull roughly as:</p>
-<ol><li>fetch code refs</li><li>fetch metadata refs</li><li>for each metadata source, compare the new metadata head with the last materialized point</li><li>run <code>gmeta materialize</code></li><li>update local bookkeeping to record success</li><li>continue with any normal source-code update behavior</li></ol>
+<ol><li>fetch code refs</li><li>fetch metadata refs</li><li>for each metadata source, compare the new metadata head with the last materialized point</li><li>run <code>git meta materialize</code></li><li>update local bookkeeping to record success</li><li>continue with any normal source-code update behavior</li></ol>
 <h2 id="integrated-sync-model">Integrated sync model</h2>
 <p>Some systems may present a single <code>sync</code> concept rather than separate <code>push</code> and <code>pull</code> commands.</p>
 <p>In that case, the orchestration can still be thought of as:</p>

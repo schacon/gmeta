@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 
-# Pretty-prints git log with gmeta metadata for each commit.
+# Pretty-prints git log with git meta metadata for each commit.
 #
 # For each commit, shows: SHA, author, first 4 lines of the message,
 # then all metadata keys with a preview of the value.
@@ -101,7 +101,7 @@ commits.each do |commit|
 
   # Fetch metadata early so we can skip if --mo is set
   meta = nil
-  meta_raw = `gmeta get --json commit:#{sha} 2>/dev/null`
+  meta_raw = `git meta get --json commit:#{sha} 2>/dev/null`
   if $?.success? && !meta_raw.strip.empty? && meta_raw.strip != "{}"
     meta = begin
       JSON.parse(meta_raw)

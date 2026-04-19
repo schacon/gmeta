@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
 # Scans Claude Code transcripts for a project, finds commits that were
-# created during those sessions, and attaches real session metadata via gmeta.
+# created during those sessions, and attaches real session metadata via git meta.
 #
 # Strategy for finding commits:
 #   1. Look for `git commit` / `but commit` tool calls in the transcript and
@@ -274,7 +274,7 @@ end
 # Write metadata for a commit
 # ---------------------------------------------------------------------------
 
-def gmeta_target(sha, commit_map)
+def meta_target(sha, commit_map)
   info = commit_map[sha]
   if info && info[:change_id]
     "change-id:#{info[:change_id]}"
@@ -286,22 +286,22 @@ end
 def write_metadata(target, session, dry_run)
   model = session[:models].first || "unknown"
   cmds = [
-    ["gmeta", "set", target, "agent:session", session[:session_id]],
-    ["gmeta", "set", target, "agent:model", model],
-    ["gmeta", "set", target, "agent:usage:input_tokens", session[:total_input_tokens].to_s],
-    ["gmeta", "set", target, "agent:usage:output_tokens", session[:total_output_tokens].to_s],
-    ["gmeta", "set", target, "agent:duration_secs", session[:duration_secs].to_s],
+    ["git", "meta", "set", target, "agent:session", session[:session_id]],
+    ["git", "meta", "set", target, "agent:model", model],
+    ["git", "meta", "set", target, "agent:usage:input_tokens", session[:total_input_tokens].to_s],
+    ["git", "meta", "set", target, "agent:usage:output_tokens", session[:total_output_tokens].to_s],
+    ["git", "meta", "set", target, "agent:duration_secs", session[:duration_secs].to_s],
   ]
 
   # Tools used as a list
   session[:tools_used].each do |tool|
-    cmds << ["gmeta", "list:push", target, "agent:tools_used", tool]
+    cmds << ["git", "meta", "list:push", target, "agent:tools_used", tool]
   end
 
   # Transcript: store each message as a list entry
   transcript_json = session[:messages].map { |m| JSON.generate(m) }
   unless transcript_json.empty?
-    cmds << ["gmeta", "set", "-t", "list", target, "agent:transcript", JSON.generate(transcript_json)]
+    cmds << ["git", "meta", "set", "-t", "list", target, "agent:transcript", JSON.generate(transcript_json)]
   end
 
   cmds.each do |cmd|
@@ -343,10 +343,10 @@ jsonl_files.each_with_index do |path, idx|
 
   matches.each do |match|
     sha = match[:sha]
-    target = gmeta_target(sha, commit_map)
+    target = meta_target(sha, commit_map)
 
     # Skip if already tagged
-    existing = `gmeta get #{target} agent:session 2>/dev/null`.strip
+    existing = `git meta get #{target} agent:session 2>/dev/null`.strip
     unless existing.empty?
       skipped_count += 1
       puts "[#{idx + 1}/#{jsonl_files.length}] #{basename} — #{target} already tagged, skipping"
@@ -370,4 +370,4 @@ puts "  Tagged:     #{tagged_count} commits"
 puts "  Skipped:    #{skipped_count} (already tagged or too short)"
 puts "  No match:   #{no_match_count} sessions with no commit found"
 puts
-puts "Inspect with: gmeta get commit:<sha>" unless dry_run
+puts "Inspect with: git meta get commit:<sha>" unless dry_run

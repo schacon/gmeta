@@ -48,39 +48,39 @@
           <p>This document describes the intended command-line interface at the project level.</p>
 <h2 id="core-commands">Core commands</h2>
 <h3 id="set-a-value">Set a value</h3>
-<pre><code>gmeta set [-t &lt;type&gt;] &lt;target&gt; &lt;key&gt; &lt;value&gt;</code></pre>
+<pre><code>git meta set [-t &lt;type&gt;] &lt;target&gt; &lt;key&gt; &lt;value&gt;</code></pre>
 <p>If <code>-t</code> is not given, the value type defaults to <code>string</code>.</p>
 <p>Examples:</p>
-<pre><code>gmeta set commit:314e7f0fa7 agent:model claude-4.6
-gmeta set -t list branch:sc-branch-1-deadbeef agent:chat &#x27;[&quot;hello&quot;, &quot;world&quot;]&#x27;
-gmeta set -t set path:src/metrics owners &#x27;[&quot;schacon&quot;, &quot;caleb&quot;]&#x27;</code></pre>
+<pre><code>git meta set commit:314e7f0fa7 agent:model claude-4.6
+git meta set -t list branch:sc-branch-1-deadbeef agent:chat &#x27;[&quot;hello&quot;, &quot;world&quot;]&#x27;
+git meta set -t set path:src/metrics owners &#x27;[&quot;schacon&quot;, &quot;caleb&quot;]&#x27;</code></pre>
 <h3 id="get-values">Get values</h3>
-<pre><code>gmeta get &lt;target&gt; [&lt;key&gt;]</code></pre>
+<pre><code>git meta get &lt;target&gt; [&lt;key&gt;]</code></pre>
 <p>Behavior:</p>
 <ul><li>with only <code>&lt;target&gt;</code>, show all keys for the target</li><li>with <code>&lt;target&gt; &lt;key&gt;</code>, show the exact key if present</li><li>with <code>&lt;target&gt; &lt;partial-key&gt;</code>, show matching subkeys</li></ul>
 <h3 id="remove-a-key">Remove a key</h3>
-<pre><code>gmeta rm &lt;target&gt; &lt;key&gt;</code></pre>
+<pre><code>git meta rm &lt;target&gt; &lt;key&gt;</code></pre>
 <p>This removes the logical key and records a whole-key tombstone.</p>
 <h2 id="list-operations">List operations</h2>
-<pre><code>gmeta list:push &lt;target&gt; &lt;key&gt; &lt;value&gt;
-gmeta list:pop &lt;target&gt; &lt;key&gt; &lt;value&gt;</code></pre>
+<pre><code>git meta list:push &lt;target&gt; &lt;key&gt; &lt;value&gt;
+git meta list:pop &lt;target&gt; &lt;key&gt; &lt;value&gt;</code></pre>
 <p>Notes:</p>
 <ul><li><code>list:push</code> appends a new list entry</li><li><code>list:pop</code> requires explicit exchange semantics before implementation is finalized; see <a href="../exchange-format/lists.html">Lists</a></li><li>if a string key is pushed to as a list, the implementation may convert it to a list</li></ul>
 <h2 id="set-operations">Set operations</h2>
-<pre><code>gmeta set:add &lt;target&gt; &lt;key&gt; &lt;value&gt;
-gmeta set:rm &lt;target&gt; &lt;key&gt; &lt;value&gt;</code></pre>
+<pre><code>git meta set:add &lt;target&gt; &lt;key&gt; &lt;value&gt;
+git meta set:rm &lt;target&gt; &lt;key&gt; &lt;value&gt;</code></pre>
 <p>Notes:</p>
 <ul><li><code>set:add</code> creates the set if it does not already exist</li><li><code>set:add</code> is idempotent for an existing member</li><li><code>set:rm</code> removes a single member and records a member tombstone</li></ul>
 <h2 id="exchange-commands">Exchange commands</h2>
 <h3 id="serialize">Serialize</h3>
-<pre><code>gmeta serialize</code></pre>
+<pre><code>git meta serialize</code></pre>
 <p>Writes a new metadata commit for the current local shareable state.</p>
 <h3 id="materialize">Materialize</h3>
-<pre><code>gmeta materialize [&lt;remote&gt;]</code></pre>
+<pre><code>git meta materialize [&lt;remote&gt;]</code></pre>
 <p>Behavior:</p>
 <ul><li>if <code>&lt;remote&gt;</code> is given, materialize from that remote metadata ref</li><li>if omitted, inspect all known metadata remotes and materialize them</li></ul>
 <h3 id="dry-run-materialize">Dry-run materialize</h3>
-<pre><code>gmeta materialize --dry-run [&lt;remote&gt;]</code></pre>
+<pre><code>git meta materialize --dry-run [&lt;remote&gt;]</code></pre>
 <p>Useful for reporting the merge strategy and conflict decisions without applying them.</p>
 <h2 id="target-syntax">Target syntax</h2>
 <p>Targets use the syntax documented in <a href="../exchange-format/targets.html">Targets and keys</a>.</p>
@@ -98,7 +98,7 @@ project</code></pre>
 <h3 id="set-input">Set input</h3>
 <p>For <code>-t set</code>, <code>&lt;value&gt;</code> should be a JSON array of unique strings.</p>
 <h2 id="output-modes">Output modes</h2>
-<p><code>gmeta get</code> may support:</p>
+<p><code>git meta get</code> may support:</p>
 <ul><li>human-readable tabular output</li><li><code>--json</code></li><li><code>--with-authorship</code> for author/timestamp metadata in JSON mode</li></ul>
 <p>The output model is documented in <a href="output.html">Output</a>.</p>
         </article>

@@ -7,7 +7,7 @@
 //!   3. Pack file size    — run `git gc` and report pack size + object count
 //!   4. Diff speed        — compare two trees (base vs base+1000 changes)
 //!
-//! Usage:  gmeta fanout-bench [--objects N]   (default N = 1_000_000)
+//! Usage:  git meta fanout-bench [--objects N]   (default N = 1_000_000)
 
 use anyhow::{Context, Result};
 use gix::prelude::ObjectIdExt;
@@ -323,7 +323,7 @@ fn bench_scheme(
 
     // Incremental: apply SAMPLE new entries onto the existing base tree in one
     // shot. Only the shard subtrees touched by the new entries are rebuilt;
-    // everything else is reused by OID. This is what a correct gmeta serialize
+    // everything else is reused by OID. This is what a correct git meta serialize
     // would do after accumulating N changes since the last commit.
     let new_shas = &shas[n_base..n_base + SAMPLE];
     let batch_incremental: Vec<(String, Vec<u8>)> = new_shas
@@ -348,7 +348,7 @@ fn bench_scheme(
 
     // Add 1 entry, write an incremental tree, write a commit with the previous
     // commit as parent — repeat SAMPLE times. Models frequent single-change
-    // serializes (e.g. one gmeta set -> serialize per user action).
+    // serializes (e.g. one git meta set -> serialize per user action).
     let t0 = Instant::now();
     let mut prev_tree_oid = base_tree_oid;
     let mut prev_commit_oid = base_commit_oid;
@@ -688,7 +688,7 @@ pub fn run(n_objects: usize) -> Result<()> {
     let schemes = [Scheme::First2, Scheme::First3, Scheme::First2Next2];
 
     println!(
-        "\n{BOLD}gmeta fanout benchmark{RESET}  —  {CYAN}{n_objects} base objects{RESET}, {SAMPLE} new per test"
+        "\n{BOLD}git meta fanout benchmark{RESET}  —  {CYAN}{n_objects} base objects{RESET}, {SAMPLE} new per test"
     );
     println!("{DIM}running all three schemes in parallel{RESET}\n");
 
@@ -707,7 +707,7 @@ pub fn run(n_objects: usize) -> Result<()> {
 
     // Temp directory for all repos — use a unique subdir under system temp
     let tmp_path = std::env::temp_dir().join(format!(
-        "gmeta-fanout-bench-{}",
+        "git-meta-fanout-bench-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

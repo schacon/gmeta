@@ -2,7 +2,7 @@
 
 - partial blob hydration on get
 - ability to set timestamp
-- better `gmeta get` default formatting (dont show large blobs, only first line)
+- better `git meta get` default formatting (dont show large blobs, only first line)
 - simultaneous prune testing
 
 - namespaces (local, shared, internal, etc - push targets (none, remote)

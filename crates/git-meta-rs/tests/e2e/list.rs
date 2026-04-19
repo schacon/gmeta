@@ -7,17 +7,17 @@ fn list_push() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:push", &target, "tags", "first"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:push", &target, "tags", "second"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "tags"])
         .assert()
         .success()
@@ -30,17 +30,17 @@ fn list_push_converts_string_to_list() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "note", "original"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:push", &target, "note", "appended"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "note"])
         .assert()
         .success()
@@ -53,22 +53,22 @@ fn list_pop() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:push", &target, "tags", "a"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:push", &target, "tags", "b"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:pop", &target, "tags", "b"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "tags"])
         .assert()
         .success()
@@ -81,7 +81,7 @@ fn set_list_type() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -93,7 +93,7 @@ fn set_list_type() {
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "items"])
         .assert()
         .success()

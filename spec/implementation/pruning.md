@@ -57,49 +57,49 @@ Serialization proceeds as follows when auto-prune rules are configured:
 
 If no trigger fires, serialization produces a single commit as before.
 
-## The `gmeta config` command
+## The `git meta config` command
 
 A convenience command for managing project-level `meta:*` keys.
 
 ```
-gmeta config <key> <value>       # set a config key
-gmeta config <key>               # get a config key
-gmeta config --list              # list all meta:* config keys
-gmeta config --unset <key>       # remove a config key
+git meta config <key> <value>       # set a config key
+git meta config <key>               # get a config key
+git meta config --list              # list all meta:* config keys
+git meta config --unset <key>       # remove a config key
 ```
 
 Examples:
 
 ```
-gmeta config meta:prune:since 90d
-gmeta config meta:prune:max-keys 10000
-gmeta config meta:prune:max-size 50m
-gmeta config meta:prune:min-size 512k
+git meta config meta:prune:since 90d
+git meta config meta:prune:max-keys 10000
+git meta config meta:prune:max-size 50m
+git meta config meta:prune:min-size 512k
 
-gmeta config meta:prune:since
+git meta config meta:prune:since
 # → 90d
 
-gmeta config --list
+git meta config --list
 # → meta:prune:since = 90d
 # → meta:prune:max-keys = 10000
 # → meta:prune:max-size = 50m
 # → meta:prune:min-size = 512k
 
-gmeta config --unset meta:prune:max-keys
+git meta config --unset meta:prune:max-keys
 ```
 
-Under the hood, `gmeta config` operates on the `project` target with string values:
+Under the hood, `git meta config` operates on the `project` target with string values:
 
-- `gmeta config <key> <value>` is equivalent to `gmeta set project <key> <value>`
-- `gmeta config <key>` is equivalent to `gmeta get project <key>`
-- `gmeta config --list` queries all project keys matching `meta:*`
-- `gmeta config --unset <key>` is equivalent to `gmeta rm project <key>`
+- `git meta config <key> <value>` is equivalent to `git meta set project <key> <value>`
+- `git meta config <key>` is equivalent to `git meta get project <key>`
+- `git meta config --list` queries all project keys matching `meta:*`
+- `git meta config --unset <key>` is equivalent to `git meta rm project <key>`
 
-All keys set via `gmeta config` must start with `meta:`. This keeps the config namespace distinct from user-defined project metadata.
+All keys set via `git meta config` must start with `meta:`. This keeps the config namespace distinct from user-defined project metadata.
 
 ## Interaction with manual prune
 
-Running `gmeta prune` manually remains supported. Auto-pruning does not interfere — if a manual prune was recently run and the tree is already below thresholds, auto-pruning will not trigger.
+Running `git meta prune` manually remains supported. Auto-pruning does not interfere — if a manual prune was recently run and the tree is already below thresholds, auto-pruning will not trigger.
 
 ## Interaction with materialization
 

@@ -11,12 +11,12 @@ fn serialize_creates_ref() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success()
@@ -47,12 +47,12 @@ fn serialize_creates_ref() {
 fn serialize_path_target_uses_raw_segments_and_separator() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "path:src/__generated/file.rs", "owner", "schacon"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -81,7 +81,7 @@ fn serialize_path_target_uses_raw_segments_and_separator() {
 fn serialize_list_values() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -93,7 +93,7 @@ fn serialize_list_values() {
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -140,7 +140,7 @@ fn serialize_list_values() {
 fn serialize_empty() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success()
@@ -151,7 +151,7 @@ fn serialize_empty() {
 fn serialize_list_uses_stored_timestamp() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -163,7 +163,7 @@ fn serialize_list_uses_stored_timestamp() {
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -172,7 +172,7 @@ fn serialize_list_uses_stored_timestamp() {
     let first_entries = collect_list_entry_names(&repo);
     assert_eq!(first_entries.len(), 2);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -192,17 +192,17 @@ fn serialize_rm_writes_tombstone_blob() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["rm", &target, "agent:model"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
