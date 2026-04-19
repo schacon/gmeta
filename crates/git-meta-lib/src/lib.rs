@@ -1,7 +1,7 @@
 //! # gmeta
 //!
 //! A library for storing and exchanging structured metadata in Git repositories.
-//! This is the reference implementation of the [gmeta spec](https://schacon.github.io/gmeta/).
+//! This is the reference implementation of the [gmeta spec](https://git-meta.com/).
 //!
 //! ## Core Concepts
 //!

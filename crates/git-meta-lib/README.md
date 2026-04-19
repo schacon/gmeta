@@ -1,6 +1,6 @@
 # git-meta-lib
 
-Rust library for attaching and exchanging structured metadata in Git repositories: local SQLite storage, serialize/materialize to Git trees and refs, and merge semantics aligned with the [git metadata specification](https://schacon.github.io/gmeta/).
+Rust library for attaching and exchanging structured metadata in Git repositories: local SQLite storage, serialize/materialize to Git trees and refs, and merge semantics aligned with the [git metadata specification](https://git-meta.com/).
 
 Add to your `Cargo.toml`:
 
