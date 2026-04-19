@@ -2,7 +2,7 @@
 
 This document suggests a small set of commonly useful metadata keys and conventions.
 
-These are not mandatory exchange-format rules. They are implementation-level recommendations intended to improve interoperability between tools that use gmeta.
+These are not mandatory exchange-format rules. They are implementation-level recommendations intended to improve interoperability between tools that use git-meta.
 
 ## Goals
 

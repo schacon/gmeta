@@ -132,7 +132,7 @@ Possible patterns include:
 - serializing metadata for virtual branches, change IDs, or other higher-level targets before publish
 - using host-managed remotes or destination rules to decide where metadata should go
 
-The important part is not the exact UI shape, but that the host tool treats gmeta as low-level plumbing and coordinates it at the same moments users already think about collaboration.
+The important part is not the exact UI shape, but that the host tool treats git-meta as low-level plumbing and coordinates it at the same moments users already think about collaboration.
 
 ## Multiple destinations
 
