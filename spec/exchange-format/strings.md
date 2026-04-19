@@ -1,6 +1,6 @@
 # Strings
 
-Strings are the simplest gmeta value type.
+Strings are the simplest git-meta value type.
 
 A string represents one current scalar value for a `(target, key)` pair.
 

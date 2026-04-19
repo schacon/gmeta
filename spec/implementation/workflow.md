@@ -1,12 +1,12 @@
 # Workflow
 
-This document describes how a higher-level version control system might incorporate gmeta's lower-level serialize and materialize operations into normal push and pull flows.
+This document describes how a higher-level version control system might incorporate git-meta's lower-level serialize and materialize operations into normal push and pull flows.
 
 The exchange-format documents define the tree shape, merge rules, and materialization semantics. This document is about orchestration: when those operations happen, what they are associated with, and how a host tool like GitButler or Jujutsu may make them feel integrated.
 
 ## Scope
 
-A higher-level system may treat gmeta as a metadata engine with two core exchange operations:
+A higher-level system may treat git-meta as a metadata engine with two core exchange operations:
 
 - **serialize** local shareable metadata state into a metadata commit
 - **materialize** one or more incoming metadata commits into the local database
