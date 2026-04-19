@@ -68,7 +68,7 @@ Per-type layouts are defined in:
 
 Keys are serialized directly under the target base path.
 
-Any path component beginning with `__` is reserved for gmeta structural paths such as:
+Any path component beginning with `__` is reserved for git-meta structural paths such as:
 
 - `__value`
 - `__list`

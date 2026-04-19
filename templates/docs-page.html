@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{title}} · gmeta</title>
-    <meta name="description" content="gmeta project documentation generated from the canonical spec markdown files.">
+    <title>{{title}} · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
     <link rel="stylesheet" href="{{root}}assets/style.css">
     <script>
       (() => {
-        const stored = localStorage.getItem('gmeta-theme');
+        const stored = localStorage.getItem('git-meta-theme');
         document.documentElement.dataset.theme = stored || 'system';
       })();
     </script>
@@ -17,7 +17,7 @@
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-main">
-          <a class="brand" href="{{root}}index.html">gmeta</a>
+          <a class="brand" href="{{root}}index.html">git-meta</a>
           <p class="tagline">Git metadata specification and project docs</p>
           <nav class="nav">
             {{nav}}
@@ -58,7 +58,7 @@
         const media = window.matchMedia('(prefers-color-scheme: dark)');
 
         function currentTheme() {
-          return localStorage.getItem('gmeta-theme') || 'system';
+          return localStorage.getItem('git-meta-theme') || 'system';
         }
 
         function applyTheme(theme) {
@@ -70,7 +70,7 @@
         }
 
         function currentSidebarState() {
-          return localStorage.getItem('gmeta-sidebar') || 'expanded';
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
         }
 
         function applySidebarState(state) {
@@ -83,14 +83,14 @@
 
         themeButtons.forEach((button) => {
           button.addEventListener('click', () => {
-            localStorage.setItem('gmeta-theme', button.dataset.themeValue);
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
             applyTheme(button.dataset.themeValue);
           });
         });
 
         sidebarToggle.addEventListener('click', () => {
           const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
-          localStorage.setItem('gmeta-sidebar', next);
+          localStorage.setItem('git-meta-sidebar', next);
           applySidebarState(next);
         });
 

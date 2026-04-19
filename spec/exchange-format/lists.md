@@ -1,6 +1,6 @@
 # Lists
 
-Lists in gmeta are append-friendly multi-value collections.
+Lists in git-meta are append-friendly multi-value collections.
 
 They are best thought of as an ordered append log of string entries, not as a general-purpose mutable array.
 

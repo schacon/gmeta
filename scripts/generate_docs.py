@@ -653,7 +653,7 @@ def watch_docs(interval: float) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate gmeta docs from spec markdown")
+    parser = argparse.ArgumentParser(description="Generate git-meta docs from spec markdown")
     parser.add_argument("-w", "--watch", action="store_true", help="watch spec/ for changes and regenerate docs")
     parser.add_argument(
         "--interval",

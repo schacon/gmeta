@@ -52,7 +52,7 @@ Rules:
 - key segments cannot contain `/`, `:`, or null bytes
 - key segments cannot start with `__`
 
-The last rule reserves all `__*` path components for gmeta structural metadata. If they are needed (for example, file paths), they can be escaped.
+The last rule reserves all `__*` path components for git-meta structural metadata. If they are needed (for example, file paths), they can be escaped.
 
 ## Value types
 
