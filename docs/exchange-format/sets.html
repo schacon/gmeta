@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Sets · gmeta</title>
-    <meta name="description" content="gmeta project documentation generated from the canonical spec markdown files.">
+    <title>Sets · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
     <link rel="stylesheet" href="../assets/style.css">
     <script>
       (() => {
-        const stored = localStorage.getItem('gmeta-theme');
+        const stored = localStorage.getItem('git-meta-theme');
         document.documentElement.dataset.theme = stored || 'system';
       })();
     </script>
@@ -17,7 +17,7 @@
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-main">
-          <a class="brand" href="../index.html">gmeta</a>
+          <a class="brand" href="../index.html">git-meta</a>
           <p class="tagline">Git metadata specification and project docs</p>
           <nav class="nav">
             <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="targets.html">Targets and keys</a><a href="exchange.html">Serialization</a><a href="materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="strings.html">Strings</a><a href="lists.html">Lists</a><a class="active" href="sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="../implementation/overview.html">Implementation Overview</a><a href="../implementation/storage.html">Local storage</a><a href="../implementation/cli.html">CLI surface</a><a href="../implementation/output.html">Output and query semantics</a><a href="../implementation/pruning.html">Auto-pruning</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="../implementation/standard-keys.html">Standard keys</a><a href="../implementation/workflow.html">Workflow</a></div>
@@ -40,7 +40,7 @@
       <main class="content">
         <header class="page-header">
           <div class="page-header-main">
-            <div class="eyebrow">Generated from <a href="https://github.com/schacon/gmeta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
             <h1>Sets</h1>
           </div>
         </header>
@@ -81,7 +81,7 @@
         const media = window.matchMedia('(prefers-color-scheme: dark)');
 
         function currentTheme() {
-          return localStorage.getItem('gmeta-theme') || 'system';
+          return localStorage.getItem('git-meta-theme') || 'system';
         }
 
         function applyTheme(theme) {
@@ -93,7 +93,7 @@
         }
 
         function currentSidebarState() {
-          return localStorage.getItem('gmeta-sidebar') || 'expanded';
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
         }
 
         function applySidebarState(state) {
@@ -106,14 +106,14 @@
 
         themeButtons.forEach((button) => {
           button.addEventListener('click', () => {
-            localStorage.setItem('gmeta-theme', button.dataset.themeValue);
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
             applyTheme(button.dataset.themeValue);
           });
         });
 
         sidebarToggle.addEventListener('click', () => {
           const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
-          localStorage.setItem('gmeta-sidebar', next);
+          localStorage.setItem('git-meta-sidebar', next);
           applySidebarState(next);
         });
 

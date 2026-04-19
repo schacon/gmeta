@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Gmeta Engineering Guide
 
-This is a reference implementation of the gmeta spec ([docs](https://schacon.github.io/gmeta/))
+This is a reference implementation of the gmeta spec ([docs](https://git-meta.com/))
 
 ## Rust Style and Idioms
 

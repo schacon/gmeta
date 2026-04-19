@@ -62,7 +62,7 @@
 //! - [`Session::push_once()`] serializes + pushes to the remote
 //!
 //! The exchange format uses Git trees with a deterministic path layout, enabling
-//! standard Git merge strategies. See the [spec](https://schacon.github.io/gmeta/)
+//! standard Git merge strategies. See the [spec](https://git-meta.com/)
 //! for the full format description.
 //!
 //! ## Blobless Clone Support

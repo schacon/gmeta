@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Workflow · gmeta</title>
-    <meta name="description" content="gmeta project documentation generated from the canonical spec markdown files.">
+    <title>Workflow · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
     <link rel="stylesheet" href="../assets/style.css">
     <script>
       (() => {
-        const stored = localStorage.getItem('gmeta-theme');
+        const stored = localStorage.getItem('git-meta-theme');
         document.documentElement.dataset.theme = stored || 'system';
       })();
     </script>
@@ -17,7 +17,7 @@
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-main">
-          <a class="brand" href="../index.html">gmeta</a>
+          <a class="brand" href="../index.html">git-meta</a>
           <p class="tagline">Git metadata specification and project docs</p>
           <nav class="nav">
             <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a href="pruning.html">Auto-pruning</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="standard-keys.html">Standard keys</a><a class="active" href="workflow.html">Workflow</a></div>
@@ -40,15 +40,15 @@
       <main class="content">
         <header class="page-header">
           <div class="page-header-main">
-            <div class="eyebrow">Generated from <a href="https://github.com/schacon/gmeta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
             <h1>Workflow</h1>
           </div>
         </header>
         <article class="doc-content">
-          <p>This document describes how a higher-level version control system might incorporate gmeta&#x27;s lower-level serialize and materialize operations into normal push and pull flows.</p>
+          <p>This document describes how a higher-level version control system might incorporate git-meta&#x27;s lower-level serialize and materialize operations into normal push and pull flows.</p>
 <p>The exchange-format documents define the tree shape, merge rules, and materialization semantics. This document is about orchestration: when those operations happen, what they are associated with, and how a host tool like GitButler or Jujutsu may make them feel integrated.</p>
 <h2 id="scope">Scope</h2>
-<p>A higher-level system may treat gmeta as a metadata engine with two core exchange operations:</p>
+<p>A higher-level system may treat git-meta as a metadata engine with two core exchange operations:</p>
 <ul><li><strong>serialize</strong> local shareable metadata state into a metadata commit</li><li><strong>materialize</strong> one or more incoming metadata commits into the local database</li></ul>
 <p>The host VCS remains responsible for deciding:</p>
 <ul><li>when serialize runs</li><li>when materialize runs</li><li>which code remote or metadata remote is associated with the operation</li><li>which metadata namespaces are shared vs local-only</li><li>how retries, status reporting, and user prompts are surfaced</li></ul>
@@ -92,7 +92,7 @@
 <p>Higher-level systems such as GitButler or Jujutsu may be especially good fits because they already mediate user workflows around sync, history movement, and state materialization.</p>
 <p>Possible patterns include:</p>
 <ul><li>attaching metadata sync to an existing &quot;push branch&quot; or &quot;sync workspace&quot; action</li><li>materializing metadata after remote updates are incorporated into the local view</li><li>serializing metadata for virtual branches, change IDs, or other higher-level targets before publish</li><li>using host-managed remotes or destination rules to decide where metadata should go</li></ul>
-<p>The important part is not the exact UI shape, but that the host tool treats gmeta as low-level plumbing and coordinates it at the same moments users already think about collaboration.</p>
+<p>The important part is not the exact UI shape, but that the host tool treats git-meta as low-level plumbing and coordinates it at the same moments users already think about collaboration.</p>
 <h2 id="multiple-destinations">Multiple destinations</h2>
 <p>An implementation may support multiple metadata destinations, such as:</p>
 <ul><li>public metadata</li><li>organization-internal metadata</li><li>personal/private metadata</li></ul>
@@ -120,7 +120,7 @@
         const media = window.matchMedia('(prefers-color-scheme: dark)');
 
         function currentTheme() {
-          return localStorage.getItem('gmeta-theme') || 'system';
+          return localStorage.getItem('git-meta-theme') || 'system';
         }
 
         function applyTheme(theme) {
@@ -132,7 +132,7 @@
         }
 
         function currentSidebarState() {
-          return localStorage.getItem('gmeta-sidebar') || 'expanded';
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
         }
 
         function applySidebarState(state) {
@@ -145,14 +145,14 @@
 
         themeButtons.forEach((button) => {
           button.addEventListener('click', () => {
-            localStorage.setItem('gmeta-theme', button.dataset.themeValue);
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
             applyTheme(button.dataset.themeValue);
           });
         });
 
         sidebarToggle.addEventListener('click', () => {
           const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
-          localStorage.setItem('gmeta-sidebar', next);
+          localStorage.setItem('git-meta-sidebar', next);
           applySidebarState(next);
         });
 
