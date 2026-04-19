@@ -98,13 +98,13 @@ Sets are meant to be short, unordered groups of unique values, like a set of cod
 So, for example, you could set a property called `agent:model` on a specific commit:
 
 ```
-❯ gmeta set commit:314e7f0fa7 agent:model "claude-opus-4-6[1m]"
+❯ git meta set commit:314e7f0fa7 agent:model "claude-opus-4-6[1m]"
 ```
 
 And then get it back out:
 
 ```
-❯ gmeta get commit:314e7f0fa7 agent:model
+❯ git meta get commit:314e7f0fa7 agent:model
 agent:model  claude-opus-4-6[1m]
 ```
 
@@ -113,7 +113,7 @@ The key can be simple like 'author' or it could be deeply namespaced like `agent
 Which is nice because then you can easily get all the subkey values for a top level key namespace, like:
 
 ```
-❯ gmeta get commit:314e7f0fa7 agent
+❯ git meta get commit:314e7f0fa7 agent
 agent:model  claude-opus-4-6[1m]
 agent:provider  anthropic
 agent:prompt  Make me a sandwich
@@ -123,15 +123,15 @@ agent:transcript  ...
 Attaching metadata to a commit is somewhat familiar, but there are other target types. For example, you could use a `path` target to associate agent rules to a subdirectory (rather than using multiple AGENT.md files):
 
 ```
-❯ gmeta set path:src/git agent:rules -F GIT_AGENT.md
-❯ gmeta set path:src/observability agent:rules -F OBS_AGENT.md
-❯ gmeta set path:src/metrics agent:rules -F METRICS_AGENT.md
+❯ git meta set path:src/git agent:rules -F GIT_AGENT.md
+❯ git meta set path:src/observability agent:rules -F OBS_AGENT.md
+❯ git meta set path:src/metrics agent:rules -F METRICS_AGENT.md
 ```
 
 And see all the agent rules values per subdirectory under `src/`:
 
 ```
-❯ gmeta get path:src agent:rules
+❯ git meta get path:src agent:rules
 src/git;agent:rules "git agent rules"
 src/observability;agent:rules "observability agent rules"
 src/metrics;agent:rules "metrics agent rules"
@@ -142,13 +142,13 @@ src/metrics;agent:rules "metrics agent rules"
 The list data type is for for cases like chunked transcripts or comments - where you would be maintaining a generally appended list of values for the key.
 
 ```
-❯ gmeta list:push branch:sc-feature-1 review:comments "love it"
+❯ git meta list:push branch:sc-feature-1 review:comments "love it"
 
-❯ gmeta list:push branch:sc-feature-1 review:comments "like it"
+❯ git meta list:push branch:sc-feature-1 review:comments "like it"
 
-❯ gmeta list:push branch:sc-feature-1 review:comments "now I hate it"
+❯ git meta list:push branch:sc-feature-1 review:comments "now I hate it"
 
-❯ gmeta get branch:sc-feature-1 review
+❯ git meta get branch:sc-feature-1 review
 review:comments  ["love it", "like it", "now I hate it"]
 ```
 
@@ -157,20 +157,20 @@ review:comments  ["love it", "like it", "now I hate it"]
 The set data type is for a set of unordered values, for example, a set of code owners for a path.
 
 ```
-❯ gmeta set:add path:src/metrics owners schacon
+❯ git meta set:add path:src/metrics owners schacon
 
-❯ gmeta set:add path:src/metrics owners caleb
+❯ git meta set:add path:src/metrics owners caleb
 
-❯ gmeta set:add path:src/metrics owners kiril
+❯ git meta set:add path:src/metrics owners kiril
 
-❯ gmeta get path:src
+❯ git meta get path:src
 src/metrics;owners ["caleb", "kiril", "schacon"]
 
-❯ gmeta set:rm path:src/metrics owners kiril
+❯ git meta set:rm path:src/metrics owners kiril
 
-❯ gmeta set:add path:src/metrics owners caleb
+❯ git meta set:add path:src/metrics owners caleb
 
-❯ gmeta get path:src
+❯ git meta get path:src
 src/metrics;owners ["caleb", "schacon"]
 ```
 
@@ -221,8 +221,8 @@ Key segments cannot start with `__`, so we can differentiate keys from other val
 Lists are handled slightly differently. Instead of `__value` as a blob at the termination of a key sequence, it is a tree called `__list` that has timestamped, hashed entries. So, for example, if you added two code owners to a path:
 
 ```
-❯ gmeta list:push path:src/metrics owners schacon
-❯ gmeta list:push path:src/metrics owners caleb
+❯ git meta list:push path:src/metrics owners schacon
+❯ git meta list:push path:src/metrics owners caleb
 ```
 
 The serialized data might look like this:

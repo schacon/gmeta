@@ -10,7 +10,7 @@ NS="${1:-meta}"
 
 git init --bare
 
-# Build the tree structure expected by gmeta:
+# Build the tree structure expected by git meta:
 #   project/
 #     testing/
 #       __value  (blob: "hello")

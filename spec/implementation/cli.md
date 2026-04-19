@@ -7,7 +7,7 @@ This document describes the intended command-line interface at the project level
 ### Set a value
 
 ```bash
-gmeta set [-t <type>] <target> <key> <value>
+git meta set [-t <type>] <target> <key> <value>
 ```
 
 If `-t` is not given, the value type defaults to `string`.
@@ -15,15 +15,15 @@ If `-t` is not given, the value type defaults to `string`.
 Examples:
 
 ```bash
-gmeta set commit:314e7f0fa7 agent:model claude-4.6
-gmeta set -t list branch:sc-branch-1-deadbeef agent:chat '["hello", "world"]'
-gmeta set -t set path:src/metrics owners '["schacon", "caleb"]'
+git meta set commit:314e7f0fa7 agent:model claude-4.6
+git meta set -t list branch:sc-branch-1-deadbeef agent:chat '["hello", "world"]'
+git meta set -t set path:src/metrics owners '["schacon", "caleb"]'
 ```
 
 ### Get values
 
 ```bash
-gmeta get <target> [<key>]
+git meta get <target> [<key>]
 ```
 
 Behavior:
@@ -35,7 +35,7 @@ Behavior:
 ### Remove a key
 
 ```bash
-gmeta rm <target> <key>
+git meta rm <target> <key>
 ```
 
 This removes the logical key and records a whole-key tombstone.
@@ -43,8 +43,8 @@ This removes the logical key and records a whole-key tombstone.
 ## List operations
 
 ```bash
-gmeta list:push <target> <key> <value>
-gmeta list:pop <target> <key> <value>
+git meta list:push <target> <key> <value>
+git meta list:pop <target> <key> <value>
 ```
 
 Notes:
@@ -56,8 +56,8 @@ Notes:
 ## Set operations
 
 ```bash
-gmeta set:add <target> <key> <value>
-gmeta set:rm <target> <key> <value>
+git meta set:add <target> <key> <value>
+git meta set:rm <target> <key> <value>
 ```
 
 Notes:
@@ -71,7 +71,7 @@ Notes:
 ### Serialize
 
 ```bash
-gmeta serialize
+git meta serialize
 ```
 
 Writes a new metadata commit for the current local shareable state.
@@ -79,7 +79,7 @@ Writes a new metadata commit for the current local shareable state.
 ### Materialize
 
 ```bash
-gmeta materialize [<remote>]
+git meta materialize [<remote>]
 ```
 
 Behavior:
@@ -90,7 +90,7 @@ Behavior:
 ### Dry-run materialize
 
 ```bash
-gmeta materialize --dry-run [<remote>]
+git meta materialize --dry-run [<remote>]
 ```
 
 Useful for reporting the merge strategy and conflict decisions without applying them.
@@ -125,7 +125,7 @@ For `-t set`, `<value>` should be a JSON array of unique strings.
 
 ## Output modes
 
-`gmeta get` may support:
+`git meta get` may support:
 
 - human-readable tabular output
 - `--json`

@@ -49,7 +49,7 @@ A host tool might implement push roughly as:
 
 1. prepare the code push
 2. gather shareable metadata for the destination
-3. run `gmeta serialize`
+3. run `git meta serialize`
 4. attempt to push the metadata ref
 5. if the metadata ref advanced remotely, fetch that metadata head, merge/retry, and push again
 6. complete the overall push once both code and metadata are in the desired state
@@ -85,7 +85,7 @@ A host tool might implement pull roughly as:
 1. fetch code refs
 2. fetch metadata refs
 3. for each metadata source, compare the new metadata head with the last materialized point
-4. run `gmeta materialize`
+4. run `git meta materialize`
 5. update local bookkeeping to record success
 6. continue with any normal source-code update behavior
 

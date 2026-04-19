@@ -9,12 +9,12 @@ fn set_and_get_string() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target])
         .assert()
         .success()
@@ -28,18 +28,18 @@ fn set_and_get_with_partial_sha() {
     let full_target = commit_target(&sha);
     let partial_target = commit_target(&sha[..8]);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &partial_target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &full_target])
         .assert()
         .success()
         .stdout(predicate::str::contains("claude-4.6"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &partial_target])
         .assert()
         .success()
@@ -51,17 +51,17 @@ fn set_and_get_specific_key() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent:model"])
         .assert()
         .success()
@@ -74,17 +74,17 @@ fn set_and_get_json() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "--json", &target])
         .assert()
         .success()
@@ -97,12 +97,12 @@ fn json_with_authorship() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "--json", "--with-authorship", &target])
         .assert()
         .success()
@@ -116,22 +116,22 @@ fn partial_key_matching() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "other:key", "value"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent"])
         .assert()
         .success()
@@ -145,27 +145,27 @@ fn partial_key_matching_commit_namespace_example() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-opus-4-6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:provider", "anthropic"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:prompt", "Make me a sandwich"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:transcript", "..."])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent"])
         .assert()
         .success()
@@ -183,17 +183,17 @@ fn rm_removes_value() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["rm", &target, "agent:model"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent:model"])
         .assert()
         .success()
@@ -205,17 +205,17 @@ fn upsert_overwrites() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "v1"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "v2"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent:model"])
         .assert()
         .success()
@@ -227,12 +227,12 @@ fn upsert_overwrites() {
 fn path_target() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "path:src/main.rs", "review:status", "approved"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "path:src/main.rs"])
         .assert()
         .success()
@@ -245,24 +245,24 @@ fn path_target() {
 fn path_target_tree_lookup() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "path:src/git", "owner", "schacon"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "path:src/observability", "owner", "caleb"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "path:src/metrics", "owner", "kiril"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "path:srcx/metrics", "owner", "nope"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "path:src", "owner"])
         .assert()
         .success()
@@ -279,7 +279,7 @@ fn path_target_tree_lookup() {
 fn change_id_target() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "change-id:550e8400-e29b-41d4-a716-446655440000",
@@ -289,7 +289,7 @@ fn change_id_target() {
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "change-id:550e8400-e29b-41d4-a716-446655440000"])
         .assert()
         .success()
@@ -301,12 +301,12 @@ fn change_id_target() {
 fn project_target() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "project", "name", "my-project"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "name"])
         .assert()
         .success()
@@ -317,7 +317,7 @@ fn project_target() {
 fn invalid_target_type() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "unknown:abc123", "key", "value"])
         .assert()
         .failure()
@@ -328,7 +328,7 @@ fn invalid_target_type() {
 fn target_value_too_short() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "commit:ab", "key", "value"])
         .assert()
         .failure()
@@ -342,12 +342,12 @@ fn custom_namespace() {
 
     git_config(dir.path(), "meta.namespace", "notes");
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success()
@@ -363,29 +363,29 @@ fn set_add_and_rm() {
     let (dir, _sha) = setup_repo();
     let target = "branch:sc-branch-1-deadbeef";
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set:add", target, "reviewer", "alice@example.com"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set:add", target, "reviewer", "bob@example.com"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", target, "reviewer"])
         .assert()
         .success()
         .stdout(predicate::str::contains("alice@example.com"))
         .stdout(predicate::str::contains("bob@example.com"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set:rm", target, "reviewer", "alice@example.com"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", target, "reviewer"])
         .assert()
         .success()
@@ -398,17 +398,17 @@ fn set_add_deduplicates_members() {
     let (dir, _sha) = setup_repo();
     let target = "branch:sc-branch-1-deadbeef";
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set:add", target, "reviewer", "alice@example.com"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set:add", target, "reviewer", "alice@example.com"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", target, "reviewer"])
         .assert()
         .success()
@@ -419,7 +419,7 @@ fn set_add_deduplicates_members() {
 fn set_type_round_trips_and_serializes_members() {
     let (dir, _sha) = setup_repo();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -431,14 +431,14 @@ fn set_type_round_trips_and_serializes_members() {
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "branch:sc-branch-1-deadbeef", "reviewer"])
         .assert()
         .success()
         .stdout(predicate::str::contains("alice@example.com"))
         .stdout(predicate::str::contains("bob@example.com"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();

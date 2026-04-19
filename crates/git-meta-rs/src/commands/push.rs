@@ -47,7 +47,7 @@ pub fn run_readme(remote: Option<&str>, verbose: bool) -> Result<()> {
     };
 
     let commit = gix::objs::Commit {
-        message: "Initial metadata repository setup\n\nCreated by gmeta to provide documentation for contributors.".into(),
+        message: "Initial metadata repository setup\n\nCreated by git meta to provide documentation for contributors.".into(),
         tree: tree_oid.into(),
         author: sig.clone(),
         committer: sig,
@@ -102,7 +102,7 @@ This repository stores structured metadata for the project at:
 
     {origin_url}
 
-It is managed by [gmeta](https://github.com/schacon/gmeta), a tool for associating
+It is managed by [git meta](https://github.com/schacon/gmeta), a tool for associating
 key-value metadata with Git objects (commits, branches, paths, and more) and syncing
 them across repositories.
 
@@ -117,47 +117,47 @@ metadata remote in your local checkout of the main project.
 
 ## Setup
 
-1. Install gmeta (see [gmeta README](https://github.com/schacon/gmeta) for details).
+1. Install git meta (see the [git meta README](https://github.com/schacon/gmeta) for details).
 
 2. In your local clone of the main project, add this repository as a metadata remote:
 
    ```
-   gmeta remote add {meta_url}
+   git meta remote add {meta_url}
    ```
 
 3. Pull existing metadata:
 
    ```
-   gmeta pull
+   git meta pull
    ```
 
 4. You're ready to read and write metadata:
 
    ```
-   gmeta get commit:HEAD
-   gmeta set commit:HEAD review:status "approved"
-   gmeta push
+   git meta get commit:HEAD
+   git meta set commit:HEAD review:status "approved"
+   git meta push
    ```
 
 ## Contributing Metadata
 
-- **Set values:** `gmeta set <target> <key> <value>`
-- **Read values:** `gmeta get <target> [key]`
-- **Push changes:** `gmeta push`
-- **Pull updates:** `gmeta pull`
+- **Set values:** `git meta set <target> <key> <value>`
+- **Read values:** `git meta get <target> [key]`
+- **Push changes:** `git meta push`
+- **Pull updates:** `git meta pull`
 
 Target types include `commit:<sha>`, `branch:<name>`, `change-id:<id>`,
 `path:<file>`, and `project` (for repo-wide metadata).
 
-See `gmeta --help` for the full command reference.
+See `git meta --help` for the full command reference.
 
 ## Important Notes
 
 - Metadata is stored on `refs/{namespace}/main`, not on `refs/heads/main`.
   The `main` branch you see here is just this README for orientation.
-- Never push directly to `refs/{namespace}/main` — always use `gmeta push`,
+- Never push directly to `refs/{namespace}/main` — always use `git meta push`,
   which handles serialization and conflict resolution.
-- Metadata can be pruned over time. See `gmeta config:prune` for auto-prune rules.
+- Metadata can be pruned over time. See `git meta config:prune` for auto-prune rules.
 "#
     )
 }

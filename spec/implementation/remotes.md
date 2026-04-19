@@ -7,7 +7,7 @@ Some implementation examples of how we would ideally do remote mangement and ser
 The workflow starts by adding a remote source. This could be automatically done by GitButler if we see it's setup (via local .gitmeta or something).
 
 ```
-$ gmeta remote add (url)
+$ git meta remote add (url)
 ```
 
 Could `ls-remote` the server and look for `refs/meta/*`, but should generally be `refs/meta/main`. Setup a fetch spec.
@@ -48,19 +48,19 @@ It doesn't have to be a top level tree, we could look up any set of blob values 
 
 ## Pushing and Pulling
 
-Eventually we'll need to incorporate some automatic version of this into GitButler itself, but as a mid-level plumbing solution, we can do a `gmeta push` and `gmeta pull` that could be called by something else (like Git hooks or whatever).
+Eventually we'll need to incorporate some automatic version of this into GitButler itself, but as a mid-level plumbing solution, we can do a `git meta push` and `git meta pull` that could be called by something else (like Git hooks or whatever).
 
 ### Pushing
 
-So `gmeta push` would rely on the `fetch` and `serialize` config values on the `meta` tagged remote (there should only be one, but fallback would be to choose the first one).
+So `git meta push` would rely on the `fetch` and `serialize` config values on the `meta` tagged remote (there should only be one, but fallback would be to choose the first one).
 
-The simplest outcome of a `gmeta push` would be to serialize a new tree and commit on the metadata history and push it upstream as a fast-forward.
+The simplest outcome of a `git meta push` would be to serialize a new tree and commit on the metadata history and push it upstream as a fast-forward.
 
 The more complex case is that there is data we have not seen yet upstream, so we need to pull that down, serialize our own tree, merge the trees, materialize the outcome, then write a new tree and commit on top and try to push again. If we weren't fast enough and there is new data upstream again, we repeat. It should _always_ result in a single new commit written locally, even if we had to try several times.
 
 ### Pulling
 
-A `gmeta pull` should simply do the first part of the complex push process. Fetch the new data, serialize our side if we have new data and use Git to merge the trees with `ours` strategy, then materialize the new tree locally.
+A `git meta pull` should simply do the first part of the complex push process. Fetch the new data, serialize our side if we have new data and use Git to merge the trees with `ours` strategy, then materialize the new tree locally.
 
 ### Serializing for Push
 
@@ -75,7 +75,7 @@ There are two commit message formats:
 **Normal** (up to 1000 changes):
 
 ```
-gmeta: serialize (3 changes)
+git-meta: serialize (3 changes)
 
 A	commit:abc123...	agent:model
 M	commit:abc123...	agent:cost
@@ -87,7 +87,7 @@ Each change line is: `A`/`M`/`D` (add/modify/delete), a tab, the target, a tab, 
 **Large** (over 1000 changes):
 
 ```
-gmeta: serialize (5432 changes)
+git-meta: serialize (5432 changes)
 
 changes-omitted: true
 count: 5432
@@ -99,6 +99,6 @@ When the change count exceeds 1000, the individual lines are omitted to keep com
 
 A user may want to get rid of a meta source they are no longer using.
 
-`gmeta remote remove [name]`
+`git meta remote remove [name]`
 
 It should remove the `.git/config` entry for that remote, any `refs/meta/local/*` and any `refs/meta/remote/*` pointers.

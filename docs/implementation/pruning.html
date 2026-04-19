@@ -72,33 +72,33 @@
 <ul><li><code>max-keys</code>: count the total number of metadata keys (distinct target+key pairs) in the tree.</li><li><code>max-size</code>: compute the total size of all blob objects reachable from the tree.</li></ul>
 <ol><li>If any trigger exceeds its threshold, run a prune using <code>since</code> and <code>min-size</code> from the rules.</li><li>The prune creates a second commit on top of the serialization commit, with the standard prune commit message format.</li></ol>
 <p>If no trigger fires, serialization produces a single commit as before.</p>
-<h2 id="the-gmeta-config-command">The <code>gmeta config</code> command</h2>
+<h2 id="the-git-meta-config-command">The <code>git meta config</code> command</h2>
 <p>A convenience command for managing project-level <code>meta:*</code> keys.</p>
-<pre><code>gmeta config &lt;key&gt; &lt;value&gt;       # set a config key
-gmeta config &lt;key&gt;               # get a config key
-gmeta config --list              # list all meta:* config keys
-gmeta config --unset &lt;key&gt;       # remove a config key</code></pre>
+<pre><code>git meta config &lt;key&gt; &lt;value&gt;       # set a config key
+git meta config &lt;key&gt;               # get a config key
+git meta config --list              # list all meta:* config keys
+git meta config --unset &lt;key&gt;       # remove a config key</code></pre>
 <p>Examples:</p>
-<pre><code>gmeta config meta:prune:since 90d
-gmeta config meta:prune:max-keys 10000
-gmeta config meta:prune:max-size 50m
-gmeta config meta:prune:min-size 512k
+<pre><code>git meta config meta:prune:since 90d
+git meta config meta:prune:max-keys 10000
+git meta config meta:prune:max-size 50m
+git meta config meta:prune:min-size 512k
 
-gmeta config meta:prune:since
+git meta config meta:prune:since
 # → 90d
 
-gmeta config --list
+git meta config --list
 # → meta:prune:since = 90d
 # → meta:prune:max-keys = 10000
 # → meta:prune:max-size = 50m
 # → meta:prune:min-size = 512k
 
-gmeta config --unset meta:prune:max-keys</code></pre>
-<p>Under the hood, <code>gmeta config</code> operates on the <code>project</code> target with string values:</p>
-<ul><li><code>gmeta config &lt;key&gt; &lt;value&gt;</code> is equivalent to <code>gmeta set project &lt;key&gt; &lt;value&gt;</code></li><li><code>gmeta config &lt;key&gt;</code> is equivalent to <code>gmeta get project &lt;key&gt;</code></li><li><code>gmeta config --list</code> queries all project keys matching <code>meta:*</code></li><li><code>gmeta config --unset &lt;key&gt;</code> is equivalent to <code>gmeta rm project &lt;key&gt;</code></li></ul>
-<p>All keys set via <code>gmeta config</code> must start with <code>meta:</code>. This keeps the config namespace distinct from user-defined project metadata.</p>
+git meta config --unset meta:prune:max-keys</code></pre>
+<p>Under the hood, <code>git meta config</code> operates on the <code>project</code> target with string values:</p>
+<ul><li><code>git meta config &lt;key&gt; &lt;value&gt;</code> is equivalent to <code>git meta set project &lt;key&gt; &lt;value&gt;</code></li><li><code>git meta config &lt;key&gt;</code> is equivalent to <code>git meta get project &lt;key&gt;</code></li><li><code>git meta config --list</code> queries all project keys matching <code>meta:*</code></li><li><code>git meta config --unset &lt;key&gt;</code> is equivalent to <code>git meta rm project &lt;key&gt;</code></li></ul>
+<p>All keys set via <code>git meta config</code> must start with <code>meta:</code>. This keeps the config namespace distinct from user-defined project metadata.</p>
 <h2 id="interaction-with-manual-prune">Interaction with manual prune</h2>
-<p>Running <code>gmeta prune</code> manually remains supported. Auto-pruning does not interfere — if a manual prune was recently run and the tree is already below thresholds, auto-pruning will not trigger.</p>
+<p>Running <code>git meta prune</code> manually remains supported. Auto-pruning does not interfere — if a manual prune was recently run and the tree is already below thresholds, auto-pruning will not trigger.</p>
 <h2 id="interaction-with-materialization">Interaction with materialization</h2>
 <p>Auto-prune rules materialized from a remote are immediately effective for subsequent local serializations. There is no special merge handling — the rules are ordinary string values and follow standard last-writer-wins conflict resolution.</p>
         </article>

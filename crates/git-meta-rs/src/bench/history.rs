@@ -32,7 +32,7 @@
 //!   new targets).  Stop when the root is reached.  The final set should equal the
 //!   full collection of commit SHAs introduced during generation.
 //!
-//! Usage:  gmeta history-walker [--commits N]   (default N = 500)
+//! Usage:  git meta history-walker [--commits N]   (default N = 500)
 
 use anyhow::Result;
 use gix::prelude::ObjectIdExt;
@@ -123,7 +123,7 @@ fn build_tree_incremental(
 }
 
 /// Tree path for a commit-SHA target's metadata blob.
-/// Layout mirrors the real gmeta serialization: commit/{first2}/{sha}/bench/__value
+/// Layout mirrors the real git meta serialization: commit/{first2}/{sha}/bench/__value
 /// The commit SHA is encoded in the path; the blob holds arbitrary metadata.
 fn value_path(commit_sha: &str) -> String {
     format!("commit/{}/{}/bench/__value", &commit_sha[..2], commit_sha)
@@ -284,12 +284,12 @@ fn generate_history(
         let kind = if is_prune { "prune" } else { "serialize" };
         let msg = if is_prune {
             format!(
-                "gmeta: prune\n\npruned: true\nkept: {}\nevicted: {}",
+                "git-meta: prune\n\npruned: true\nkept: {}\nevicted: {}",
                 live_paths.len(),
                 PRUNE_THRESHOLD - PRUNE_KEEP,
             )
         } else {
-            format!("gmeta: serialize (commit {})", commit_idx + 1)
+            format!("git-meta: serialize (commit {})", commit_idx + 1)
         };
 
         let commit_oid = write_commit(repo, tree_oid, parent_oid, &msg)?;
@@ -434,7 +434,7 @@ fn fmt_us(secs: f64) -> String {
 }
 pub fn run(n_commits: usize) -> Result<()> {
     println!(
-        "\n{BOLD}gmeta history-walker benchmark{RESET}  —  {CYAN}{n_commits} commits to generate{RESET}",
+        "\n{BOLD}git meta history-walker benchmark{RESET}  —  {CYAN}{n_commits} commits to generate{RESET}",
     );
     println!(
         "{DIM}rules: 95% introduce / 5% modify, 1–200 values/commit (low-weighted), prune at >{PRUNE_THRESHOLD} values (keep {PRUNE_KEEP}){RESET}\n",
@@ -442,7 +442,7 @@ pub fn run(n_commits: usize) -> Result<()> {
 
     // Temp bare repo — gix uses on-disk ODB (no mempack equivalent).
     let tmp_path: PathBuf = std::env::temp_dir().join(format!(
-        "gmeta-history-walker-{}",
+        "git-meta-history-walker-{}",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

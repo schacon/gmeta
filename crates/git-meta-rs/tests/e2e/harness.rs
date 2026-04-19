@@ -1,4 +1,4 @@
-//! Test harness for gmeta end-to-end tests.
+//! Test harness for git meta end-to-end tests.
 //!
 //! Provides isolated, reproducible test environments inspired by GitButler's
 //! `but-testsupport` crate. Key features:
@@ -58,10 +58,10 @@ fn isolate_cmd(cmd: &mut Command) {
         .env("GIT_CONFIG_KEY_2", "init.defaultBranch")
         .env("GIT_CONFIG_VALUE_2", "main");
 }
-/// Build an isolated `gmeta` [`Command`] pointed at `dir`.
+/// Build an isolated `git-meta` [`Command`] pointed at `dir`.
 ///
 /// The command has full environment isolation applied so tests are reproducible.
-pub fn gmeta(dir: &Path) -> Command {
+pub fn git_meta(dir: &Path) -> Command {
     let mut cmd = assert_cmd::cargo::cargo_bin_cmd!("git-meta");
     cmd.current_dir(dir);
     isolate_cmd(&mut cmd);
@@ -170,7 +170,7 @@ pub fn setup_repo() -> (TempDir, String) {
     (dir, commit_oid.to_string())
 }
 
-/// Create a bare repo with a `refs/{ns}/main` ref containing gmeta tree
+/// Create a bare repo with a `refs/{ns}/main` ref containing git meta tree
 /// structure: `project/testing/__value = "hello"`.
 ///
 /// Used as a remote for push/pull tests.
@@ -225,7 +225,10 @@ pub fn setup_bare_with_meta(ns: &str) -> TempDir {
     bare_dir
 }
 
-/// Build a bare repo with multiple gmeta serialize commits for promisor tests.
+/// Build a bare repo with multiple git meta serialize commits for promisor tests.
+///
+/// The commit messages use the legacy `gmeta: serialize` prefix on purpose,
+/// to exercise the parser's backward-compatibility path.
 ///
 /// The repo has 2 commits on `refs/meta/main`:
 ///   - Commit 1 (older): `project/old_key/__value = "old_value"`

@@ -2,16 +2,16 @@
 
 This document describes implementation-level query behavior and display choices.
 
-The exchange format defines what data means on the wire; this document defines how a specific implementation may expose that data through commands like `gmeta get`.
+The exchange format defines what data means on the wire; this document defines how a specific implementation may expose that data through commands like `git meta get`.
 
 ## Query forms
 
-`gmeta get` should support three basic forms:
+`git meta get` should support three basic forms:
 
 ```bash
-gmeta get <target>
-gmeta get <target> <key>
-gmeta get <target> <partial-key>
+git meta get <target>
+git meta get <target> <key>
+git meta get <target> <partial-key>
 ```
 
 Behavior:
@@ -25,7 +25,7 @@ Behavior:
 Example:
 
 ```bash
-❯ gmeta get commit:13a7d29cde8f8557b54fd6474f547a56822180ae
+❯ git meta get commit:13a7d29cde8f8557b54fd6474f547a56822180ae
 agent:model  claude-4.6
 agent:provider  anthropic
 ```
@@ -39,7 +39,7 @@ Human-readable output should be stable and easy to scan, but exact formatting is
 Example:
 
 ```bash
-❯ gmeta get --json commit:13a7d29cde8f8557b54fd6474f547a56822180ae
+❯ git meta get --json commit:13a7d29cde8f8557b54fd6474f547a56822180ae
 {
   "agent": {
     "model": "claude-4.6",
@@ -55,7 +55,7 @@ Example:
 Example:
 
 ```bash
-❯ gmeta get --json --with-authorship commit:13a7d29cde8f8557b54fd6474f547a56822180ae
+❯ git meta get --json --with-authorship commit:13a7d29cde8f8557b54fd6474f547a56822180ae
 {
   "agent": {
     "model": {

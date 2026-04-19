@@ -256,7 +256,7 @@ while candidates.length < count
   break if shas.empty?
 
   shas.each do |sha|
-    existing = `gmeta get commit:#{sha} agent:session 2>/dev/null`.strip
+    existing = `git meta get commit:#{sha} agent:session 2>/dev/null`.strip
     if existing.empty?
       candidates << sha
       break if candidates.length >= count
@@ -295,32 +295,32 @@ candidates.each_with_index do |sha, idx|
   model = transcript[:models].first || "unknown"
 
   # Core metadata
-  system("gmeta", "set", "commit:#{sha}", "agent:session", transcript[:session_id])
-  system("gmeta", "set", "commit:#{sha}", "agent:model", model)
-  system("gmeta", "set", "commit:#{sha}", "agent:source", transcript[:source])
+  system("git", "meta", "set", "commit:#{sha}", "agent:session", transcript[:session_id])
+  system("git", "meta", "set", "commit:#{sha}", "agent:model", model)
+  system("git", "meta", "set", "commit:#{sha}", "agent:source", transcript[:source])
 
   # Transcript as a list of JSON message strings
   transcript_json = transcript[:messages].map { |msg| JSON.generate(msg) }
-  system("gmeta", "set", "-t", "list", "commit:#{sha}", "agent:transcript", JSON.generate(transcript_json))
+  system("git", "meta", "set", "-t", "list", "commit:#{sha}", "agent:transcript", JSON.generate(transcript_json))
 
   # Token usage
   if transcript[:total_input_tokens] > 0
-    system("gmeta", "set", "commit:#{sha}", "agent:usage:input_tokens", transcript[:total_input_tokens].to_s)
-    system("gmeta", "set", "commit:#{sha}", "agent:usage:output_tokens", transcript[:total_output_tokens].to_s)
+    system("git", "meta", "set", "commit:#{sha}", "agent:usage:input_tokens", transcript[:total_input_tokens].to_s)
+    system("git", "meta", "set", "commit:#{sha}", "agent:usage:output_tokens", transcript[:total_output_tokens].to_s)
   end
 
   # Duration
   if transcript[:duration_secs] > 0
-    system("gmeta", "set", "commit:#{sha}", "agent:duration_secs", transcript[:duration_secs].to_s)
+    system("git", "meta", "set", "commit:#{sha}", "agent:duration_secs", transcript[:duration_secs].to_s)
   end
 
   # Tools used
   transcript[:tools_used].each do |tool|
-    system("gmeta", "list:push", "commit:#{sha}", "agent:tools_used", tool)
+    system("git", "meta", "list:push", "commit:#{sha}", "agent:tools_used", tool)
   end
 
   puts "[#{idx + 1}/#{candidates.length}] #{sha[0..9]} <- #{transcript[:source]}:#{transcript[:session_id][0..7]} (#{model}, #{transcript[:message_count]} msgs)"
 end
 
 puts "\nDone! Attached real transcripts to #{candidates.length} commits."
-puts "Inspect with: cd #{repo_path} && gmeta get commit:<sha>"
+puts "Inspect with: cd #{repo_path} && git meta get commit:<sha>"

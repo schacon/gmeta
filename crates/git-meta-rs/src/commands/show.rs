@@ -1,4 +1,4 @@
-//! `gmeta show <commit-sha>` — display commit details with any associated metadata.
+//! `git meta show <commit-sha>` — display commit details with any associated metadata.
 
 use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;

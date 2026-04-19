@@ -14,11 +14,11 @@ fn fast_forward_applies_remote_removal() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "v1"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -27,11 +27,11 @@ fn fast_forward_applies_remote_removal() {
     let first_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["rm", &target, "agent:model"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -55,17 +55,17 @@ fn fast_forward_applies_remote_removal() {
     .unwrap();
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "stale"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent:model"])
         .assert()
         .success()
@@ -77,7 +77,7 @@ fn fast_forward_applies_remote_list_entry_removal() {
     let (dir, _sha) = setup_repo();
     let target = "branch:sc-branch-1-deadbeef";
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -88,7 +88,7 @@ fn fast_forward_applies_remote_list_entry_removal() {
         ])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -97,11 +97,11 @@ fn fast_forward_applies_remote_list_entry_removal() {
     let first_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["list:pop", target, "agent:chat", "b"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -125,7 +125,7 @@ fn fast_forward_applies_remote_list_entry_removal() {
     .unwrap();
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -137,12 +137,12 @@ fn fast_forward_applies_remote_list_entry_removal() {
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", target, "agent:chat"])
         .assert()
         .success()
@@ -165,19 +165,19 @@ fn serialize_wipe_db_materialize_restores_all_data() {
     let commit = commit_target(&sha);
 
     // Set a string value on a commit target.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &commit, "agent:model", "claude-4.6"])
         .assert()
         .success();
 
     // Set a string value on a project target.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", "project", "name", "my-project"])
         .assert()
         .success();
 
     // Set a list value on a branch target.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -190,7 +190,7 @@ fn serialize_wipe_db_materialize_restores_all_data() {
         .success();
 
     // Set a set value on a branch target.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args([
             "set",
             "-t",
@@ -203,7 +203,7 @@ fn serialize_wipe_db_materialize_restores_all_data() {
         .success();
 
     // Serialize everything to refs/meta/local/main.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -235,27 +235,27 @@ fn serialize_wipe_db_materialize_restores_all_data() {
     let _ = std::fs::remove_file(dir.path().join(".git").join("git-meta.sqlite-shm"));
 
     // Materialize rebuilds the database from the serialized git tree.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
     // Verify the string value on the commit target is restored.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &commit, "agent:model"])
         .assert()
         .success()
         .stdout(predicate::str::contains("claude-4.6"));
 
     // Verify the project value is restored.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "name"])
         .assert()
         .success()
         .stdout(predicate::str::contains("my-project"));
 
     // Verify list entries are restored.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "branch:sc-feature-abc123", "agent:chat"])
         .assert()
         .success()
@@ -263,7 +263,7 @@ fn serialize_wipe_db_materialize_restores_all_data() {
         .stdout(predicate::str::contains("world"));
 
     // Verify set members are restored.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "branch:sc-feature-abc123", "reviewer"])
         .assert()
         .success()
@@ -272,7 +272,7 @@ fn serialize_wipe_db_materialize_restores_all_data() {
 
     // Verify the data round-trips through a second serialize — the re-serialized
     // tree should be structurally identical (same commit SHA or same tree content).
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -417,7 +417,7 @@ fn preserves_local_changes_over_stale_remote() {
         .unwrap();
 
     // === Step 1: User A sets metadata and serializes ===
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "set",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -427,7 +427,7 @@ fn preserves_local_changes_over_stale_remote() {
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "set",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -437,7 +437,7 @@ fn preserves_local_changes_over_stale_remote() {
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -465,12 +465,12 @@ fn preserves_local_changes_over_stale_remote() {
         )
         .unwrap();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -500,7 +500,7 @@ fn preserves_local_changes_over_stale_remote() {
         )
         .unwrap();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "set",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -510,18 +510,18 @@ fn preserves_local_changes_over_stale_remote() {
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["serialize"])
         .assert()
         .success();
 
     // === Step 4: User A materializes — local change must survive ===
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["get", "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp"])
         .assert()
         .success()
@@ -529,7 +529,7 @@ fn preserves_local_changes_over_stale_remote() {
         .stdout(predicate::str::contains("tom@example.com"))
         .stdout(predicate::str::contains("alice@example.com").not());
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "get",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -636,7 +636,7 @@ fn both_sides_modified_later_timestamp_wins() {
         .unwrap();
 
     // === Step 1: User A sets initial data and serializes ===
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "set",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -646,7 +646,7 @@ fn both_sides_modified_later_timestamp_wins() {
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -663,12 +663,12 @@ fn both_sides_modified_later_timestamp_wins() {
         .reference("refs/meta/origin", a_oid, PreviousValue::Any, "fetch")
         .unwrap();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args([
             "set",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -678,7 +678,7 @@ fn both_sides_modified_later_timestamp_wins() {
         .assert()
         .success();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -690,7 +690,7 @@ fn both_sides_modified_later_timestamp_wins() {
         .unwrap();
 
     // === Step 3: User A modifies the same key AFTER B, serializes, then materializes ===
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "set",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -700,7 +700,7 @@ fn both_sides_modified_later_timestamp_wins() {
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -710,12 +710,12 @@ fn both_sides_modified_later_timestamp_wins() {
         .reference("refs/meta/origin", b_oid, PreviousValue::Any, "fetch B")
         .unwrap();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args([
             "get",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -747,12 +747,12 @@ fn both_sides_modified_later_timestamp_wins() {
         )
         .unwrap();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["materialize"])
         .assert()
         .success();
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args([
             "get",
             "change-id:uzytqkxrnstmxlzmvwluqomoynnowolp",
@@ -768,11 +768,11 @@ fn dry_run_does_not_mutate_sqlite_or_ref() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "v1"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -781,11 +781,11 @@ fn dry_run_does_not_mutate_sqlite_or_ref() {
     let first_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "v2"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -808,19 +808,19 @@ fn dry_run_does_not_mutate_sqlite_or_ref() {
     .unwrap();
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "stale"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["materialize", "--dry-run"])
         .assert()
         .success()
         .stdout(predicate::str::contains("dry-run: strategy=fast-forward"))
         .stdout(predicate::str::contains("agent:model"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent:model"])
         .assert()
         .success()
@@ -837,11 +837,11 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
     let (dir, sha) = setup_repo();
     let target = commit_target(&sha);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "base:key", "base"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -850,11 +850,11 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
     let base_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "remote"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -870,11 +870,11 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
     .unwrap();
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["set", &target, "agent:model", "local"])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -890,7 +890,7 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
     .unwrap();
     drop(repo);
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["materialize", "--dry-run"])
         .assert()
         .success()
@@ -898,7 +898,7 @@ fn dry_run_reports_concurrent_add_conflict_resolution() {
         .stdout(predicate::str::contains("reason=concurrent-add"))
         .stdout(predicate::str::contains("agent:model"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", &target, "agent:model"])
         .assert()
         .success()
@@ -919,15 +919,15 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
     let (repo_a_dir, _sha_a) = setup_repo();
     let (repo_b_dir, _sha_b) = setup_repo();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["set", "project", "agent:model", "local"])
         .assert()
         .success();
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["set", "project", "local:only", "keep-me"])
         .assert()
         .success();
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -935,15 +935,15 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
     let repo_a = open_repo(repo_a_dir.path());
     let a_oid = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
 
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["set", "project", "agent:model", "remote"])
         .assert()
         .success();
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["set", "project", "remote:only", "keep-too"])
         .assert()
         .success();
-    harness::gmeta(repo_b_dir.path())
+    harness::git_meta(repo_b_dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -965,7 +965,7 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
         )
         .unwrap();
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["materialize", "--dry-run"])
         .assert()
         .success()
@@ -981,25 +981,25 @@ fn no_common_ancestor_uses_two_way_merge_remote_wins() {
     let a_after_dry_run = ref_to_commit_oid(&repo_a, "refs/meta/local/main");
     assert_eq!(a_after_dry_run, a_oid);
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["materialize"])
         .assert()
         .success()
         .stdout(predicate::str::contains("two-way merge"));
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["get", "project", "agent:model"])
         .assert()
         .success()
         .stdout(predicate::str::contains("local"))
         .stdout(predicate::str::contains("remote").not());
 
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["get", "project", "local:only"])
         .assert()
         .success()
         .stdout(predicate::str::contains("keep-me"));
-    harness::gmeta(repo_a_dir.path())
+    harness::git_meta(repo_a_dir.path())
         .args(["get", "project", "remote:only"])
         .assert()
         .success()

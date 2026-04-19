@@ -3,7 +3,8 @@
 #   Commit 1 (older): project/old_key/__value = "old_value"
 #   Commit 2 (tip):   project/testing/__value = "hello"  (old_key removed)
 #
-# Commit messages include the changelog format gmeta expects:
+# Commit messages use the legacy `gmeta: serialize` prefix on purpose to
+# exercise the parser's backward-compatibility path:
 #   Commit 1: "gmeta: serialize (1 changes)\n\nA\tproject\told_key"
 #   Commit 2: "gmeta: serialize (1 changes)\n\nA\tproject\ttesting"
 set -eu -o pipefail

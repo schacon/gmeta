@@ -12,25 +12,25 @@ fn pull_inserts_promisor_entries() {
     let bare_dir = setup_bare_with_history();
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success()
         .stderr(predicate::str::contains("Indexed 1 keys from history"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "testing"])
         .assert()
         .success()
         .stdout(predicate::str::contains("hello"));
 
     // The historical key was pruned from the tip tree; get should not crash.
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "old_key"])
         .assert()
         .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "--json"])
         .assert()
         .success()
@@ -44,19 +44,22 @@ fn promisor_hydration_from_tip_tree() {
     let bare_dir = setup_bare_with_history_retained();
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "old_key"])
         .assert()
         .success()
         .stdout(predicate::str::contains("old_value"));
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["get", "project", "testing"])
         .assert()
         .success()
@@ -69,13 +72,16 @@ fn promisor_entry_not_serialized() {
     let bare_dir = setup_bare_with_history();
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path()).args(["pull"]).assert().success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["serialize"])
         .assert()
         .success();
@@ -104,11 +110,11 @@ fn pull_tip_only_no_promisor_entries() {
     let bare_dir = setup_bare_with_meta("meta");
     let bare_path = bare_dir.path().to_str().unwrap();
 
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["remote", "add", bare_path])
         .assert()
         .success();
-    harness::gmeta(dir.path())
+    harness::git_meta(dir.path())
         .args(["pull"])
         .assert()
         .success()

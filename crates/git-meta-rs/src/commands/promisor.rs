@@ -14,7 +14,7 @@ pub fn run() -> Result<()> {
     let tip_oid = match repo.find_reference(&tracking_ref) {
         Ok(r) => r.into_fully_peeled_id()?.detach(),
         Err(_) => bail!(
-            "no remote tracking ref ({tracking_ref}).\nAdd a remote first: gmeta remote add <url>"
+            "no remote tracking ref ({tracking_ref}).\nAdd a remote first: git meta remote add <url>"
         ),
     };
 
