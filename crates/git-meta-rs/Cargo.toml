@@ -1,0 +1,44 @@
+[package]
+name = "git-meta-rs"
+description = "Command-line tool for structured Git metadata (get/set, serialize, materialize, push/pull)."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/git-meta-rs"
+keywords = ["git", "metadata", "cli"]
+categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "git-meta"
+path = "src/main.rs"
+
+[features]
+## Enable optional in-tree benchmark subcommands (for local profiling).
+bench = []
+
+[dependencies]
+git-meta-lib = { path = "../git-meta-lib", version = "0.1.0", features = ["internal"] }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+dialoguer = "0.11"
+gix = { workspace = true }
+notify = "7"
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+time = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+assert_cmd = "2"
+gix = { workspace = true }
+gix-testtools = "0.18"
+predicates = "3"
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true

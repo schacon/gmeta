@@ -35,7 +35,7 @@ gmeta prune --since=<date> [--min-size=<bytes>]
 5. Writes a new commit on top of `refs/meta/local` with the new tree and a structured commit
    message (see below). The previous commit becomes the parent, so `git log` still shows the
    full ancestry and `git fetch --deepen` can recover older data.
-6. Updates `gmeta.sqlite` — marks the prune epoch so subsequent `serialize` calls know not to
+6. Updates `git-meta.sqlite` — marks the prune epoch so subsequent `serialize` calls know not to
    re-emit dropped entries unless they are written again locally.
 
 ## Commit message format

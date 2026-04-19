@@ -1,0 +1,32 @@
+[package]
+name = "git-meta-lib"
+description = "Library for attaching and exchanging structured metadata in Git repositories (serialize/materialize, SQLite store, merge)."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+documentation = "https://docs.rs/git-meta-lib"
+keywords = ["git", "metadata", "gix", "sqlite"]
+categories = ["development-tools"]
+
+[features]
+## Expose internal plumbing modules for the `git-meta-rs` CLI.
+## Library consumers should NOT enable this feature.
+internal = []
+
+[dependencies]
+gix = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha1 = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+
+[dev-dependencies]
+gix = { workspace = true }
+tempfile = "3"
+
+[lints]
+workspace = true

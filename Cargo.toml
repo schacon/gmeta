@@ -1,6 +1,12 @@
 [workspace]
-members = ["crates/gmeta", "crates/gmeta-cli", "crates/gmeta-bench"]
+members = ["crates/git-meta-lib", "crates/git-meta-rs"]
 resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/schacon/gmeta"
 
 [workspace.dependencies]
 anyhow = "1"

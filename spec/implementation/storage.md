@@ -6,7 +6,7 @@ This document describes the local storage role of SQLite.
 
 The local metadata database lives at:
 
-`.git/gmeta.sqlite`
+`.git/git-meta.sqlite`
 
 ## Purpose
 
