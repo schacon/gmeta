@@ -16,6 +16,11 @@ DOCS_DIR = ROOT / "docs"
 TEMPLATE_PATH = ROOT / "templates" / "docs-page.html"
 ASSETS_DIR = DOCS_DIR / "assets"
 
+# Files and directories under docs/ that the generator must never delete.
+# `other/` holds hand-curated extras and `CNAME` is required by GitHub Pages
+# to map the site to git-meta.com.
+PRESERVED_DOCS_ENTRIES = frozenset({"other", "CNAME"})
+
 PAGE_ORDER = [
     "README.md",
     "exchange-format/targets.md",
@@ -596,7 +601,7 @@ def generate_docs() -> None:
 
     if DOCS_DIR.exists():
         for child in DOCS_DIR.iterdir():
-            if child.name == "other":
+            if child.name in PRESERVED_DOCS_ENTRIES:
                 continue
             if child.is_dir():
                 shutil.rmtree(child)
