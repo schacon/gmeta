@@ -426,26 +426,35 @@ p  { color: var(--ink-2); margin: 0 0 12px; }
   box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.62 0.16 145) 22%, transparent);
 }
 
-/* ——— PEOPLE ——— */
-.people { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
-.person {
+/* ——— ORGS ——— */
+.orgs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.org {
   display: flex; align-items: center; gap: 14px;
-  padding: 16px; border: 1px solid var(--line);
+  padding: 18px; border: 1px solid var(--line);
   background: var(--surface);
   border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
-.avatar {
-  width: 44px; height: 44px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--brand-light) 0%, var(--brand-dark) 100%);
-  color: #fff;
+.org:hover {
+  border-color: color-mix(in oklab, var(--brand-dark) 35%, var(--line));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -8px color-mix(in oklab, var(--brand-dark) 40%, transparent);
+}
+.org-logo {
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center;
-  font: 600 14px "Inter", sans-serif;
   flex: 0 0 auto;
+  overflow: hidden;
 }
-.avatar::after { content: attr(data-initials); }
-.person-name { font-weight: 600; color: var(--ink); font-size: 14.5px; }
-.person-role { font-size: 13px; color: var(--ink-3); font-family: "JetBrains Mono", monospace; }
-.person-role a { color: var(--brand-dark); text-decoration: underline; }
+.org-logo img { width: 40px; height: 40px; display: block; }
+.org-logo-dark { background: #f5efe2; }
+.org-name { font-weight: 600; color: var(--ink); font-size: 15px; }
+.org-role { font-size: 13px; color: var(--ink-3); font-family: "JetBrains Mono", monospace; margin-top: 2px; }
 
 /* ——— FAQ ——— */
 .faq-wrap { display: grid; grid-template-columns: 320px 1fr; gap: 64px; }
@@ -535,7 +544,7 @@ html[data-theme="dark"] .cta-strip { background: var(--brand-dark); color: #fff;
   .how-grid { grid-template-columns: 1fr; gap: 32px; }
   .demo { grid-template-columns: 1fr; }
   .demo-side { position: static; }
-  .people { grid-template-columns: repeat(2, 1fr); }
+  .orgs { grid-template-columns: 1fr; }
   .faq-wrap { grid-template-columns: 1fr; gap: 24px; }
   .faq-head { position: static; }
   .foot-grid { grid-template-columns: 1fr; gap: 32px; }
@@ -550,7 +559,7 @@ html[data-theme="dark"] .cta-strip { background: var(--brand-dark); color: #fff;
   .why-grid { grid-template-columns: 1fr; }
   .why-item { border-right: none !important; border-bottom: 1px solid var(--line-2); }
   .why-item:last-child { border-bottom: none; }
-  .people { grid-template-columns: 1fr; }
+  .orgs { grid-template-columns: 1fr; }
   .compare-wrap { overflow-x: auto; }
   .compare { min-width: 640px; }
 }

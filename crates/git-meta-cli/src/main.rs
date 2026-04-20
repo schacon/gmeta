@@ -16,7 +16,6 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Set {
-            value_type,
             file,
             json,
             timestamp,
@@ -28,7 +27,6 @@ fn main() -> Result<()> {
             &key,
             value.as_deref(),
             file.as_deref(),
-            &value_type,
             json,
             timestamp,
         ),

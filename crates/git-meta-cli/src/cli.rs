@@ -13,13 +13,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Set a metadata value
+    /// Set a string metadata value
     #[command(display_order = 10)]
     Set {
-        /// Value type: string (default) or list
-        #[arg(short = 't', long = "type", default_value = "string")]
-        value_type: String,
-
         /// Read value from file
         #[arg(short = 'F', long = "file")]
         file: Option<String>,
@@ -38,7 +34,7 @@ pub enum Commands {
         /// Key (can be namespaced with colons, e.g. agent:model)
         key: String,
 
-        /// Value (string or JSON array for lists)
+        /// String value (omit when reading from --file)
         value: Option<String>,
     },
 
