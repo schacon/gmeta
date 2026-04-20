@@ -19,6 +19,11 @@ ASSETS_DIR = DOCS_DIR / "assets"
 
 SITE_ORIGIN = "https://git-meta.com"
 
+# Files and directories under docs/ that the generator must never delete.
+# `other/` holds hand-curated extras and `CNAME` is required by GitHub Pages
+# to map the site to git-meta.com.
+PRESERVED_DOCS_ENTRIES = frozenset({"other", "CNAME"})
+
 AI_USER_AGENTS = [
     "GPTBot",
     "OAI-SearchBot",
@@ -689,7 +694,7 @@ def generate_docs() -> None:
 
     if DOCS_DIR.exists():
         for child in DOCS_DIR.iterdir():
-            if child.name == "other":
+            if child.name in PRESERVED_DOCS_ENTRIES:
                 continue
             if child.is_dir():
                 shutil.rmtree(child)
