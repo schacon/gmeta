@@ -1,15 +1,18 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>git metadata project · git-meta</title>
-    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
-    <link rel="stylesheet" href="assets/style.css">
+    <meta
+      name="description"
+      content="git-meta project documentation generated from the canonical spec markdown files."
+    />
+    <link rel="stylesheet" href="assets/style.css" />
     <script>
       (() => {
-        const stored = localStorage.getItem('git-meta-theme');
-        document.documentElement.dataset.theme = stored || 'system';
+        const stored = localStorage.getItem("git-meta-theme");
+        document.documentElement.dataset.theme = stored || "system";
       })();
     </script>
   </head>
@@ -18,24 +21,80 @@
       <aside class="sidebar">
         <div class="sidebar-main">
           <a class="brand" href="index.html">
-            <img class="brand-icon" src="../other/git-meta-icon.png" alt="" width="40" height="40">
+            <img
+              class="brand-icon"
+              src="../other/git-meta-icon.png"
+              alt=""
+              width="40"
+              height="40"
+            />
             <span class="brand-text">git-meta</span>
           </a>
           <p class="tagline">Git metadata specification and project docs</p>
           <nav class="nav">
-            <div class="nav-group"><a class="active" href="index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="exchange-format/targets.html">Targets and keys</a><a href="exchange-format/exchange.html">Serialization</a><a href="exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="exchange-format/strings.html">Strings</a><a href="exchange-format/lists.html">Lists</a><a href="exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="implementation/overview.html">Implementation Overview</a><a href="implementation/storage.html">Local storage</a><a href="implementation/cli.html">CLI surface</a><a href="implementation/output.html">Output and query semantics</a><a href="implementation/pruning.html">Auto-pruning</a><a href="implementation/auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="implementation/standard-keys.html">Standard keys</a><a href="implementation/workflow.html">Workflow</a></div>
+            <div class="nav-group">
+              <a class="active" href="index.html">Overview</a>
+            </div>
+            <div class="nav-group">
+              <h2>Exchange format</h2>
+              <a href="exchange-format/targets.html">Targets and keys</a
+              ><a href="exchange-format/exchange.html">Serialization</a
+              ><a href="exchange-format/materialization.html"
+                >Materialization</a
+              >
+            </div>
+            <div class="nav-group">
+              <h2>Value types</h2>
+              <a href="exchange-format/strings.html">Strings</a
+              ><a href="exchange-format/lists.html">Lists</a
+              ><a href="exchange-format/sets.html">Sets</a>
+            </div>
+            <div class="nav-group">
+              <h2>Implementation</h2>
+              <a href="implementation/overview.html">Implementation Overview</a
+              ><a href="implementation/storage.html">Local storage</a
+              ><a href="implementation/cli.html">CLI surface</a
+              ><a href="implementation/output.html"
+                >Output and query semantics</a
+              ><a href="implementation/pruning.html">Auto-pruning</a
+              ><a href="implementation/auto-sync.html"
+                >Syncing with normal Git</a
+              >
+            </div>
+            <div class="nav-group">
+              <h2>Other Considerations</h2>
+              <a href="implementation/standard-keys.html">Standard keys</a
+              ><a href="implementation/workflow.html">Workflow</a>
+            </div>
           </nav>
         </div>
         <div class="sidebar-footer">
           <div class="theme-control" aria-label="Theme switcher">
-            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+            <button
+              type="button"
+              class="theme-icon-button"
+              data-theme-value="light"
+              aria-label="Use light theme"
+              title="Light theme"
+            >
               <span aria-hidden="true">☀️</span>
             </button>
-            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+            <button
+              type="button"
+              class="theme-icon-button"
+              data-theme-value="dark"
+              aria-label="Use dark theme"
+              title="Dark theme"
+            >
               <span aria-hidden="true">🌙</span>
             </button>
           </div>
-          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+          <button
+            type="button"
+            class="sidebar-toggle"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
             <span class="collapse-icon" aria-hidden="true">◧</span>
           </button>
         </div>
@@ -43,92 +102,239 @@
       <main class="content">
         <header class="page-header">
           <div class="page-header-main">
-            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <div class="eyebrow">
+              Generated from
+              <a href="https://github.com/git-meta/git-meta/tree/main/spec"
+                ><code>spec/*.md</code></a
+              >
+            </div>
             <h1>git metadata project</h1>
           </div>
         </header>
         <article class="doc-content has-aside">
-          <p>This is a proposed specification for a new standardized way to attach and exchange arbitrary metadata in Git projects.</p>
-<h2 id="why-this-project-exists">Why this project exists</h2>
-<div class="callout callout-aside"><a class="callout-youtube-link" href="https://www.youtube.com/watch?v=46bV6KT0SsQ" target="_blank" rel="noopener noreferrer"><img class="callout-youtube-thumb" src="https://i.ytimg.com/vi/46bV6KT0SsQ/hqdefault.jpg" alt="YouTube video thumbnail" loading="lazy"><span class="callout-youtube-play" aria-hidden="true">▶</span></a><div class="callout-youtube-caption"><p>Rodrigo Bovendorp&#x27;s metadata talk at JJCon 2025, outlining the overall problem set this project is meant to address.</p></div></div>
-<p>This is a proposal to provide a more flexible and scalable metadata system for Git projects than the tools Git commonly uses today such as <code>git notes</code>, commit headers, message trailers, and checked-in helper files like <code>CODEOWNERS</code>.</p>
-<h3 id="limitations-of-current-solutions">Limitations of Current Solutions</h3>
-<p>These existing approaches tend to have some important limitations:</p>
-<ul><li>limited control over metadata granularity and mutability</li><li>poor support for many independently addressable fields on the same object</li><li>awkward merge behavior for structured data</li><li>file pollution when metadata has to live in the working tree</li><li>poor scaling characteristics for very large metadata sets</li></ul>
-<h3 id="metadata-use-cases">Metadata Use Cases</h3>
-<p>This project is meant to more elagantly support a wider variety of metadata use cases such as:</p>
-<ul><li>provenance for generated code, prompts, and transcripts</li><li>trust and review information</li><li>comments and review discussions</li><li>testing results and attestations</li><li>path- or project-scoped metadata like ownership or policy hints</li></ul>
-<h3 id="overall-goals">Overall Goals</h3>
-<p>The core idea is to:</p>
-<ul><li>support more fine grained metadata targets (branches, paths, etc)</li><li>store metadata locally in a format that is fast to query and mutate</li><li>exchange metadata using normal Git trees, commits, refs, and transport mechanisms</li><li>model mergeable data as many small tree entries instead of large structured blobs</li></ul>
-<p>That combination is meant to make metadata:</p>
-<ul><li>easy to read and write locally</li><li>exchangeable over existing Git hosting infrastructure</li><li>eventually consistent across collaborators</li><li>practical even when metadata grows large</li></ul>
-<h2 id="approach">Approach</h2>
-<p>This project has two parts. One is specifying an agreed upon exchange format that accomplishes these goals. The other is a local reference implementation that can be used, referenced or built upon.</p>
-<h2 id="exchange-format">Exchange format</h2>
-<p>The important part is the exchange format - how metadata is stored, transmitted and updated among teams working on a project. This is what would need to be agreed upon for wider interop.</p>
-<p>We refer to this as &quot;serialization&quot; - how to write data into Git primiatives for exchange, and &quot;materialization&quot; - how to update local values when receiving new data.</p>
-<ul><li><a href="exchange-format/targets.html">Targets and keys</a></li><li><a href="exchange-format/exchange.html">Exchange format and refs</a></li><li><a href="exchange-format/materialization.html">Materialization and merge workflow</a></li></ul>
-<h3 id="value-types">Value types</h3>
-<p>There are three initial data types that can be used for any given target key. Here are the specifications for how those data types are serialized.</p>
-<ul><li><a href="exchange-format/principles.html">Principles</a></li><li><a href="exchange-format/strings.html">Strings</a></li><li><a href="exchange-format/lists.html">Lists</a></li><li><a href="exchange-format/sets.html">Sets</a></li></ul>
-<h2 id="implementation">Implementation</h2>
-<p>Finally, there is a reference implementation for how one might actually use this concept locally in higher level version control tooling. As long as the exchange format and semantics are followed, local implementation isn&#x27;t highly important, but it may be valuable to see a practical application.</p>
-<ul><li><a href="implementation/storage.html">Local storage</a></li><li><a href="implementation/cli.html">CLI surface</a></li><li><a href="implementation/output.html">Output and query semantics</a></li><li><a href="implementation/workflow.html">Workflow</a></li></ul>
-<h3 id="key-naming-standards">Key Naming Standards</h3>
-<p>If this were to be widely used, it would be nice to generally agree on how to name common keys, so we&#x27;re not all reinventing slightly different wheels. We&#x27;ve put together a list of standardized key naming suggestions for common problem sets.</p>
-<ul><li><a href="implementation/standard-keys.html">Standard keys</a></li></ul>
+          <p>
+            This is a proposed specification for a new standardized way to
+            attach and exchange arbitrary metadata in Git projects.
+          </p>
+          <h2 id="why-this-project-exists">Why this project exists</h2>
+          <div class="callout callout-aside">
+            <a
+              class="callout-youtube-link"
+              href="https://www.youtube.com/watch?v=46bV6KT0SsQ"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><img
+                class="callout-youtube-thumb"
+                src="https://i.ytimg.com/vi/46bV6KT0SsQ/hqdefault.jpg"
+                alt="YouTube video thumbnail"
+                loading="lazy"
+              /><span class="callout-youtube-play" aria-hidden="true"
+                >▶</span
+              ></a
+            >
+            <div class="callout-youtube-caption">
+              <p>
+                Rodrigo Bovendorp&#x27;s metadata talk at JJCon 2025, outlining
+                the overall problem set this project is meant to address.
+              </p>
+            </div>
+          </div>
+          <p>
+            This is a proposal to provide a more flexible and scalable metadata
+            system for Git projects than the tools Git commonly uses today such
+            as <code>git notes</code>, commit headers, message trailers, and
+            checked-in helper files like <code>CODEOWNERS</code>.
+          </p>
+          <h3 id="limitations-of-current-solutions">
+            Limitations of Current Solutions
+          </h3>
+          <p>
+            These existing approaches tend to have some important limitations:
+          </p>
+          <ul>
+            <li>limited control over metadata granularity and mutability</li>
+            <li>
+              poor support for many independently addressable fields on the same
+              object
+            </li>
+            <li>awkward merge behavior for structured data</li>
+            <li>
+              file pollution when metadata has to live in the working tree
+            </li>
+            <li>poor scaling characteristics for very large metadata sets</li>
+          </ul>
+          <h3 id="metadata-use-cases">Metadata Use Cases</h3>
+          <p>
+            This project is meant to more elagantly support a wider variety of
+            metadata use cases such as:
+          </p>
+          <ul>
+            <li>provenance for generated code, prompts, and transcripts</li>
+            <li>trust and review information</li>
+            <li>comments and review discussions</li>
+            <li>testing results and attestations</li>
+            <li>
+              path- or project-scoped metadata like ownership or policy hints
+            </li>
+          </ul>
+          <h3 id="overall-goals">Overall Goals</h3>
+          <p>The core idea is to:</p>
+          <ul>
+            <li>
+              support more fine grained metadata targets (branches, paths, etc)
+            </li>
+            <li>
+              store metadata locally in a format that is fast to query and
+              mutate
+            </li>
+            <li>
+              exchange metadata using normal Git trees, commits, refs, and
+              transport mechanisms
+            </li>
+            <li>
+              model mergeable data as many small tree entries instead of large
+              structured blobs
+            </li>
+          </ul>
+          <p>That combination is meant to make metadata:</p>
+          <ul>
+            <li>easy to read and write locally</li>
+            <li>exchangeable over existing Git hosting infrastructure</li>
+            <li>eventually consistent across collaborators</li>
+            <li>practical even when metadata grows large</li>
+          </ul>
+          <h2 id="approach">Approach</h2>
+          <p>
+            This project has two parts. One is specifying an agreed upon
+            exchange format that accomplishes these goals. The other is a local
+            reference implementation that can be used, referenced or built upon.
+          </p>
+          <h2 id="exchange-format">Exchange format</h2>
+          <p>
+            The important part is the exchange format - how metadata is stored,
+            transmitted and updated among teams working on a project. This is
+            what would need to be agreed upon for wider interop.
+          </p>
+          <p>
+            We refer to this as &quot;serialization&quot; - how to write data
+            into Git primiatives for exchange, and &quot;materialization&quot; -
+            how to update local values when receiving new data.
+          </p>
+          <ul>
+            <li><a href="exchange-format/targets.html">Targets and keys</a></li>
+            <li>
+              <a href="exchange-format/exchange.html"
+                >Exchange format and refs</a
+              >
+            </li>
+            <li>
+              <a href="exchange-format/materialization.html"
+                >Materialization and merge workflow</a
+              >
+            </li>
+          </ul>
+          <h3 id="value-types">Value types</h3>
+          <p>
+            There are three initial data types that can be used for any given
+            target key. Here are the specifications for how those data types are
+            serialized.
+          </p>
+          <ul>
+            <li><a href="exchange-format/strings.html">Strings</a></li>
+            <li><a href="exchange-format/lists.html">Lists</a></li>
+            <li><a href="exchange-format/sets.html">Sets</a></li>
+          </ul>
+          <h2 id="implementation">Implementation</h2>
+          <p>
+            Finally, there is a reference implementation for how one might
+            actually use this concept locally in higher level version control
+            tooling. As long as the exchange format and semantics are followed,
+            local implementation isn&#x27;t highly important, but it may be
+            valuable to see a practical application.
+          </p>
+          <ul>
+            <li><a href="implementation/storage.html">Local storage</a></li>
+            <li><a href="implementation/cli.html">CLI surface</a></li>
+            <li>
+              <a href="implementation/output.html"
+                >Output and query semantics</a
+              >
+            </li>
+            <li><a href="implementation/workflow.html">Workflow</a></li>
+          </ul>
+          <h3 id="key-naming-standards">Key Naming Standards</h3>
+          <p>
+            If this were to be widely used, it would be nice to generally agree
+            on how to name common keys, so we&#x27;re not all reinventing
+            slightly different wheels. We&#x27;ve put together a list of
+            standardized key naming suggestions for common problem sets.
+          </p>
+          <ul>
+            <li>
+              <a href="implementation/standard-keys.html">Standard keys</a>
+            </li>
+          </ul>
         </article>
       </main>
     </div>
     <script>
       (() => {
         const root = document.documentElement;
-        const sidebar = document.querySelector('.sidebar');
-        const themeButtons = document.querySelectorAll('.theme-icon-button');
-        const sidebarToggle = document.querySelector('.sidebar-toggle');
-        const media = window.matchMedia('(prefers-color-scheme: dark)');
+        const sidebar = document.querySelector(".sidebar");
+        const themeButtons = document.querySelectorAll(".theme-icon-button");
+        const sidebarToggle = document.querySelector(".sidebar-toggle");
+        const media = window.matchMedia("(prefers-color-scheme: dark)");
 
         function currentTheme() {
-          return localStorage.getItem('git-meta-theme') || 'system';
+          return localStorage.getItem("git-meta-theme") || "system";
         }
 
         function applyTheme(theme) {
           root.dataset.theme = theme;
-          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          const effective =
+            theme === "system" ? (media.matches ? "dark" : "light") : theme;
           themeButtons.forEach((button) => {
-            button.classList.toggle('active', button.dataset.themeValue === effective);
+            button.classList.toggle(
+              "active",
+              button.dataset.themeValue === effective,
+            );
           });
         }
 
         function currentSidebarState() {
-          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+          return localStorage.getItem("git-meta-sidebar") || "expanded";
         }
 
         function applySidebarState(state) {
-          const collapsed = state === 'collapsed';
-          sidebar.classList.toggle('collapsed', collapsed);
-          document.body.classList.toggle('sidebar-collapsed', collapsed);
-          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
-          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+          const collapsed = state === "collapsed";
+          sidebar.classList.toggle("collapsed", collapsed);
+          document.body.classList.toggle("sidebar-collapsed", collapsed);
+          sidebarToggle.title = collapsed
+            ? "Expand sidebar"
+            : "Collapse sidebar";
+          sidebarToggle.setAttribute(
+            "aria-label",
+            collapsed ? "Expand sidebar" : "Collapse sidebar",
+          );
         }
 
         themeButtons.forEach((button) => {
-          button.addEventListener('click', () => {
-            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+          button.addEventListener("click", () => {
+            localStorage.setItem("git-meta-theme", button.dataset.themeValue);
             applyTheme(button.dataset.themeValue);
           });
         });
 
-        sidebarToggle.addEventListener('click', () => {
-          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
-          localStorage.setItem('git-meta-sidebar', next);
+        sidebarToggle.addEventListener("click", () => {
+          const next =
+            currentSidebarState() === "collapsed" ? "expanded" : "collapsed";
+          localStorage.setItem("git-meta-sidebar", next);
           applySidebarState(next);
         });
 
-        media.addEventListener?.('change', () => {
-          if (currentTheme() === 'system') {
-            applyTheme('system');
+        media.addEventListener?.("change", () => {
+          if (currentTheme() === "system") {
+            applyTheme("system");
           }
         });
 

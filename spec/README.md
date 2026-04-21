@@ -64,7 +64,6 @@ We refer to this as "serialization" - how to write data into Git primiatives for
 
 There are three initial data types that can be used for any given target key. Here are the specifications for how those data types are serialized.
 
-- [Principles](./exchange-format/principles.md)
 - [Strings](./exchange-format/strings.md)
 - [Lists](./exchange-format/lists.md)
 - [Sets](./exchange-format/sets.md)
