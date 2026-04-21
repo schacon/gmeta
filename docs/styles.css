@@ -75,6 +75,16 @@ body {
 }
 a { color: inherit; text-decoration: none; }
 a:hover { color: var(--brand-dark); }
+/* Inline body-text links (inside paragraphs) pop with the accent color
+   and an underline; nav, buttons, cards and footer links keep the plain
+   inherited styling above. */
+p a {
+  color: var(--accent-2);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+p a:hover { color: var(--brand-dark); }
 code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 code { font-size: 0.88em; background: var(--code-bg); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
 h1, h2, h3 { letter-spacing: -0.02em; }

@@ -358,7 +358,7 @@
                     <text x="20" y="15" text-anchor="middle">list</text>
                   </g>
                   <text x="68" y="2" class="meta-key">agent:transcripts</text>
-                  <text x="220" y="2" class="meta-val">[tx-7e2c, +2]</text>
+                  <text x="220" y="2" class="meta-val">[(JSONL), (JSONL)]</text>
                 </g>
               </g>
 
@@ -416,7 +416,7 @@
             <div class="why-num">02</div>
             <div class="why-title">Namespaced keys</div>
             <p>
-              Attach values of several types (strings, lists, sets) to
+              Attach values of several types <em>(strings, lists, sets)</em> to
               namespaced keys such as <code>agents:model</code>.
             </p>
           </div>
@@ -682,8 +682,12 @@
             <div class="eyebrow">Who's behind it</div>
             <h2>All the coolest people in modern version control tools.</h2>
             <p class="section-lede">
-              git-meta is built and maintained by people from the projects and
-              organizations working on the next generation of Git tooling.
+              The git-meta specification was developed and proposed by
+              <a href="https://gitbutler.com">GitButler</a> with inspiration and
+              feedback from several leading version control teams, to solve the
+              growing Git metadata problem.
+              <a href="mailto:scott@gitbutler.com">Contact us</a> if you would
+              like to join this list of cool kids using it.
             </p>
           </div>
 
@@ -699,7 +703,9 @@
               </div>
               <div class="org-body">
                 <div class="org-name">GitButler</div>
-                <div class="org-role">Branch-based Git workflow tool</div>
+                <div class="org-role">
+                  Next generation Git-based version control client
+                </div>
               </div>
             </a>
             <a class="org" href="https://www.jj-vcs.dev/latest/">
@@ -709,7 +715,7 @@
               <div class="org-body">
                 <div class="org-name">Jujutsu</div>
                 <div class="org-role">
-                  A Git-compatible version control system
+                  A Git-compatible version control system, by Google
                 </div>
               </div>
             </a>
@@ -791,9 +797,15 @@
               <div class="faq-body">
                 <p>
                   Metadata lives on its own <code>refs/meta/*</code> refs, so
-                  cloning code doesn't pull metadata unless you ask for it. The
-                  local index shards entries and supports auto-pruning for
-                  tombstoned keys.
+                  cloning code doesn't pull metadata unless you ask for it.
+                  Initialization uses partial fetches to only get a working set
+                  of data, not every historical value, but older values can be
+                  fetched on demand with any modern Git server, including
+                  GitHub.
+                </p>
+                <p>
+                  If that's not enough, history can even be split and unioned in
+                  special cases, or even partially made private.
                 </p>
               </div>
             </details>
