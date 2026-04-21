@@ -167,13 +167,14 @@ p  { color: var(--ink-2); margin: 0 0 12px; }
   line-height: 1.04;
   letter-spacing: -0.03em;
   font-weight: 600;
-  margin: 0 0 24px;
+  margin: 0 0 30px;
   color: var(--ink);
   max-width: 14ch;
   text-wrap: pretty;
 }
 .lede {
-  font-size: 17px; line-height: 1.55;
+  font-size: 18px; line-height: 1.55;
+  text-align: justify;
   color: var(--ink-2);
   max-width: 52ch;
   margin: 0 0 28px;
