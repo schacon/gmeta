@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Syncing with normal Git · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a href="pruning.html">Auto-pruning</a><a class="active" href="auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="standard-keys.html">Standard keys</a><a href="workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Syncing with normal Git</h1>
+          </div>
+        </header>
+        <article class="doc-content has-aside">
+          <p>This document describes how an end user can set up a normal Git repository to automatically push and pull metadata whenever they push and pull code, using only commands the reference CLI already provides (<code>git meta push</code>, <code>git meta pull</code>, <code>git meta show</code>, <code>git meta log</code>) and Git&#x27;s existing hook and alias mechanisms.</p>
+<p>It is intentionally scoped to what works today with stock Git and the published reference CLI. Higher-level integrations that hide these moves entirely are covered in the <a href="workflow.html">Workflow</a> document.</p>
+<h2 id="what-we-are-wiring-up">What we are wiring up</h2>
+<p>Two operations need to happen alongside normal Git for metadata to feel &quot;automatic&quot;:</p>
+<ul><li>on push: after (or before) the code push, run <code>git meta push</code> so the local metadata commits travel to the remote</li><li>on pull / fetch: after new remote refs land, run <code>git meta pull</code> so the local metadata database materializes the new metadata commits</li></ul>
+<p>Git provides hooks for some of these moments and not others. The recommended setup uses the hooks Git does provide and falls back to a small set of aliases for the cases it does not.</p>
+<h2 id="push-side-pre-push">Push side: <code>pre-push</code></h2>
+<p>Git&#x27;s <code>pre-push</code> hook runs on the client immediately before refs are sent. It receives the remote name and URL as arguments and the list of local-to-remote ref pairs on stdin. This is the natural place to push metadata refs alongside the code push.</p>
+<p>Save the following as <code>.git/hooks/pre-push</code> and make it executable (<code>chmod +x</code>):</p>
+<pre><code>#!/usr/bin/env sh
+remote_name=&quot;$1&quot;
+
+# Forward metadata to the same remote the user is pushing to.
+# The metadata remote should already be configured via `git meta remote add`.
+git meta push &quot;$remote_name&quot; || {
+    echo &quot;git meta push to &#x27;$remote_name&#x27; failed; aborting git push&quot; &gt;&amp;2
+    exit 1
+}</code></pre>
+<p>Behavior notes:</p>
+<ul><li><code>pre-push</code> runs once per <code>git push</code> invocation regardless of how many refs are being pushed, which matches <code>git meta push</code>&#x27;s once-per-invocation semantics.</li><li>Returning a non-zero exit code from <code>pre-push</code> aborts the entire <code>git push</code>. If you would rather the code push always succeed and metadata sync be best-effort, replace the <code>exit 1</code> with <code>:</code> (no-op) so failures are reported but do not block.</li><li>If <code>git meta</code> is not aware of the remote name passed to the hook, it falls back to the first configured meta remote.</li></ul>
+<div class="callout callout-aside"><div class="callout-title">Note</div><p>There is no <code>post-push</code> hook in core Git. <code>pre-push</code> is the only client-side hook in the push lifecycle.</p></div>
+<h2 id="pull-side-post-merge">Pull side: <code>post-merge</code></h2>
+<p>Git&#x27;s <code>post-merge</code> hook runs after a successful merge, including the merge phase of <code>git pull</code>. This is the simplest way to materialize newly fetched metadata into the local database.</p>
+<p>Save the following as <code>.git/hooks/post-merge</code> and make it executable:</p>
+<pre><code>#!/usr/bin/env sh
+git meta pull || true</code></pre>
+<p>The trailing <code>|| true</code> keeps a metadata sync failure from interrupting the rest of the merge workflow. Drop it if you want metadata problems to surface loudly.</p>
+<p>Behavior notes:</p>
+<ul><li><code>post-merge</code> only fires when <code>git pull</code> actually merges. If the pull is a no-op (already up to date), the hook does not run, and there is nothing new to materialize anyway.</li><li><code>post-merge</code> does not fire for <code>git pull --rebase</code> or <code>git rebase</code>. If you rebase by default, see the <code>reference-transaction</code> recipe below or use the alias approach.</li></ul>
+<h2 id="fetch-side-reference-transaction">Fetch side: <code>reference-transaction</code></h2>
+<p>Core Git does not provide a <code>pre-fetch</code> or <code>post-fetch</code> hook. The closest mechanism is <code>reference-transaction</code>, available since Git 2.28, which fires for every ref-update transaction including the one written by <code>git fetch</code>.</p>
+<p>Save the following as <code>.git/hooks/reference-transaction</code> and make it executable:</p>
+<pre><code>#!/usr/bin/env sh
+# This hook runs three times per transaction (`prepared`, `committed`, `aborted`).
+# Only act once, after the transaction commits.
+[ &quot;$1&quot; = &quot;committed&quot; ] || exit 0
+
+# Read the ref updates from stdin and only react when remote-tracking refs
+# changed (which is what `git fetch` writes). Skip otherwise to avoid
+# materializing on every local commit, branch, or tag write.
+if grep -q &quot;	refs/remotes/&quot; ; then
+    git meta pull &gt;/dev/null 2&gt;&amp;1 &amp;
+fi</code></pre>
+<p>Behavior notes:</p>
+<ul><li>This hook is on the hot path for <em>every</em> ref update Git makes (including <code>git commit</code> writing <code>HEAD</code>). The <code>refs/remotes/</code> filter scopes the work to fetches.</li><li>The <code>&amp;</code> runs <code>git meta pull</code> in the background so it does not block the calling Git command. If you want synchronous behavior, drop the <code>&amp;</code>.</li><li>This hook makes <code>post-merge</code> redundant for users who only fetch via the same Git invocation. Pick one or the other unless you have a reason to layer both.</li></ul>
+<div class="callout callout-aside"><div class="callout-title">Warning</div><p><code>reference-transaction</code> is a relatively low-level mechanism. If a script in this hook fails noisily it can disrupt unrelated Git operations. The redirects to <code>/dev/null</code> and the background <code>&amp;</code> above are deliberate. Test the hook with <code>git fetch -v</code> before relying on it.</p></div>
+<h2 id="aliases-as-a-simpler-alternative">Aliases as a simpler alternative</h2>
+<p>For users who prefer to avoid hooks entirely, Git aliases that combine the code and metadata operations work just as well. Add to <code>~/.gitconfig</code> (global) or <code>.git/config</code> (per-repo):</p>
+<pre><code>[alias]
+    pushm  = &quot;!git push \&quot;$@\&quot; &amp;&amp; git meta push&quot;
+    pullm  = &quot;!git pull \&quot;$@\&quot; &amp;&amp; git meta pull&quot;
+    fetchm = &quot;!git fetch \&quot;$@\&quot; &amp;&amp; git meta pull&quot;</code></pre>
+<p>Users then run <code>git pushm</code>, <code>git pullm</code>, or <code>git fetchm</code> instead of the bare commands. The advantages over hooks are:</p>
+<ul><li>portable across machines without copying hook scripts</li><li>explicit: only runs when the user opts in</li><li>easy to debug because failures appear inline in the terminal</li></ul>
+<p>The disadvantage is that someone running plain <code>git push</code> or <code>git pull</code> will not get metadata sync. Hooks are appropriate when &quot;always on&quot; is the desired behavior.</p>
+<h2 id="reading-metadata-alongside-code-history">Reading metadata alongside code history</h2>
+<p>Core Git also does not expose hooks for <code>git log</code> or <code>git show</code>, and Git aliases cannot override built-in commands. The reference CLI ships two existing read commands that are intended to be used directly instead:</p>
+<ul><li><code>git meta show &lt;commit&gt;</code> displays the commit details and all metadata attached to that commit</li><li><code>git meta log [&lt;ref&gt;]</code> walks the commit log and shows metadata for each commit, with <code>--mo</code> to limit output to commits that actually have metadata</li></ul>
+<p>The recommended pattern is to use these as drop-in companions to <code>git show</code> and <code>git log</code> rather than trying to splice metadata into the built-in commands&#x27; output.</p>
+<p>If you prefer the verbs <code>show</code> and <code>log</code> to live under your normal Git invocation, alias them:</p>
+<pre><code>[alias]
+    showm = &quot;!f() { git show \&quot;$@\&quot; &amp;&amp; git meta show \&quot;${1:-HEAD}\&quot; ; }; f&quot;
+    logm  = &quot;!git meta log&quot;</code></pre>
+<p>Now <code>git showm &lt;sha&gt;</code> prints the standard <code>git show</code> output followed by the metadata view, and <code>git logm</code> is a shortcut for <code>git meta log</code>.</p>
+<h2 id="recommended-starter-setup">Recommended starter setup</h2>
+<p>For a single user on a single machine that wants the round trip to feel automatic with the least moving parts:</p>
+<ol><li>install the CLI: <code>cargo install git-meta-cli</code></li><li>configure the metadata remote once: <code>git meta remote add &lt;url&gt;</code></li><li>install the <code>pre-push</code> and <code>post-merge</code> hooks above</li><li>add the <code>showm</code> and <code>logm</code> aliases above for read access</li></ol>
+<p>This covers <code>git push</code>, <code>git pull</code>, and inspection without any custom code. For <code>git fetch</code> without a follow-up merge, fall back to either the <code>reference-transaction</code> hook or the <code>fetchm</code> alias.</p>
+<h2 id="what-this-setup-does-not-do">What this setup does not do</h2>
+<p>These recipes are deliberately thin. They do not:</p>
+<ul><li>decide which metadata namespaces are eligible to publish (the meta remote configuration handles that)</li><li>coordinate metadata pushes with multiple code remotes</li><li>present unified <code>git log</code> / <code>git show</code> output that interleaves metadata</li><li>handle conflicts beyond what <code>git meta pull</code> already does</li></ul>
+<p>A higher-level VCS that wants any of those behaviors should follow the <a href="workflow.html">Workflow</a> document instead, which describes the integration model for tools like GitButler or Jujutsu.</p>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>

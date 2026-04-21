@@ -61,6 +61,7 @@ PAGE_ORDER = [
     "implementation/cli.md",
     "implementation/output.md",
     "implementation/pruning.md",
+    "implementation/auto-sync.md",
     "implementation/workflow.md",
 ]
 
@@ -82,6 +83,7 @@ PAGE_GROUPS = {
         "implementation/cli.md",
         "implementation/output.md",
         "implementation/pruning.md",
+        "implementation/auto-sync.md",
     ],
     "Other Considerations": [
         "implementation/standard-keys.md",
