@@ -420,7 +420,7 @@
             <div class="why-num">01</div>
             <div class="why-title">Fine-grained targets</div>
             <p>
-              Attach keys to commits, branches, paths, change-ids, or the
+              Attach key/values to commits, branches, paths, change-ids, or the
               project itself &mdash; not just whole commits.
             </p>
           </div>
@@ -724,9 +724,9 @@
                 <p>
                   Metadata lives under its own ref namespace. Pin the
                   recommended remote in a <code>.git-meta</code> file at the
-                  repo root &mdash; the same repo as your code is fine
-                  &mdash; then run <code>git meta setup</code> to wire it up
-                  and seed <code>refs/meta/main</code>.
+                  repo root &mdash; the same repo as your code is fine &mdash;
+                  then run <code>git meta setup</code> to wire it up and seed
+                  <code>refs/meta/main</code>.
                 </p>
               </div>
               <pre class="snippet"><span class="c-mut">$</span> cd your-project
@@ -758,9 +758,9 @@
                 <p>
                   On a different machine, a collaborator clones the repo and
                   runs <code>git meta setup</code>. The committed
-                  <code>.git-meta</code> file from step 02 picks the remote
-                  for them, fetches the metadata refs, and gets them ready
-                  to inspect the values you wrote.
+                  <code>.git-meta</code> file from step 02 picks the remote for
+                  them, fetches the metadata refs, and gets them ready to
+                  inspect the values you wrote.
                 </p>
               </div>
               <pre
