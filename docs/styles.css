@@ -500,14 +500,14 @@ html[data-theme="dark"] .meta-val.str { fill: oklch(0.72 0.13 145); }
   font-size: 14.5px;
   line-height: 1.55;
 }
-.callout p { margin: 0; }
+.callout p { margin: 0; color: inherit; }
 .callout-icon { flex-shrink: 0; margin-top: 1px; }
 .callout-warn {
   background: oklch(0.26 0.045 var(--accent-h));
   border: 1px solid oklch(0.40 0.07 var(--accent-h));
   border-left-width: 3px;
   border-left-color: var(--brand);
-  color: #f0e2d4;
+  color: #fff7ee;
 }
 .callout-warn .callout-icon { color: var(--brand-light); }
 .section-try p a,
