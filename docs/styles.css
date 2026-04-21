@@ -454,59 +454,64 @@ html[data-theme="dark"] .meta-val.str { fill: oklch(0.72 0.13 145); }
   letter-spacing: 0.02em;
 }
 
-/* Animations: a single 12s loop tells the full Alice→Bob→Alice story.
+/* Animations: a single 14s loop tells the full Alice→Bob→Alice story
+   with quick transit (~1s per leg) and a ~3.5s steady pause at the end
+   where both received rows stay visible before the cycle resets.
    Keyframes use translate() values that map to fixed positions in the SVG
    viewBox (40,105 = alice row 1; 380,105 = bob row 1; 210,169 = remote;
    380,185 = bob row 2; 40,185 = alice row 2). The remote cylinder is
    drawn after the pills so the pill is naturally hidden behind it
-   while it sits at the remote position. */
+   while it sits at the remote position. Each pill fades to opacity 0
+   right after it lands so it doesn't linger over the materialized row. */
 .flow-pill-a {
-  animation: flow-pill-a 12s ease-in-out infinite;
+  animation: flow-pill-a 14s ease-in-out infinite;
 }
 .flow-pill-b {
-  animation: flow-pill-b 12s ease-in-out infinite;
+  animation: flow-pill-b 14s ease-in-out infinite;
 }
 .flow-row-on-bob {
-  animation: flow-row-on-bob 12s ease-in-out infinite;
+  animation: flow-row-on-bob 14s ease-in-out infinite;
   opacity: 0;
 }
 .flow-row-on-alice {
-  animation: flow-row-on-alice 12s ease-in-out infinite;
+  animation: flow-row-on-alice 14s ease-in-out infinite;
   opacity: 0;
 }
 
 @keyframes flow-pill-a {
   0%   { opacity: 0; transform: translate(40px, 105px); }
-  3%   { opacity: 1; transform: translate(40px, 105px); }
-  10%  { opacity: 1; transform: translate(40px, 105px); }
-  25%  { opacity: 1; transform: translate(210px, 169px); }
-  35%  { opacity: 1; transform: translate(210px, 169px); }
-  50%  { opacity: 1; transform: translate(380px, 105px); }
-  53%  { opacity: 0; transform: translate(380px, 105px); }
-  100% { opacity: 0; transform: translate(40px, 105px); }
+  4%   { opacity: 1; transform: translate(40px, 105px); }
+  11%  { opacity: 1; transform: translate(40px, 105px); }
+  18%  { opacity: 1; transform: translate(210px, 169px); }
+  22%  { opacity: 1; transform: translate(210px, 169px); }
+  29%  { opacity: 1; transform: translate(380px, 105px); }
+  32%  { opacity: 0; transform: translate(380px, 105px); }
+  100% { opacity: 0; transform: translate(380px, 105px); }
 }
 
 @keyframes flow-pill-b {
-  0%, 50% { opacity: 0; transform: translate(380px, 185px); }
-  53%     { opacity: 1; transform: translate(380px, 185px); }
-  60%     { opacity: 1; transform: translate(380px, 185px); }
-  75%     { opacity: 1; transform: translate(210px, 169px); }
-  85%     { opacity: 1; transform: translate(210px, 169px); }
-  98%     { opacity: 1; transform: translate(40px, 185px); }
+  0%, 39% { opacity: 0; transform: translate(380px, 185px); }
+  43%     { opacity: 1; transform: translate(380px, 185px); }
+  50%     { opacity: 1; transform: translate(380px, 185px); }
+  57%     { opacity: 1; transform: translate(210px, 169px); }
+  61%     { opacity: 1; transform: translate(210px, 169px); }
+  68%     { opacity: 1; transform: translate(40px, 185px); }
+  71%     { opacity: 0; transform: translate(40px, 185px); }
   100%    { opacity: 0; transform: translate(40px, 185px); }
 }
 
 @keyframes flow-row-on-bob {
-  0%, 47% { opacity: 0; }
-  52%     { opacity: 1; }
+  0%, 28% { opacity: 0; }
+  31%     { opacity: 1; }
   96%     { opacity: 1; }
   100%    { opacity: 0; }
 }
 
 @keyframes flow-row-on-alice {
-  0%, 95% { opacity: 0; }
-  98%     { opacity: 1; }
-  100%    { opacity: 1; }
+  0%, 67% { opacity: 0; }
+  70%     { opacity: 1; }
+  96%     { opacity: 1; }
+  100%    { opacity: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
