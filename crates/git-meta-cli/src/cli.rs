@@ -392,36 +392,82 @@ pub enum RemoteAction {
     List,
 }
 
+/// One curated group in the top-level help output.
+///
+/// Each group prints a bold heading followed by one or more
+/// [`HelpSection`]s, allowing a single thematic group (like "read and
+/// write data") to be visually subdivided by the kind of value it
+/// operates on (strings vs lists vs sets).
+struct HelpGroup {
+    /// Heading text, rendered bold + yellow.
+    heading: &'static str,
+    /// Sub-sections, in display order. A group with a single
+    /// label-less section renders identically to a flat group.
+    sections: &'static [HelpSection],
+}
+
+/// One sub-section within a [`HelpGroup`].
+///
+/// When `label` is `Some`, it is rendered dim and indented just above
+/// the commands (e.g. `(strings)`, `(lists)`, `(sets)`). When `label`
+/// is `None`, the commands are listed directly under the group heading
+/// with no extra label line.
+struct HelpSection {
+    /// Optional sub-label, e.g. `Some("(strings)")`.
+    label: Option<&'static str>,
+    /// Subcommand names to list, in display order. Names must match
+    /// what clap resolves via `Command::find_subcommand` so the
+    /// one-line `about` text can be pulled from the [`Commands`] enum.
+    commands: &'static [&'static str],
+}
+
 /// Curated top-level help groups, shown by [`print_help`].
 ///
-/// Order matters: groups print top-to-bottom in this order, and command
-/// names print left-to-right within each group. Anything not listed here
-/// is hidden from this view; most of those entries also carry
-/// `#[command(hide = true)]` so they stay out of clap's own help, error
-/// suggestions, and shell completions.
-const HELP_GROUPS: &[(&str, &[&str])] = &[
-    (
-        "read and write data",
-        &[
-            "set",
-            "get",
-            "rm",
-            "list:push",
-            "list:pop",
-            "list:rm",
-            "set:add",
-            "set:rm",
+/// Order matters at every level: groups print top-to-bottom, sections
+/// print top-to-bottom within each group, and command names print
+/// top-to-bottom within each section. Anything not listed here is
+/// hidden from this view; most of those entries also carry
+/// `#[command(hide = true)]` so they stay out of clap's own help,
+/// error suggestions, and shell completions.
+const HELP_GROUPS: &[HelpGroup] = &[
+    HelpGroup {
+        heading: "read and write data",
+        sections: &[
+            HelpSection {
+                label: Some("(strings)"),
+                commands: &["set", "get", "rm"],
+            },
+            HelpSection {
+                label: Some("(lists)"),
+                commands: &["list:push", "list:pop", "list:rm"],
+            },
+            HelpSection {
+                label: Some("(sets)"),
+                commands: &["set:add", "set:rm"],
+            },
         ],
-    ),
-    (
-        "browse and exchange (porcelain)",
-        &["show", "inspect", "log", "stats", "push", "pull"],
-    ),
-    (
-        "low-level git ref operations (plumbing)",
-        &["serialize", "materialize"],
-    ),
-    ("setup and configuration", &["remote", "config", "teardown"]),
+    },
+    HelpGroup {
+        heading: "browse and exchange (porcelain)",
+        sections: &[HelpSection {
+            label: None,
+            commands: &["show", "inspect", "log", "stats", "push", "pull"],
+        }],
+    },
+    HelpGroup {
+        heading: "low-level git ref operations (plumbing)",
+        sections: &[HelpSection {
+            label: None,
+            commands: &["serialize", "materialize"],
+        }],
+    },
+    HelpGroup {
+        heading: "setup and configuration",
+        sections: &[HelpSection {
+            label: None,
+            commands: &["remote", "config", "teardown"],
+        }],
+    },
 ];
 
 /// Decide whether the curated help should emit ANSI color codes.
@@ -513,11 +559,12 @@ pub fn print_help() {
     let p = Palette::detect();
 
     // Pad command names so the description column lines up across
-    // groups. ANSI codes are zero-width so this width also lines up
-    // visually when colors are enabled.
+    // every group and sub-section. ANSI codes are zero-width so this
+    // width also lines up visually when colors are enabled.
     let pad = HELP_GROUPS
         .iter()
-        .flat_map(|(_, names)| names.iter())
+        .flat_map(|g| g.sections.iter())
+        .flat_map(|s| s.commands.iter())
         .map(|n| n.len())
         .max()
         .unwrap_or(0)
@@ -530,20 +577,31 @@ pub fn print_help() {
     println!();
     println!("These are the most commonly used git meta commands:");
 
-    for (heading, names) in HELP_GROUPS {
+    for group in HELP_GROUPS {
         println!();
-        println!("{}{}{heading}{}", p.bold, p.yellow, p.reset);
-        for name in *names {
-            let about = cmd
-                .find_subcommand(name)
-                .and_then(|c| c.get_about())
-                .map(std::string::ToString::to_string)
-                .unwrap_or_default();
-            println!(
-                "   {green}{name:<pad$}{reset}{about}",
-                green = p.green,
-                reset = p.reset,
-            );
+        println!("{}{}{}{}", p.bold, p.yellow, group.heading, p.reset);
+        for (idx, section) in group.sections.iter().enumerate() {
+            // Sub-labelled sections get a blank line *between* them so
+            // (strings) / (lists) / (sets) read as distinct blocks; the
+            // first sub-label sits flush against the group heading.
+            if let Some(label) = section.label {
+                if idx > 0 {
+                    println!();
+                }
+                println!("   {}{}{}", p.dim, label, p.reset);
+            }
+            for name in section.commands {
+                let about = cmd
+                    .find_subcommand(name)
+                    .and_then(|c| c.get_about())
+                    .map(std::string::ToString::to_string)
+                    .unwrap_or_default();
+                println!(
+                    "   {green}{name:<pad$}{reset}{about}",
+                    green = p.green,
+                    reset = p.reset,
+                );
+            }
         }
     }
 
