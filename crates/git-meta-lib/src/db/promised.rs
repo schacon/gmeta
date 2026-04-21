@@ -44,6 +44,7 @@ impl Store {
     /// - `value`: the resolved value content
     /// - `value_type`: the type of value (string, list, set)
     /// - `is_git_ref`: whether the value is a git blob SHA reference
+    #[cfg(feature = "internal")]
     pub fn resolve_promised(
         &self,
         target: &Target,
@@ -76,6 +77,7 @@ impl Store {
     ///
     /// - `target`: the metadata target
     /// - `key`: the metadata key name
+    #[cfg(feature = "internal")]
     pub fn delete_promised(&self, target: &Target, key: &str) -> Result<()> {
         let target_type_str = target.target_type().as_str();
         let target_value = target.value().unwrap_or("");
@@ -87,6 +89,7 @@ impl Store {
     }
 
     /// Count promised (not-yet-hydrated) keys, grouped by target_type.
+    #[cfg(feature = "internal")]
     pub fn count_promised_keys(&self) -> Result<Vec<(String, u64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT target_type, COUNT(*) FROM metadata WHERE is_promised = 1 GROUP BY target_type ORDER BY target_type",
@@ -103,6 +106,7 @@ impl Store {
 
     /// Get all promised (not-yet-hydrated) keys.
     /// Returns (target_type, target_value, key).
+    #[cfg(feature = "internal")]
     pub fn get_promised_keys(&self) -> Result<Vec<(String, String, String)>> {
         let mut stmt = self.conn.prepare(
             "SELECT target_type, target_value, key FROM metadata WHERE is_promised = 1 ORDER BY target_type, target_value, key",

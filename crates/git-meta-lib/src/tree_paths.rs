@@ -125,6 +125,7 @@ pub fn tree_path(target: &Target, key: &str) -> Result<String> {
 ///
 /// # Errors
 /// Returns an error if the key is invalid.
+#[cfg(feature = "internal")]
 pub fn key_tree_path(target: &Target, key: &str) -> Result<String> {
     build_key_tree_path(target, key)
 }

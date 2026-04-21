@@ -448,6 +448,7 @@ fn build_commit_message(changes: &[(char, String, String)]) -> String {
 /// # Errors
 ///
 /// Returns an error if target parsing or Git object writes fail.
+#[cfg(feature = "internal")]
 pub fn build_filtered_tree(
     repo: &gix::Repository,
     metadata_entries: &[SerializableEntry],
