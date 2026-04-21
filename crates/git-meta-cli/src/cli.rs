@@ -1,8 +1,15 @@
 use clap::{Args, Parser, Subcommand};
 
+/// Top-level command-line interface for the `git-meta` binary.
+//
+// `version` (no value) instructs clap to derive `--version` / `-V` from
+// `CARGO_PKG_VERSION`, which is kept in sync with the workspace package
+// version, so the flag always reflects the version of the installed
+// binary.
 #[derive(Parser)]
 #[command(
     name = "git-meta",
+    version,
     about = "Structured metadata for Git data",
     disable_help_subcommand = true
 )]
@@ -38,7 +45,7 @@ pub enum Commands {
         value: Option<String>,
     },
 
-    /// Get metadata value(s)
+    /// Get string metadata value(s)
     #[command(display_order = 11)]
     Get {
         /// Output as JSON
@@ -56,7 +63,7 @@ pub enum Commands {
         key: Option<String>,
     },
 
-    /// Remove a metadata key
+    /// Remove a string metadata key
     #[command(display_order = 12)]
     Rm {
         /// Target in type:value format
@@ -417,6 +424,74 @@ const HELP_GROUPS: &[(&str, &[&str])] = &[
     ("setup and configuration", &["remote", "config", "teardown"]),
 ];
 
+/// Decide whether the curated help should emit ANSI color codes.
+///
+/// Resolution order (first match wins):
+/// 1. `NO_COLOR` is set (any value) → never color, per
+///    <https://no-color.org/>.
+/// 2. `CLICOLOR_FORCE` is set to a non-empty value other than `"0"` →
+///    always color, even when stdout is not a TTY. This matches the
+///    convention used by `ls`, `grep`, and friends, and makes the
+///    colored path deterministically testable in `assert_cmd`.
+/// 3. Otherwise, color iff stdout is connected to a real terminal, so
+///    codes never leak into pipes, log files, or another program's
+///    input as raw escape garbage.
+fn use_color() -> bool {
+    if std::env::var_os("NO_COLOR").is_some() {
+        return false;
+    }
+    if let Some(v) = std::env::var_os("CLICOLOR_FORCE") {
+        if !v.is_empty() && v != "0" {
+            return true;
+        }
+    }
+    use std::io::IsTerminal;
+    std::io::stdout().is_terminal()
+}
+
+/// ANSI styling palette used by [`print_help`].
+///
+/// Constructed once per invocation by [`Palette::detect`] so every code
+/// site can stay free of color/no-color branching. When color is
+/// disabled every field is the empty string, making colored and plain
+/// output a single code path.
+struct Palette {
+    /// Bold weight, used for the `usage:` label.
+    bold: &'static str,
+    /// Dim weight, used for the footer hints.
+    dim: &'static str,
+    /// Yellow foreground, combined with bold for group headings.
+    yellow: &'static str,
+    /// Green foreground, used for command names in each group.
+    green: &'static str,
+    /// SGR reset, terminating any styled run.
+    reset: &'static str,
+}
+
+impl Palette {
+    /// Build a palette honouring the environment: colored when stdout is
+    /// a TTY and `NO_COLOR` is unset, otherwise an all-empty palette.
+    fn detect() -> Self {
+        if use_color() {
+            Self {
+                bold: "\x1b[1m",
+                dim: "\x1b[2m",
+                yellow: "\x1b[33m",
+                green: "\x1b[32m",
+                reset: "\x1b[0m",
+            }
+        } else {
+            Self {
+                bold: "",
+                dim: "",
+                yellow: "",
+                green: "",
+                reset: "",
+            }
+        }
+    }
+}
+
 /// Print the structured top-level help that replaces clap's auto-generated
 /// help for `git meta`, `git meta -h`, `git meta --help`, and `git meta
 /// help`.
@@ -427,15 +502,19 @@ const HELP_GROUPS: &[(&str, &[&str])] = &[
 /// sync. Subcommand names not listed in [`HELP_GROUPS`] are intentionally
 /// omitted.
 ///
-/// Output goes to stdout as plain text (no ANSI styling) so the help is
-/// readable in pipes, logs, and dumb terminals.
+/// Output goes to stdout. Group headings render bold yellow and command
+/// names render green when stdout is a terminal and `NO_COLOR` is unset;
+/// in pipes, logs, and dumb terminals the output is plain ASCII.
 ///
 /// [`Command`]: clap::Command
 pub fn print_help() {
     use clap::CommandFactory;
     let cmd = Cli::command();
+    let p = Palette::detect();
 
-    // Pad command names so the description column lines up across groups.
+    // Pad command names so the description column lines up across
+    // groups. ANSI codes are zero-width so this width also lines up
+    // visually when colors are enabled.
     let pad = HELP_GROUPS
         .iter()
         .flat_map(|(_, names)| names.iter())
@@ -444,7 +523,7 @@ pub fn print_help() {
         .unwrap_or(0)
         + 4;
 
-    println!("usage: git meta <command> [options]");
+    println!("{}usage:{} git meta <command> [options]", p.bold, p.reset);
     println!();
     println!("Structured metadata for Git data — attach values to commits, branches,");
     println!("paths, and projects, and exchange them over normal git transport.");
@@ -453,18 +532,30 @@ pub fn print_help() {
 
     for (heading, names) in HELP_GROUPS {
         println!();
-        println!("{heading}");
+        println!("{}{}{heading}{}", p.bold, p.yellow, p.reset);
         for name in *names {
             let about = cmd
                 .find_subcommand(name)
                 .and_then(|c| c.get_about())
                 .map(std::string::ToString::to_string)
                 .unwrap_or_default();
-            println!("   {name:<pad$}{about}");
+            println!(
+                "   {green}{name:<pad$}{reset}{about}",
+                green = p.green,
+                reset = p.reset,
+            );
         }
     }
 
     println!();
-    println!("Run 'git meta <command> --help' for command-specific options.");
-    println!("See https://git-meta.com for the spec and full docs.");
+    println!(
+        "{dim}Run 'git meta <command> --help' for command-specific options.{reset}",
+        dim = p.dim,
+        reset = p.reset,
+    );
+    println!(
+        "{dim}See https://git-meta.com for the spec and full docs.{reset}",
+        dim = p.dim,
+        reset = p.reset,
+    );
 }
