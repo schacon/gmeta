@@ -94,10 +94,7 @@
               scalable, flexible and collaborative <code>git notes</code>.
             </p>
             <div class="cta-row">
-              <a
-                class="btn btn-primary"
-                href="#try"
-              >
+              <a class="btn btn-primary" href="#try">
                 Try the git-meta CLI
                 <svg
                   width="14"
@@ -682,10 +679,9 @@
             <div class="eyebrow">Try it out</div>
             <h2>Install, push a key, fetch it from another machine.</h2>
             <p class="section-lede">
-              The reference implementation is a single Rust binary. Install
-              with <code>cargo</code>, wire up a remote, set a value and push
-              it &mdash; then watch a teammate pull it down with the same
-              tool.
+              The reference implementation is a single Rust binary. Install with
+              <code>cargo</code>, wire up a remote, set a value and push it
+              &mdash; then watch a teammate pull it down with the same tool.
             </p>
           </div>
 
@@ -711,14 +707,11 @@
                 <div class="try-step-num">02 &middot; Set up</div>
                 <h3>Point at a meta remote</h3>
                 <p>
-                  Metadata lives under its own ref namespace. Add a remote
-                  that hosts those refs &mdash; the same repo as your code
-                  is fine.
+                  Metadata lives under its own ref namespace. Add a remote that
+                  hosts those refs &mdash; the same repo as your code is fine.
                 </p>
               </div>
-              <pre
-                class="snippet"
-              ><span class="c-mut">$</span> cd your-project
+              <pre class="snippet"><span class="c-mut">$</span> cd your-project
 <span class="c-mut">$</span> git meta remote add <span class="c-s">git@github.com:you/proj.git</span></pre>
             </li>
 
@@ -729,8 +722,8 @@
                 <p>
                   Set a key on any target &mdash; <code>commit</code>,
                   <code>branch</code>, <code>path</code>, or
-                  <code>project</code> &mdash; then push the metadata refs
-                  to the remote.
+                  <code>project</code> &mdash; then push the metadata refs to
+                  the remote.
                 </p>
               </div>
               <pre
@@ -744,9 +737,9 @@
                 <div class="try-step-num">04 &middot; Teammate</div>
                 <h3>Another user fetches and inspects it</h3>
                 <p>
-                  On a different machine, a collaborator clones the repo,
-                  points at the same meta remote, fetches the metadata
-                  refs, and inspects the values you wrote.
+                  On a different machine, a collaborator clones the repo, points
+                  at the same meta remote, fetches the metadata refs, and
+                  inspects the values you wrote.
                 </p>
               </div>
               <pre
@@ -758,10 +751,32 @@
             </li>
           </ol>
 
-          <p class="try-foot">
-            From here: <a href="spec/implementation/cli.html">browse the full CLI surface</a>
-            or read <a href="spec/exchange-format/targets.html">how targets &amp; keys work</a>.
-          </p>
+          <aside class="callout callout-warn" role="note">
+            <svg
+              class="callout-icon"
+              viewBox="0 0 24 24"
+              width="22"
+              height="22"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"
+              />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <p>
+              This is really just the plumbing for a real metadata sharing
+              workflow. Tools like GitButler, Jujutsu or Entire are working
+              to integrate these low level tools into higher level things
+              like committing, pushing and pulling.
+            </p>
+          </aside>
         </div>
       </section>
 
@@ -925,11 +940,7 @@
             </p>
           </div>
           <div class="cta-row">
-            <a
-              class="btn btn-primary"
-              href="#try"
-              >Try the implementation</a
-            >
+            <a class="btn btn-primary" href="#try">Try the implementation</a>
             <a class="btn btn-ghost" href="spec/">Read the spec</a>
           </div>
         </div>
