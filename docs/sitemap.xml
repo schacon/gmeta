@@ -41,10 +41,6 @@
     <lastmod>2026-04-19</lastmod>
   </url>
   <url>
-    <loc>https://git-meta.com/spec/implementation/standard-keys.html</loc>
-    <lastmod>2026-04-19</lastmod>
-  </url>
-  <url>
     <loc>https://git-meta.com/spec/implementation/cli.html</loc>
     <lastmod>2026-04-21</lastmod>
   </url>
@@ -54,6 +50,10 @@
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/pruning.html</loc>
+    <lastmod>2026-04-19</lastmod>
+  </url>
+  <url>
+    <loc>https://git-meta.com/spec/implementation/standard-keys.html</loc>
     <lastmod>2026-04-19</lastmod>
   </url>
   <url>

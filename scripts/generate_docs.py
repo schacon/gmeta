@@ -57,10 +57,10 @@ PAGE_ORDER = [
     "exchange-format/sets.md",
     "implementation/overview.md",
     "implementation/storage.md",
-    "implementation/standard-keys.md",
     "implementation/cli.md",
     "implementation/output.md",
     "implementation/pruning.md",
+    "implementation/standard-keys.md",
     "implementation/auto-sync.md",
     "implementation/workflow.md",
 ]
@@ -83,10 +83,10 @@ PAGE_GROUPS = {
         "implementation/cli.md",
         "implementation/output.md",
         "implementation/pruning.md",
-        "implementation/auto-sync.md",
     ],
     "Other Considerations": [
         "implementation/standard-keys.md",
+        "implementation/auto-sync.md",
         "implementation/workflow.md",
     ]
 }
