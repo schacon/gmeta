@@ -12,6 +12,7 @@ mod harness;
 
 mod help;
 mod list;
+mod log;
 mod materialize;
 mod promisor;
 mod push_pull;

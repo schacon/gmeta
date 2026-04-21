@@ -1,11 +1,20 @@
 //! `git meta log` — walk the commit history and print metadata for each commit,
 //! matching the output of scripts/log.rb.
+//!
+//! Output is funnelled through [`crate::pager::Pager`], which transparently
+//! pipes through `$PAGER` (or `core.pager`) when stdout is a terminal —
+//! mirroring `git log`'s pager behaviour. When stdout is not a terminal
+//! (pipes, redirects, the test harness, …) the pager is skipped and we
+//! write straight to stdout instead.
+
+use std::io::Write;
 
 use anyhow::{Context, Result};
 use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 
 use crate::context::CommandContext;
+use crate::pager::Pager;
 use git_meta_lib::types::{Target, TargetType};
 
 const RESET: &str = "\x1b[0m";
@@ -22,6 +31,29 @@ pub fn run(
     metadata_only: bool,     // skip commits with no metadata
 ) -> Result<()> {
     let ctx = CommandContext::open(None)?;
+    let repo = ctx.session.repo();
+
+    // Set up the pager *before* writing anything. When stdout is a
+    // terminal this hooks up the pager pipe; otherwise it falls back
+    // to stdout. The `Pager` is dropped at end-of-fn, which closes
+    // the pipe and reaps the child process.
+    let mut out = Pager::start(Some(repo));
+
+    write_log(&mut out, &ctx, start_ref, count, metadata_only)
+}
+
+/// Walk commits and write the formatted log to `out`.
+///
+/// Split out from [`run`] so the rendering can be tested independently
+/// of pager spawning, and so the `Pager` cleanup in [`run`] runs even
+/// when this function returns an error mid-walk.
+fn write_log<W: Write>(
+    out: &mut W,
+    ctx: &CommandContext,
+    start_ref: Option<&str>,
+    count: usize,
+    metadata_only: bool,
+) -> Result<()> {
     let repo = ctx.session.repo();
 
     // Resolve start ref -> OID
@@ -69,7 +101,7 @@ pub fn run(
 
         // Blank line between entries
         if printed > 0 {
-            println!();
+            writeln!(out)?;
         }
         printed += 1;
 
@@ -86,38 +118,39 @@ pub fn run(
             .email
             .to_str_lossy();
 
-        println!(
+        writeln!(
+            out,
             "{YELLOW}commit {short_sha}{RESET} {DIM}---{RESET} \
              {GREEN}{author_name}{RESET} {DIM}<{author_email}>{RESET}"
-        );
+        )?;
 
         let message = decoded.message.to_str_lossy();
         let message = message.trim().to_string();
         let nonempty_lines: Vec<&str> = message.lines().filter(|l| !l.trim().is_empty()).collect();
         let shown = nonempty_lines.len().min(4);
         for line in &nonempty_lines[..shown] {
-            println!("  {line}");
+            writeln!(out, "  {line}")?;
         }
         if nonempty_lines.len() > 4 {
             let extra = nonempty_lines.len() - 4;
-            println!("  {DIM}... ({extra} more lines){RESET}");
+            writeln!(out, "  {DIM}... ({extra} more lines){RESET}")?;
         }
 
         if !meta.is_empty() {
-            println!("  {CYAN}--- metadata ---{RESET}");
+            writeln!(out, "  {CYAN}--- metadata ---{RESET}")?;
             for (key, value) in &meta {
                 let preview = format_value_preview(value);
-                println!("  {BLUE}|{RESET} {BOLD}{key}{RESET}  {preview}");
+                writeln!(out, "  {BLUE}|{RESET} {BOLD}{key}{RESET}  {preview}")?;
             }
-            println!("  {BLUE}.{RESET}");
+            writeln!(out, "  {BLUE}.{RESET}")?;
         }
     }
 
     if printed == 0 {
         if metadata_only {
-            println!("No commits with metadata found.");
+            writeln!(out, "No commits with metadata found.")?;
         } else {
-            println!("No commits found.");
+            writeln!(out, "No commits found.")?;
         }
     }
 
