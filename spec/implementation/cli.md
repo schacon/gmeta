@@ -7,17 +7,17 @@ This document describes the intended command-line interface at the project level
 ### Set a value
 
 ```bash
-git meta set [-t <type>] <target> <key> <value>
+git meta set <target> <key> <value>
 ```
 
-If `-t` is not given, the value type defaults to `string`.
+`git meta set` always writes a string value. List and set values are mutated
+through their own dedicated verbs (see below).
 
 Examples:
 
 ```bash
 git meta set commit:314e7f0fa7 agent:model claude-4.6
-git meta set -t list branch:sc-branch-1-deadbeef agent:chat '["hello", "world"]'
-git meta set -t set path:src/metrics owners '["schacon", "caleb"]'
+git meta set path:src/metrics review:status approved
 ```
 
 ### Get values
@@ -111,17 +111,13 @@ project
 
 ## Value encoding
 
-### String input
+`git meta set` only writes string values. To populate or mutate list and set
+values, use the dedicated verbs:
 
-Without `-t`, `<value>` is interpreted as a string.
-
-### List input
-
-For `-t list`, `<value>` should be a JSON array of strings.
-
-### Set input
-
-For `-t set`, `<value>` should be a JSON array of unique strings.
+- `git meta list:push <target> <key> <value>` to append a list entry
+- `git meta list:pop <target> <key> <value>` to drop a list entry
+- `git meta set:add <target> <key> <value>` to add a set member
+- `git meta set:rm <target> <key> <value>` to remove a set member
 
 ## Output modes
 

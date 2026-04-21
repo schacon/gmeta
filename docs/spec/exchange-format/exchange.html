@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Serialization · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="targets.html">Targets and keys</a><a class="active" href="exchange.html">Serialization</a><a href="materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="strings.html">Strings</a><a href="lists.html">Lists</a><a href="sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="../implementation/overview.html">Implementation Overview</a><a href="../implementation/storage.html">Local storage</a><a href="../implementation/cli.html">CLI surface</a><a href="../implementation/output.html">Output and query semantics</a><a href="../implementation/pruning.html">Auto-pruning</a><a href="../implementation/auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="../implementation/standard-keys.html">Standard keys</a><a href="../implementation/workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Serialization</h1>
+          </div>
+        </header>
+        <article class="doc-content">
+          <p>This document describes how to serialize metadata into Git primatives that can be transferred via normal Git remote protocols.</p>
+<p><a href="../other/example-serialize.html">Interactive demo of the serialization format</a></p>
+<h2 id="commit-model">Commit model</h2>
+<p>Serialization writes a Git commit whose tree contains the current shareable metadata state.</p>
+<ul><li>tree pointer</li><li>author identity</li><li>author date / commit date</li><li>ancestry for incremental materialization and merging</li></ul>
+<h2 id="tree-root-layout">Tree root layout</h2>
+<p>The base tree path for a target is target-type dependent:</p>
+<ul><li><code>commit</code> → <code>&lt;target-type&gt;/&lt;first2-of-sha&gt;/&lt;full-target-value&gt;</code></li><li><code>branch</code> / <code>change-id</code> → <code>&lt;target-type&gt;/&lt;fanout&gt;/&lt;full-target-value&gt;</code></li><li><code>path</code> → <code>path/&lt;escaped path segments...&gt;/__target__</code></li><li><code>project</code> → <code>project</code></li></ul>
+<p>Fanout is target-type dependent:</p>
+<ul><li>for <code>commit</code>, use the first 2 characters of the commit SHA</li><li>for <code>path</code>, do not hash the target value; serialize the path segments directly</li><li>for anything else (<code>branch</code>, <code>change-id</code>), use the first 2 hexadecimal characters of the SHA-1 hash of the target value (ie, the branch name or change-id value)</li></ul>
+<p>Examples:</p>
+<ul><li><code>commit/13/13a7d29cde8f8557b54fd6474f547a56822180ae/...</code></li><li><code>branch/06/sc-branch-1-deadbeef/...</code></li><li><code>path/src/metrics/__target__/owner/__value</code></li></ul>
+<p>For <code>path</code> targets, a reserved separator component <code>__target__</code> marks the end of the target path and the beginning of key segments. If a serialized path segment would begin with <code>__</code>, it must be escaped by prefixing it with <code>~</code>. To keep this reversible, a path segment beginning with <code>~</code> should also be escaped by prefixing it with <code>~</code>. Examples:</p>
+<ul><li>raw path segment <code>__generated</code> → serialized as <code>~__generated</code></li><li>raw path segment <code>~scratch</code> → serialized as <code>~~scratch</code></li></ul>
+<p>This keeps commit paths readable, preserves human-readable path targets, and still avoids ambiguity between serialized path targets and metadata structure.</p>
+<h2 id="key-path-layout">Key path layout</h2>
+<p>Under the target base path, key segments are serialized directly as path components.</p>
+<p>Metadata structure begins when a reserved <code>__*</code> component is encountered.</p>
+<p>Examples:</p>
+<ul><li>string: <code>&lt;base&gt;/agent/model/__value</code></li><li>list: <code>&lt;base&gt;/agent/chat/__list/&lt;entry-id&gt;</code></li><li>whole-key tombstone: <code>&lt;base&gt;/__tombstones/agent/model/__deleted</code></li></ul>
+<h2 id="per-type-layouts">Per-type layouts</h2>
+<p>Per-type layouts are defined in:</p>
+<ul><li><a href="strings.html">Strings</a></li><li><a href="lists.html">Lists</a></li><li><a href="sets.html">Sets</a></li></ul>
+<h2 id="key-path-reservation">Key path reservation</h2>
+<p>Keys are serialized directly under the target base path.</p>
+<p>Any path component beginning with <code>__</code> is reserved for git-meta structural paths such as:</p>
+<ul><li><code>__value</code></li><li><code>__list</code></li><li><code>__set</code></li><li><code>__tombstones</code></li><li><code>__target__</code> (used only as the separator inside serialized <code>path</code> targets)</li></ul>
+<p>This means user keys occupy normal path segments and metadata structure begins when a reserved <code>__*</code> path component is encountered.</p>
+<h2 id="path-target-encoding">Path target encoding</h2>
+<p><code>path</code> targets are serialized using their raw path segments rather than a hash-derived fanout prefix.</p>
+<p>Shape:</p>
+<p><code>path/&lt;escaped path segments...&gt;/__target__/...</code></p>
+<p>Rules:</p>
+<ul><li>each <code>/</code>-separated path component becomes one tree path component</li><li><code>__target__</code> marks the end of the target path and the beginning of key segments</li><li>if a path segment begins with <code>__</code>, escape it by prefixing the segment with <code>~</code></li><li>if a path segment begins with <code>~</code>, also escape it by prefixing the segment with <code>~</code></li></ul>
+<p>Examples:</p>
+<ul><li><code>path:src/metrics</code> → <code>path/src/metrics/__target__/...</code></li><li><code>path:src/__generated/file.rs</code> → <code>path/src/~__generated/file.rs/__target__/...</code></li><li><code>path:src/~scratch/file.rs</code> → <code>path/src/~~scratch/file.rs/__target__/...</code></li></ul>
+<h2 id="explicit-deletion">Explicit deletion</h2>
+<p>Exchange must not assume that missing paths mean deletion.</p>
+<p>Reasons:</p>
+<ul><li>sparse or pruned trees may omit data</li><li>multiple metadata refs may represent different subsets</li><li>absence should not be ambiguous</li></ul>
+<p>Intentional deletion is represented by explicit tombstones.</p>
+<p>A single reserved <code>__tombstones</code> namespace is used for both whole-key and child-level deletions. Child tombstones are interpreted relative to the current key type. Serialize and materialize must ignore incompatible child tombstones for the current type rather than treating them as errors or as deletions for another collection model.</p>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>

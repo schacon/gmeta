@@ -486,21 +486,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "git-meta-lib"
-version = "0.1.0"
-dependencies = [
- "gix",
- "rusqlite",
- "serde",
- "serde_json",
- "sha1",
- "tempfile",
- "thiserror 2.0.18",
- "time",
-]
-
-[[package]]
-name = "git-meta-rs"
+name = "git-meta-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -519,6 +505,20 @@ dependencies = [
  "tempfile",
  "time",
  "uuid",
+]
+
+[[package]]
+name = "git-meta-lib"
+version = "0.1.0"
+dependencies = [
+ "gix",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tempfile",
+ "thiserror 2.0.18",
+ "time",
 ]
 
 [[package]]

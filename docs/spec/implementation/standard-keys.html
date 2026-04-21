@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Standard keys · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a href="pruning.html">Auto-pruning</a><a href="auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a class="active" href="standard-keys.html">Standard keys</a><a href="workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Standard keys</h1>
+          </div>
+        </header>
+        <article class="doc-content">
+          <p>This document suggests a small set of commonly useful metadata keys and conventions.</p>
+<p>These are not mandatory exchange-format rules. They are implementation-level recommendations intended to improve interoperability between tools that use git-meta.</p>
+<h2 id="goals">Goals</h2>
+<p>Suggested standard keys should:</p>
+<ul><li>cover common collaboration and automation use cases</li><li>keep names predictable across tools</li><li>make value types obvious from the key name</li><li>avoid overloading one key with several unrelated meanings</li><li>leave room for vendor-specific extensions</li></ul>
+<h2 id="naming-recommendations">Naming recommendations</h2>
+<p>Keys should use a stable namespace-like structure with <code>:</code> separators.</p>
+<p>Recommended conventions:</p>
+<ul><li>use short, lowercase segments</li><li>use a broad domain first, then more specific segments</li><li>prefer singular nouns for scalar values</li><li>reserve plural concepts for collection-typed keys</li><li>keep the same key meaning across all target types when possible</li></ul>
+<p>Examples:</p>
+<ul><li><code>owner</code></li><li><code>codeowners</code></li><li><code>reviewer</code></li><li><code>agent:model</code></li><li><code>agent:provider</code></li><li><code>agent:session-id</code></li><li><code>agent:prompt</code></li><li><code>automation:status</code></li></ul>
+<h2 id="type-recommendations">Type recommendations</h2>
+<p>A suggested key should also imply a default value type.</p>
+<p>General guidance:</p>
+<ul><li>use <code>string</code> for one canonical value</li><li>use <code>list</code> for ordered history, logs, or preference-ranked values</li><li>use <code>set</code> for unordered unique membership</li></ul>
+<p>Examples:</p>
+<ul><li><code>owner</code> → <code>string</code></li><li><code>codeowners</code> → <code>set</code></li><li><code>reviewer</code> → <code>set</code></li><li><code>agent:model</code> → <code>string</code></li><li><code>agent:message-id</code> → <code>list</code> when preserving ordered conversation/message references</li></ul>
+<h2 id="format-recommendations">Format recommendations</h2>
+<p>Where possible, string values should use simple portable text formats:</p>
+<ul><li>email addresses as plain email strings</li><li>timestamps as RFC 3339 / ISO 8601 UTC strings</li><li>UUIDs in canonical lowercase hyphenated form</li><li>commit IDs as full Git object IDs unless a host system has a stronger stable identifier</li><li>booleans as the literal strings <code>true</code> and <code>false</code> when a dedicated boolean type does not exist</li><li>enums as short lowercase tokens like <code>open</code>, <code>closed</code>, <code>pending</code>, <code>success</code></li></ul>
+<p>If a value needs structured payloads, implementations should prefer:</p>
+<ol><li>multiple related keys</li><li>a collection type</li><li>a stable serialized string format such as JSON only when necessary</li></ol>
+<h2 id="commonly-useful-standard-keys">Commonly useful standard keys</h2>
+<p>The following are recommended cross-tool conventions.</p>
+<h3 id="ownership">Ownership</h3>
+<h4 id="owner"><code>owner</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: one primary responsible person or team</li><li>suggested formats:</li><li>email address: <code>alice@example.com</code></li><li>team slug: <code>team:release</code></li></ul>
+<p>Useful targets:</p>
+<ul><li><code>project</code></li><li><code>branch</code></li><li><code>path</code></li><li><code>change-id</code></li></ul>
+<h4 id="codeowners"><code>codeowners</code></h4>
+<ul><li>suggested type: <code>set</code></li><li>intended meaning: all owners associated with a target</li><li>suggested member formats:</li><li>email address</li><li>team slug like <code>team:platform</code></li><li>Git hosting handle only if the hosting product is the intended authority</li></ul>
+<p>Useful targets:</p>
+<ul><li><code>path</code></li><li><code>project</code></li></ul>
+<p>This key is especially useful when materializing ownership data derived from or aligned with a <code>CODEOWNERS</code> file.</p>
+<p>Tools should treat <code>codeowners</code> as advisory metadata, not as a replacement for repository-native enforcement rules.</p>
+<h3 id="review-and-collaboration">Review and collaboration</h3>
+<h4 id="reviewer"><code>reviewer</code></h4>
+<ul><li>suggested type: <code>set</code></li><li>intended meaning: requested, assigned, or associated reviewers</li><li>suggested member formats:</li><li>email address</li><li>team slug</li><li>provider-scoped identity like <code>github:user/octocat</code></li></ul>
+<p>Useful targets:</p>
+<ul><li><code>change-id</code></li><li><code>commit</code></li><li><code>branch</code></li></ul>
+<h4 id="reviewstatus"><code>review:status</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: high-level review state</li><li>suggested values:</li><li><code>unreviewed</code></li><li><code>in-review</code></li><li><code>approved</code></li><li><code>changes-requested</code></li></ul>
+<p>Useful targets:</p>
+<ul><li><code>change-id</code></li><li><code>commit</code></li><li><code>branch</code></li></ul>
+<h3 id="agent-metadata">Agent metadata</h3>
+<p>Agent-generated metadata is likely to be common, so a stable namespace is useful.</p>
+<h4 id="agentprovider"><code>agent:provider</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: service or runtime provider</li><li>examples:</li><li><code>openai</code></li><li><code>anthropic</code></li><li><code>local</code></li><li><code>pi</code></li></ul>
+<h4 id="agentmodel"><code>agent:model</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: model identifier used for generation or analysis</li><li>examples:</li><li><code>gpt-5</code></li><li><code>claude-sonnet-4</code></li><li><code>llama-3.3-70b</code></li></ul>
+<h4 id="agentsession-id"><code>agent:session-id</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: provider or tool session identifier</li><li>suggested format:</li><li>opaque stable string from the originating system</li></ul>
+<h4 id="agentmessage-id"><code>agent:message-id</code></h4>
+<ul><li>suggested type: <code>list</code></li><li>intended meaning: ordered references to one or more related agent messages or turns</li><li>suggested format:</li><li>opaque provider-issued IDs</li></ul>
+<h4 id="agentprompt"><code>agent:prompt</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: canonical prompt, summary prompt, or final instruction associated with the target</li></ul>
+<h4 id="agentsummary"><code>agent:summary</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: human-readable summary of what the agent did or concluded</li></ul>
+<p>Useful targets for agent keys:</p>
+<ul><li><code>commit</code></li><li><code>change-id</code></li><li><code>branch</code></li><li><code>path</code></li></ul>
+<p>Implementations should avoid storing secrets in agent metadata keys.</p>
+<h3 id="automation-and-ci">Automation and CI</h3>
+<h4 id="automationstatus"><code>automation:status</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: latest high-level automation state</li><li>suggested values:</li><li><code>pending</code></li><li><code>running</code></li><li><code>success</code></li><li><code>failed</code></li></ul>
+<h4 id="automationsystem"><code>automation:system</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: the system that produced the automation metadata</li><li>examples:</li><li><code>github-actions</code></li><li><code>buildkite</code></li><li><code>jenkins</code></li></ul>
+<h4 id="automationrun-id"><code>automation:run-id</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: stable external run identifier</li></ul>
+<p>Useful targets:</p>
+<ul><li><code>commit</code></li><li><code>change-id</code></li><li><code>branch</code></li></ul>
+<h3 id="provenance-and-external-references">Provenance and external references</h3>
+<h4 id="sourceurl"><code>source:url</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: canonical URL for an external discussion, issue, task, or record</li></ul>
+<h4 id="sourceid"><code>source:id</code></h4>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: external system identifier without requiring URL parsing</li></ul>
+<h4 id="tag"><code>tag</code></h4>
+<ul><li>suggested type: <code>set</code></li><li>intended meaning: lightweight labels for filtering and discovery</li><li>suggested member format:</li><li>lowercase tokens such as <code>bug</code>, <code>docs</code>, <code>release-blocker</code></li></ul>
+<p>Useful targets:</p>
+<ul><li>any target type</li></ul>
+<h2 id="target-specific-guidance">Target-specific guidance</h2>
+<h3 id="project-targets">Project targets</h3>
+<p>Good candidates for <code>project</code> metadata include:</p>
+<ul><li><code>owner</code></li><li><code>codeowners</code></li><li><code>source:url</code></li></ul>
+<h3 id="path-targets">Path targets</h3>
+<p>Good candidates for <code>path</code> metadata include:</p>
+<ul><li><code>owner</code></li><li><code>codeowners</code></li><li><code>tag</code></li><li><code>agent:summary</code></li></ul>
+<h3 id="commit-and-change-targets">Commit and change targets</h3>
+<p>Good candidates for <code>commit</code> and <code>change-id</code> metadata include:</p>
+<ul><li><code>reviewer</code></li><li><code>review:status</code></li><li><code>automation:status</code></li><li><code>automation:run-id</code></li><li><code>agent:provider</code></li><li><code>agent:model</code></li><li><code>agent:session-id</code></li></ul>
+<h3 id="branch-targets">Branch targets</h3>
+<p>Good candidates for <code>branch</code> metadata include:</p>
+<ul><li><code>owner</code></li><li><code>reviewer</code></li><li><code>automation:status</code></li><li><code>agent:summary</code></li></ul>
+<h2 id="extension-guidance">Extension guidance</h2>
+<p>Tools may define additional namespaced keys beyond these recommendations.</p>
+<p>Suggested practice:</p>
+<ul><li>use a product or organization prefix for private conventions</li><li>avoid redefining the meaning of the standard keys above</li><li>document any key whose format is not self-evident</li></ul>
+<p>Examples:</p>
+<ul><li><code>github:pr-number</code></li><li><code>gitbutler:change-owner</code></li><li><code>acme:policy:tier</code></li></ul>
+<h2 id="non-goals">Non-goals</h2>
+<p>This document does not:</p>
+<ul><li>require all implementations to support all keys</li><li>define access control or privacy policy</li><li>define a schema registry</li><li>prevent future dedicated value types beyond <code>string</code>, <code>list</code>, and <code>set</code></li></ul>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>

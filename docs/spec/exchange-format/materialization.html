@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Materialization · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="targets.html">Targets and keys</a><a href="exchange.html">Serialization</a><a class="active" href="materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="strings.html">Strings</a><a href="lists.html">Lists</a><a href="sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="../implementation/overview.html">Implementation Overview</a><a href="../implementation/storage.html">Local storage</a><a href="../implementation/cli.html">CLI surface</a><a href="../implementation/output.html">Output and query semantics</a><a href="../implementation/pruning.html">Auto-pruning</a><a href="../implementation/auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="../implementation/standard-keys.html">Standard keys</a><a href="../implementation/workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Materialization</h1>
+          </div>
+        </header>
+        <article class="doc-content">
+          <p>This document describes the rules for turning a serialized metadata tree back into local current state.</p>
+<h2 id="materialize-responsibilities">Materialize responsibilities</h2>
+<p>When materializing a remote metadata head, the client must:</p>
+<ol><li>merge that head in memory into local serialized metadata</li><li>resolve merge conflicts according to value-type semantics</li><li>update the local SQLite database with newly visible values and tombstones</li><li>record when materialization succeeded</li></ol>
+<p>Per-type conflict rules are defined in:</p>
+<ul><li><a href="strings.html">Strings</a></li><li><a href="lists.html">Lists</a></li><li><a href="sets.html">Sets</a></li></ul>
+<h2 id="high-level-scenarios">High-level scenarios</h2>
+<h3 id="1-initial-sync">1. Initial sync</h3>
+<p>If the local system has no metadata yet:</p>
+<ul><li>walk the tree at the incoming metadata head</li><li>materialize all visible values into SQLite</li><li>record that metadata commit as materialized</li></ul>
+<p>No metadata history walk is required beyond the current tree.</p>
+<h3 id="2-multiple-start-points">2. Multiple start points</h3>
+<p>If local metadata exists and someone else already pushed an independently initialized metadata history:</p>
+<ul><li>serialize local shareable state</li><li>perform a baseless two-way merge with the remote tree</li><li>for overlapping keys, remote wins</li><li>write a new metadata commit with the remote head as parent</li><li>retry if the remote advanced before push completed</li></ul>
+<p>This allows eventual convergence while keeping history linear.</p>
+<h3 id="3-fast-forward-update">3. Fast-forward update</h3>
+<p>If the incoming metadata ref is a fast-forward from the last materialized point:</p>
+<ul><li>diff the old materialized tree against the new tree</li><li>apply only changed key/values to SQLite</li><li>add or update visible values and tombstones</li></ul>
+<h3 id="4-both-sides-mutated-data">4. Both sides mutated data</h3>
+<p>If local data changed and remote data also changed:</p>
+<ul><li>serialize local current shareable state</li><li>merge the remote tree into it</li><li>resolve conflicts according to per-type semantics</li><li>write a new metadata commit from the merged tree</li></ul>
+<p>On push, if it is again not a fast-forward, do this sequence repeatedly against newer remote heads until a fast-forward push succeeds. Only one new commit locally needs to be made.</p>
+<h2 id="no-common-ancestor-merge">No common ancestor merge</h2>
+<p>If local and remote metadata histories have no common ancestor, materialize uses a two-way merge instead of a three-way merge.</p>
+<ol><li>union non-conflicting keys from both sides</li><li>for overlapping keys or value-vs-tombstone conflicts, remote wins</li><li>retain non-overlapping keys from both sides</li></ol>
+<h2 id="removal-handling">Removal handling</h2>
+<p>Deletion is explicit.</p>
+<p>During materialization:</p>
+<ul><li>whole-key tombstones remove keys locally</li><li>per-entry or per-member tombstones are applied according to the collection type</li></ul>
+<h2 id="metadata-history-shape">Metadata history shape</h2>
+<p>Unlike source-code history, metadata history does not need rich branch/merge topology.</p>
+<p>The preferred shape is linear history created by repeatedly:</p>
+<ul><li>merging in memory</li><li>writing a new commit</li><li>fast-forward pushing</li></ul>
+<p>The main goal is convergence on current metadata state, not preserving meaningful branch structure.</p>
+<h2 id="merging">Merging</h2>
+<ul><li>update locally, pruned remotely?</li></ul>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Local storage · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a class="active" href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a href="pruning.html">Auto-pruning</a><a href="auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="standard-keys.html">Standard keys</a><a href="workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Local storage</h1>
+          </div>
+        </header>
+        <article class="doc-content">
+          <p>This document describes the local storage role of SQLite.</p>
+<h2 id="sqlite-file">SQLite file</h2>
+<p>The local metadata database lives at:</p>
+<p><code>.git/git-meta.sqlite</code></p>
+<h2 id="purpose">Purpose</h2>
+<p>SQLite is the local read/write store for metadata.</p>
+<p>It is responsible for:</p>
+<ul><li>fast current-value lookup</li><li>local mutation operations</li><li>mutation history / provenance tracking</li><li>tombstone tracking</li><li>preparing data for serialization</li><li>recording materialization state</li></ul>
+<p>The exchange format is Git trees and commits, not SQLite.</p>
+<h2 id="current-state-and-history">Current state and history</h2>
+<p>There are two important local data views:</p>
+<ol><li>the current materialized value for a <code>(target, key)</code></li><li>a mutation log showing how that value changed over time</li></ol>
+<p>Mutation history should retain at least:</p>
+<ul><li>timestamp</li><li>author email</li><li>mutation type</li></ul>
+<h2 id="current-reference-schema-direction">Current reference schema direction</h2>
+<p>The original project-level spec described these tables:</p>
+<ul><li><code>metadata</code> — current key rows and string values</li><li><code>list_values</code> — list items as one row per entry</li><li><code>metadata_log</code> — mutation history</li><li><code>metadata_tombstones</code> — latest removals</li></ul>
+<p>As new value types are added, the exact schema may evolve, but the local storage must still support:</p>
+<ul><li>O(1)-ish access to current value state</li><li>efficient append/member mutation for collection types</li><li>enough provenance to resolve merge decisions during materialization</li></ul>
+<h2 id="large-values">Large values</h2>
+<p>Implementations may choose to keep some large values in Git blobs and store references locally rather than storing all payload bytes directly in SQLite.</p>
+<p>That is a local implementation detail, not an exchange-format requirement.</p>
+<h2 id="materialization-bookkeeping">Materialization bookkeeping</h2>
+<p>Local storage should also record enough state to support incremental materialization and serialization, including:</p>
+<ul><li>the last metadata commit successfully materialized per source ref</li><li>which local values changed since last materialization / serialization</li><li>any tombstones that still need to be emitted on serialize</li></ul>
+<p>These are local optimization and correctness concerns and need not be fully represented in the exchange tree.</p>
+<h2 id="refs">Refs</h2>
+<p>When serializing metadata, the commit/tree produced updates a local metadata ref so it can be pushed.</p>
+<p>The local serialized metadata head by default should be:</p>
+<ul><li><code>refs/meta/local/main</code></li></ul>
+<p>If <code>meta.namespace</code> Git config is set, that namespace should be used instead of <code>meta</code>.</p>
+<p>Fetched remote metadata heads should be stored under a remote-specific namespace, for example:</p>
+<ul><li><code>refs/meta/remotes/origin</code></li></ul>
+<p>If user has filter rules that route keys to additional destinations, those destinations get their own refs:</p>
+<ul><li><code>refs/meta/local/main</code> (default, always present)</li><li><code>refs/meta/local/private</code></li><li><code>refs/meta/local/vendor</code></li></ul>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>

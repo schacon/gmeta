@@ -11,7 +11,7 @@ keywords = ["git", "metadata", "gix", "sqlite"]
 categories = ["development-tools"]
 
 [features]
-## Expose internal plumbing modules for the `git-meta-rs` CLI.
+## Expose internal plumbing modules for the `git-meta-cli` CLI.
 ## Library consumers should NOT enable this feature.
 internal = []
 

@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{title}} · git-meta</title>
+    <title>Strings · git-meta</title>
     <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
-    <link rel="stylesheet" href="{{root}}assets/style.css">
+    <link rel="stylesheet" href="../assets/style.css">
     <script>
       (() => {
         const stored = localStorage.getItem('git-meta-theme');
@@ -17,13 +17,13 @@
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-main">
-          <a class="brand" href="{{root}}index.html">
-            <img class="brand-icon" src="{{root}}../other/git-meta-icon.png" alt="" width="40" height="40">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
             <span class="brand-text">git-meta</span>
           </a>
           <p class="tagline">Git metadata specification and project docs</p>
           <nav class="nav">
-            {{nav}}
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="targets.html">Targets and keys</a><a href="exchange.html">Serialization</a><a href="materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a class="active" href="strings.html">Strings</a><a href="lists.html">Lists</a><a href="sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="../implementation/overview.html">Implementation Overview</a><a href="../implementation/storage.html">Local storage</a><a href="../implementation/cli.html">CLI surface</a><a href="../implementation/output.html">Output and query semantics</a><a href="../implementation/pruning.html">Auto-pruning</a><a href="../implementation/auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="../implementation/standard-keys.html">Standard keys</a><a href="../implementation/workflow.html">Workflow</a></div>
           </nav>
         </div>
         <div class="sidebar-footer">
@@ -44,11 +44,30 @@
         <header class="page-header">
           <div class="page-header-main">
             <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
-            <h1>{{title}}</h1>
+            <h1>Strings</h1>
           </div>
         </header>
-        <article class="doc-content{{content_class}}">
-          {{content}}
+        <article class="doc-content">
+          <p>Strings are the simplest git-meta value type.</p>
+<p>A string represents one current scalar value for a <code>(target, key)</code> pair.</p>
+<p>Examples:</p>
+<ul><li><code>agent:model = claude-4.6</code></li><li><code>owner = schacon</code></li><li><code>review:signoff = schacon@gmail.com</code></li></ul>
+<h2 id="summary">Summary</h2>
+<ul><li>One current value per key</li><li>Serialized as a single terminal blob</li><li>Removal uses a key tombstone</li><li>Concurrent updates resolve by last-writer-wins</li></ul>
+<h2 id="serialized-tree-shape">Serialized tree shape</h2>
+<p>For a string value, write the string to:</p>
+<p><code>[base]/&lt;key segments&gt;/__value</code></p>
+<p>Examples:</p>
+<ul><li><code>commit/13/&lt;full-target&gt;/agent/model/__value</code></li><li><code>path/src/metrics/__target__/owner/__value</code></li></ul>
+<p>The blob contents are the raw string value.</p>
+<h2 id="tombstones">Tombstones</h2>
+<p>If a string key is removed, serialize a tombstone at:</p>
+<p><code>[base]/__tombstones/&lt;key segments&gt;/__deleted</code></p>
+<p>The tombstone blob should be the same blob as the <code>__value</code> was. This way Git reuses the blob and we can do content comparisons if needed in cases of conflict.</p>
+<p>When a string is set again after deletion, the tombstone is cleared locally and omitted from the next serialization.</p>
+<h2 id="merge-semantics">Merge semantics</h2>
+<p>Merging trees can technically use either <code>ours</code> or <code>theirs</code> strategies, but one value should win out. Projects or individuals can determine which they prefer.</p>
+<p>The default in our implementation is <code>ours</code>, so that both values are in the history and reverting is possible.</p>
         </article>
       </main>
     </div>

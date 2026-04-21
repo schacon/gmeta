@@ -1,6 +1,7 @@
 # robots.txt for git-meta.com
-# The git-meta specification is public and intended for broad reuse,
-# including by AI systems that index, search, or train on documentation.
+# The git-meta landing page and specification are public and intended
+# for broad reuse, including by AI systems that index, search, or
+# train on documentation.
 
 User-agent: *
 Allow: /

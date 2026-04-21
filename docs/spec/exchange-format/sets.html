@@ -3,9 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{title}} · git-meta</title>
+    <title>Sets · git-meta</title>
     <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
-    <link rel="stylesheet" href="{{root}}assets/style.css">
+    <link rel="stylesheet" href="../assets/style.css">
     <script>
       (() => {
         const stored = localStorage.getItem('git-meta-theme');
@@ -17,13 +17,13 @@
     <div class="layout">
       <aside class="sidebar">
         <div class="sidebar-main">
-          <a class="brand" href="{{root}}index.html">
-            <img class="brand-icon" src="{{root}}../other/git-meta-icon.png" alt="" width="40" height="40">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
             <span class="brand-text">git-meta</span>
           </a>
           <p class="tagline">Git metadata specification and project docs</p>
           <nav class="nav">
-            {{nav}}
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="targets.html">Targets and keys</a><a href="exchange.html">Serialization</a><a href="materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="strings.html">Strings</a><a href="lists.html">Lists</a><a class="active" href="sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="../implementation/overview.html">Implementation Overview</a><a href="../implementation/storage.html">Local storage</a><a href="../implementation/cli.html">CLI surface</a><a href="../implementation/output.html">Output and query semantics</a><a href="../implementation/pruning.html">Auto-pruning</a><a href="../implementation/auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="../implementation/standard-keys.html">Standard keys</a><a href="../implementation/workflow.html">Workflow</a></div>
           </nav>
         </div>
         <div class="sidebar-footer">
@@ -44,11 +44,34 @@
         <header class="page-header">
           <div class="page-header-main">
             <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
-            <h1>{{title}}</h1>
+            <h1>Sets</h1>
           </div>
         </header>
-        <article class="doc-content{{content_class}}">
-          {{content}}
+        <article class="doc-content">
+          <p>Sets are unordered collections of unique string members.</p>
+<p>Unlike lists:</p>
+<ul><li>order does not matter</li><li>you cannot have duplicate values</li></ul>
+<p>Examples:</p>
+<ul><li>labels</li><li>code owners</li><li>capabilities or feature flags</li></ul>
+<h2 id="serialized-tree-shape">Serialized tree shape</h2>
+<p>For a set key, store members under:</p>
+<p><code>[base]/&lt;key segments&gt;/__set</code></p>
+<p>Where <code>__set</code> is a tree of the values where the tree entry name is the SHA1 of the value.</p>
+<p>Example:</p>
+<p><code>path/src/metrics/__target__/owners/__set</code></p>
+<p>So the <code>__set</code> entry might look something like this:</p>
+<pre><code>❯ git cat-file -p meta/local:path/src/metrics/__target__/owners/__set
+100644 blob 0dd8[...]4b1b2a    0dd8[...]4b1b2a
+100644 blob 1296[...]a463c7    1296[...]a463c7</code></pre>
+<p>Notice that the tree entry blob sha is the same as the tree entry name.</p>
+<h2 id="member-tombstones">Member tombstones</h2>
+<p>If a member is removed from the set, write:</p>
+<p><code>[base]/&lt;key segments&gt;/__tombstones/&lt;member-sha&gt;</code></p>
+<p>with contents of the deleted entry as the tree entry value.</p>
+<h2 id="whole-key-tombstones">Whole-key tombstones</h2>
+<p>If the entire set key is removed, also support:</p>
+<p><code>[base]/__tombstones/&lt;key segments&gt;/__deleted</code></p>
+<p>This deletes the logical collection itself, not just one member. The tree of <code>__deleted</code> should be what <code>__set</code> was when it was deleted.</p>
         </article>
       </main>
     </div>

@@ -11,8 +11,8 @@ git-meta-lib = "0.1.0"
 
 The public API is under the `git_meta_lib` crate name (hyphens in the package name become underscores in Rust).
 
-For the command-line interface, see the [`git-meta-rs`](https://crates.io/crates/git-meta-rs) crate (binary `git-meta`).
+For the command-line interface, see the [`git-meta-cli`](https://crates.io/crates/git-meta-cli) crate (binary `git-meta`).
 
 ### Publishing
 
-`cargo publish -p git-meta-lib` must succeed on crates.io before `cargo publish -p git-meta-rs`, because the CLI crate depends on that exact version.
+`cargo publish -p git-meta-lib` must succeed on crates.io before `cargo publish -p git-meta-cli`, because the CLI crate depends on that exact version.

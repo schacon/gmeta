@@ -13,16 +13,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SPEC_DIR = ROOT / "spec"
-DOCS_DIR = ROOT / "docs"
+# The generated spec sub-site lives at docs/spec/ (served from
+# https://git-meta.com/spec/). The marketing landing page and other
+# hand-curated assets at docs/ are intentionally outside the generator's
+# blast radius — the only files this script writes outside docs/spec/ are
+# the site-wide robots.txt and sitemap.xml, which must live at the domain
+# root to be honored by crawlers.
+SITE_ROOT_DIR = ROOT / "docs"
+DOCS_DIR = SITE_ROOT_DIR / "spec"
 TEMPLATE_PATH = ROOT / "templates" / "docs-page.html"
 ASSETS_DIR = DOCS_DIR / "assets"
 
 SITE_ORIGIN = "https://git-meta.com"
-
-# Files and directories under docs/ that the generator must never delete.
-# `other/` holds hand-curated extras and `CNAME` is required by GitHub Pages
-# to map the site to git-meta.com.
-PRESERVED_DOCS_ENTRIES = frozenset({"other", "CNAME"})
+SITE_BASE = f"{SITE_ORIGIN}/spec"
+# Path of the marketing landing page relative to docs/. Its mtime is used
+# as the sitemap <lastmod> for the root URL so the sitemap stays accurate
+# whenever the landing page is republished.
+LANDING_PAGE_FILE = "index.html"
 
 AI_USER_AGENTS = [
     "GPTBot",
@@ -54,6 +61,7 @@ PAGE_ORDER = [
     "implementation/cli.md",
     "implementation/output.md",
     "implementation/pruning.md",
+    "implementation/auto-sync.md",
     "implementation/workflow.md",
 ]
 
@@ -75,6 +83,7 @@ PAGE_GROUPS = {
         "implementation/cli.md",
         "implementation/output.md",
         "implementation/pruning.md",
+        "implementation/auto-sync.md",
     ],
     "Other Considerations": [
         "implementation/standard-keys.md",
@@ -642,8 +651,8 @@ def build_nav(pages: list[Page], current_page: Page) -> str:
 
 
 def page_url(page: Page) -> str:
-    """Canonical absolute URL for a generated page."""
-    return f"{SITE_ORIGIN}/{page.output_rel}"
+    """Canonical absolute URL for a generated page on the spec sub-site."""
+    return f"{SITE_BASE}/{page.output_rel}"
 
 
 def page_lastmod(page: Page) -> str:
@@ -656,16 +665,17 @@ def page_lastmod(page: Page) -> str:
 
 
 def write_robots_txt() -> None:
-    """Write robots.txt with explicit AI crawler rules and Content-Signal directives.
+    """Write the site-wide robots.txt advertising open AI / search use.
 
-    The git-meta spec is intentionally public; we allow indexing and AI use across the board
-    and advertise that intent via Cloudflare/IETF Content Signals so policy is unambiguous
-    even for crawlers that don't read prose.
+    Crawlers only honor `/robots.txt` at the domain root, so this writes to
+    `docs/robots.txt`. It covers the marketing landing page and the spec
+    sub-site under the same allow-everything policy.
     """
     lines: list[str] = [
         "# robots.txt for git-meta.com",
-        "# The git-meta specification is public and intended for broad reuse,",
-        "# including by AI systems that index, search, or train on documentation.",
+        "# The git-meta landing page and specification are public and intended",
+        "# for broad reuse, including by AI systems that index, search, or",
+        "# train on documentation.",
         "",
         "User-agent: *",
         "Allow: /",
@@ -688,23 +698,41 @@ def write_robots_txt() -> None:
         "",
     ])
 
-    (DOCS_DIR / "robots.txt").write_text("\n".join(lines))
+    (SITE_ROOT_DIR / "robots.txt").write_text("\n".join(lines))
+
+
+def landing_page_lastmod() -> str:
+    """ISO-8601 date for the marketing landing page's last modification.
+
+    Falls back to today if `docs/index.html` is missing for any reason
+    (e.g. a fresh checkout where the landing page hasn't been added yet).
+    """
+    try:
+        mtime = (SITE_ROOT_DIR / LANDING_PAGE_FILE).stat().st_mtime
+        return datetime.fromtimestamp(mtime, tz=timezone.utc).date().isoformat()
+    except OSError:
+        return date.today().isoformat()
 
 
 def write_sitemap_xml(pages: list[Page]) -> None:
-    """Write sitemap.xml listing canonical URLs for every generated page.
+    """Write the site-wide sitemap.xml at the domain root.
 
-    Each entry uses the spec source's mtime as <lastmod>, so the sitemap stays
-    accurate as long as the doc generator is re-run on publish.
+    Includes the marketing landing page (`https://git-meta.com/`) followed by
+    every generated spec page. Each spec entry uses its source markdown's
+    mtime as <lastmod>; the landing page uses `docs/index.html`'s mtime.
     """
     entries: list[str] = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+        "  <url>",
+        f"    <loc>{html.escape(SITE_ORIGIN)}/</loc>",
+        f"    <lastmod>{landing_page_lastmod()}</lastmod>",
+        "  </url>",
     ]
     for page in pages:
         loc = page_url(page)
         if page.output_rel == "index.html":
-            loc = f"{SITE_ORIGIN}/"
+            loc = f"{SITE_BASE}/"
         entries.append("  <url>")
         entries.append(f"    <loc>{html.escape(loc)}</loc>")
         entries.append(f"    <lastmod>{page_lastmod(page)}</lastmod>")
@@ -712,7 +740,7 @@ def write_sitemap_xml(pages: list[Page]) -> None:
     entries.append("</urlset>")
     entries.append("")
 
-    (DOCS_DIR / "sitemap.xml").write_text("\n".join(entries))
+    (SITE_ROOT_DIR / "sitemap.xml").write_text("\n".join(entries))
 
 
 def generate_docs() -> None:
@@ -720,14 +748,11 @@ def generate_docs() -> None:
     page_map = {page.source_rel: page.output_rel for page in pages}
     template = TEMPLATE_PATH.read_text()
 
+    # docs/spec/ is fully owned by this generator: wipe and rewrite it on
+    # every run. Anything outside (the marketing landing page at docs/, the
+    # hand-curated docs/other/ assets, docs/CNAME) is intentionally untouched.
     if DOCS_DIR.exists():
-        for child in DOCS_DIR.iterdir():
-            if child.name in PRESERVED_DOCS_ENTRIES:
-                continue
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
+        shutil.rmtree(DOCS_DIR)
     ASSETS_DIR.mkdir(parents=True, exist_ok=True)
     (ASSETS_DIR / "style.css").write_text(STYLE_CSS.strip() + "\n")
 

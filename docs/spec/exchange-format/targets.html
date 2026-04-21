@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Targets and keys · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a class="active" href="targets.html">Targets and keys</a><a href="exchange.html">Serialization</a><a href="materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="strings.html">Strings</a><a href="lists.html">Lists</a><a href="sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="../implementation/overview.html">Implementation Overview</a><a href="../implementation/storage.html">Local storage</a><a href="../implementation/cli.html">CLI surface</a><a href="../implementation/output.html">Output and query semantics</a><a href="../implementation/pruning.html">Auto-pruning</a><a href="../implementation/auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="../implementation/standard-keys.html">Standard keys</a><a href="../implementation/workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Targets and keys</h1>
+          </div>
+        </header>
+        <article class="doc-content">
+          <p>This document defines what metadata can be attached to and how keys are structured.</p>
+<p>At it&#x27;s core, every piece of metadata is a tuple of <code>(target, key, value)</code>. The target is something like a single commit, changeset or path. This is something you can attach metadata to. Then for each target there is series of key/value pairs scoped to that target.</p>
+<p>In this specification, the key can be namespaced (such as <code>source:issue:github:id</code>) where a query may be interested at data under level of the key namespace.</p>
+<p>The value can furthermore be of various types of simple data primatives, such as a simple string, a list or an unordered set.</p>
+<h2 id="target-model">Target model</h2>
+<p>Every metadata value is scoped to a target.</p>
+<p>A target has two conceptual parts:</p>
+<ul><li><code>target_type</code></li><li><code>target_value</code></li></ul>
+<p>Supported target types:</p>
+<ul><li><code>commit</code> — target value is a Git commit SHA</li><li><code>change-id</code> — target value is a UUID</li><li><code>branch</code> — target value is a branch UUID or name</li><li><code>path</code> — target value is a file or directory path in the project</li><li><code>project</code> — global project scope; no associated target value in the user-facing model</li></ul>
+<p>The spec is written in such a way that new target types should be relatively easy to add in future spec versions.</p>
+<h2 id="keys">Keys</h2>
+<p>Keys are arbitrary strings with optional namespace structure.</p>
+<p>Examples:</p>
+<ul><li><code>owner</code></li><li><code>agent:model</code></li><li><code>agent:provider</code></li><li><code>agent:claude:session-id</code></li></ul>
+<p>Keys are split on <code>:</code> into path segments during serialization and so cannot contain a &#x27;:&#x27; in the key segment itself.</p>
+<h2 id="key-validation">Key validation</h2>
+<p>To keep the exchange tree layout unambiguous, keys are strictly validated.</p>
+<p>Rules:</p>
+<ul><li>key cannot be empty</li><li>key segments cannot be empty</li><li>key segments cannot be <code>.</code> or <code>..</code></li><li>key segments cannot contain <code>/</code>, <code>:</code>, or null bytes</li><li>key segments cannot start with <code>__</code></li></ul>
+<p>The last rule reserves all <code>__*</code> path components for git-meta structural metadata. If they are needed (for example, file paths), they can be escaped.</p>
+<h2 id="value-types">Value types</h2>
+<p>Current and proposed value types:</p>
+<ul><li><code>string</code> — single scalar string value</li><li><code>list</code> — append-friendly ordered sequence of string entries</li><li><code>set</code> — unordered unique collection of string members</li></ul>
+<p>The per-type exchange semantics are defined in:</p>
+<ul><li><a href="strings.html">Strings</a></li><li><a href="lists.html">Lists</a></li><li><a href="sets.html">Sets</a></li></ul>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>

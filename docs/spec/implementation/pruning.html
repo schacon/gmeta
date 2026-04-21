@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Auto-pruning · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a class="active" href="pruning.html">Auto-pruning</a><a href="auto-sync.html">Syncing with normal Git</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="standard-keys.html">Standard keys</a><a href="workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Auto-pruning</h1>
+          </div>
+        </header>
+        <article class="doc-content">
+          <p>This document describes how to configure automatic pruning rules that are evaluated during serialization.</p>
+<h2 id="overview">Overview</h2>
+<p>Auto-pruning allows a project to declare rules that trigger a prune commit automatically after serialization. Rules are stored as ordinary project-level metadata under the <code>meta:prune:</code> key namespace. Because project metadata is never itself pruned and travels with the metadata ref, all collaborators share the same pruning policy.</p>
+<h2 id="configuration-keys">Configuration keys</h2>
+<p>All keys are stored as <code>string</code> values on the <code>project</code> target.</p>
+<h3 id="metaprunesince"><code>meta:prune:since</code></h3>
+<p>Required. The retention window used when pruning is triggered.</p>
+<p>Accepts ISO-8601 dates (<code>2025-01-01</code>) or relative durations (<code>90d</code>, <code>6m</code>, <code>1y</code>).</p>
+<p>This value is passed to the prune operation as the <code>--since</code> parameter.</p>
+<h3 id="metaprunemax-keys"><code>meta:prune:max-keys</code></h3>
+<p>Optional. An integer threshold. When the total number of metadata keys in the serialized tree exceeds this value, a prune is triggered.</p>
+<p>Example: <code>10000</code></p>
+<h3 id="metaprunemax-size"><code>meta:prune:max-size</code></h3>
+<p>Optional. A size threshold. When the total size of all blobs in the serialized tree exceeds this value, a prune is triggered.</p>
+<p>Accepts human-friendly suffixes (<code>512k</code>, <code>10m</code>, <code>1g</code>).</p>
+<p>Example: <code>50m</code></p>
+<h3 id="metaprunemin-size"><code>meta:prune:min-size</code></h3>
+<p>Optional. Passed through to the prune operation as <code>--min-size</code>. Target subtrees smaller than this threshold are kept in full regardless of age.</p>
+<p>Accepts human-friendly suffixes (<code>512k</code>, <code>10m</code>).</p>
+<p>Example: <code>512k</code></p>
+<p>At least one of <code>meta:prune:max-keys</code> or <code>meta:prune:max-size</code> must be set alongside <code>meta:prune:since</code> for auto-pruning to activate. If neither trigger key is present, no auto-pruning occurs even if <code>meta:prune:since</code> is set.</p>
+<h2 id="evaluation-during-serialization">Evaluation during serialization</h2>
+<p>Serialization proceeds as follows when auto-prune rules are configured:</p>
+<ol><li>Normal tree serialization produces a commit as usual.</li><li>Read all <code>meta:prune:*</code> keys from the project metadata in SQLite.</li><li>If rules are incomplete (no <code>since</code>, or neither <code>max-keys</code> nor <code>max-size</code>), stop.</li><li>Evaluate each trigger against the just-written commit&#x27;s tree:</li></ol>
+<ul><li><code>max-keys</code>: count the total number of metadata keys (distinct target+key pairs) in the tree.</li><li><code>max-size</code>: compute the total size of all blob objects reachable from the tree.</li></ul>
+<ol><li>If any trigger exceeds its threshold, run a prune using <code>since</code> and <code>min-size</code> from the rules.</li><li>The prune creates a second commit on top of the serialization commit, with the standard prune commit message format.</li></ol>
+<p>If no trigger fires, serialization produces a single commit as before.</p>
+<h2 id="the-git-meta-config-command">The <code>git meta config</code> command</h2>
+<p>A convenience command for managing project-level <code>meta:*</code> keys.</p>
+<pre><code>git meta config &lt;key&gt; &lt;value&gt;       # set a config key
+git meta config &lt;key&gt;               # get a config key
+git meta config --list              # list all meta:* config keys
+git meta config --unset &lt;key&gt;       # remove a config key</code></pre>
+<p>Examples:</p>
+<pre><code>git meta config meta:prune:since 90d
+git meta config meta:prune:max-keys 10000
+git meta config meta:prune:max-size 50m
+git meta config meta:prune:min-size 512k
+
+git meta config meta:prune:since
+# → 90d
+
+git meta config --list
+# → meta:prune:since = 90d
+# → meta:prune:max-keys = 10000
+# → meta:prune:max-size = 50m
+# → meta:prune:min-size = 512k
+
+git meta config --unset meta:prune:max-keys</code></pre>
+<p>Under the hood, <code>git meta config</code> operates on the <code>project</code> target with string values:</p>
+<ul><li><code>git meta config &lt;key&gt; &lt;value&gt;</code> is equivalent to <code>git meta set project &lt;key&gt; &lt;value&gt;</code></li><li><code>git meta config &lt;key&gt;</code> is equivalent to <code>git meta get project &lt;key&gt;</code></li><li><code>git meta config --list</code> queries all project keys matching <code>meta:*</code></li><li><code>git meta config --unset &lt;key&gt;</code> is equivalent to <code>git meta rm project &lt;key&gt;</code></li></ul>
+<p>All keys set via <code>git meta config</code> must start with <code>meta:</code>. This keeps the config namespace distinct from user-defined project metadata.</p>
+<h2 id="interaction-with-manual-prune">Interaction with manual prune</h2>
+<p>Running <code>git meta prune</code> manually remains supported. Auto-pruning does not interfere — if a manual prune was recently run and the tree is already below thresholds, auto-pruning will not trigger.</p>
+<h2 id="interaction-with-materialization">Interaction with materialization</h2>
+<p>Auto-prune rules materialized from a remote are immediately effective for subsequent local serializations. There is no special merge handling — the rules are ordinary string values and follow standard last-writer-wins conflict resolution.</p>
+        </article>
+      </main>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+      })();
+    </script>
+  </body>
+</html>
