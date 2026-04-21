@@ -11,7 +11,30 @@ use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands, RemoteAction};
 
+/// Returns `true` when the user invoked `git meta` in a way that should
+/// trigger our curated top-level help instead of clap's auto-generated
+/// output.
+///
+/// The check is intentionally narrow — only the bare `git meta`,
+/// `git meta -h`, `git meta --help`, and `git meta help` invocations are
+/// intercepted. Anything with a real subcommand (e.g. `git meta set
+/// --help`) falls through to clap so the per-subcommand help still works
+/// as normal.
+fn should_show_top_level_help() -> bool {
+    let mut args = std::env::args().skip(1);
+    match (args.next(), args.next()) {
+        (None, _) => true,
+        (Some(arg), None) => matches!(arg.as_str(), "-h" | "--help" | "help"),
+        _ => false,
+    }
+}
+
 fn main() -> Result<()> {
+    if should_show_top_level_help() {
+        cli::print_help();
+        return Ok(());
+    }
+
     let cli = Cli::parse();
 
     match cli.command {

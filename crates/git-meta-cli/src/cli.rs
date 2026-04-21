@@ -217,7 +217,7 @@ pub enum Commands {
     },
 
     /// Import metadata from another format
-    #[command(display_order = 32)]
+    #[command(display_order = 32, hide = true)]
     Import {
         /// Source format: "entire" or "git-ai"
         #[arg(long)]
@@ -263,11 +263,11 @@ pub enum Commands {
     },
 
     /// Walk remote history and index keys as promisor entries
-    #[command(display_order = 37)]
+    #[command(display_order = 37, hide = true)]
     Promisor,
 
     /// Watch agent transcripts and auto-attach to commits
-    #[command(display_order = 33)]
+    #[command(display_order = 33, hide = true)]
     Watch {
         /// Agent to watch (default: claude)
         #[arg(long, default_value = "claude")]
@@ -297,11 +297,11 @@ pub enum Commands {
     },
 
     /// Interactively configure auto-prune rules
-    #[command(name = "config:prune", display_order = 41)]
+    #[command(name = "config:prune", display_order = 41, hide = true)]
     ConfigPrune,
 
     /// Prune the serialized git tree, dropping old entries
-    #[command(display_order = 42)]
+    #[command(display_order = 42, hide = true)]
     Prune {
         /// Show what would be pruned without committing
         #[arg(long = "dry-run")]
@@ -309,7 +309,7 @@ pub enum Commands {
     },
 
     /// Prune old metadata from the local SQLite database
-    #[command(name = "local-prune", display_order = 43)]
+    #[command(name = "local-prune", display_order = 43, hide = true)]
     LocalPrune {
         /// Show what would be pruned without deleting anything
         #[arg(long = "dry-run")]
@@ -383,4 +383,88 @@ pub enum RemoteAction {
 
     /// List configured metadata remotes
     List,
+}
+
+/// Curated top-level help groups, shown by [`print_help`].
+///
+/// Order matters: groups print top-to-bottom in this order, and command
+/// names print left-to-right within each group. Anything not listed here
+/// is hidden from this view; most of those entries also carry
+/// `#[command(hide = true)]` so they stay out of clap's own help, error
+/// suggestions, and shell completions.
+const HELP_GROUPS: &[(&str, &[&str])] = &[
+    (
+        "read and write data",
+        &[
+            "set",
+            "get",
+            "rm",
+            "list:push",
+            "list:pop",
+            "list:rm",
+            "set:add",
+            "set:rm",
+        ],
+    ),
+    (
+        "browse and exchange (porcelain)",
+        &["show", "inspect", "log", "stats", "push", "pull"],
+    ),
+    (
+        "low-level git ref operations (plumbing)",
+        &["serialize", "materialize"],
+    ),
+    ("setup and configuration", &["remote", "config", "teardown"]),
+];
+
+/// Print the structured top-level help that replaces clap's auto-generated
+/// help for `git meta`, `git meta -h`, `git meta --help`, and `git meta
+/// help`.
+///
+/// Subcommand one-line descriptions are pulled from the clap [`Command`]
+/// tree at runtime so they always match the doc comments on each
+/// [`Commands`] variant — there is no second source of truth to keep in
+/// sync. Subcommand names not listed in [`HELP_GROUPS`] are intentionally
+/// omitted.
+///
+/// Output goes to stdout as plain text (no ANSI styling) so the help is
+/// readable in pipes, logs, and dumb terminals.
+///
+/// [`Command`]: clap::Command
+pub fn print_help() {
+    use clap::CommandFactory;
+    let cmd = Cli::command();
+
+    // Pad command names so the description column lines up across groups.
+    let pad = HELP_GROUPS
+        .iter()
+        .flat_map(|(_, names)| names.iter())
+        .map(|n| n.len())
+        .max()
+        .unwrap_or(0)
+        + 4;
+
+    println!("usage: git meta <command> [options]");
+    println!();
+    println!("Structured metadata for Git data — attach values to commits, branches,");
+    println!("paths, and projects, and exchange them over normal git transport.");
+    println!();
+    println!("These are the most commonly used git meta commands:");
+
+    for (heading, names) in HELP_GROUPS {
+        println!();
+        println!("{heading}");
+        for name in *names {
+            let about = cmd
+                .find_subcommand(name)
+                .and_then(|c| c.get_about())
+                .map(std::string::ToString::to_string)
+                .unwrap_or_default();
+            println!("   {name:<pad$}{about}");
+        }
+    }
+
+    println!();
+    println!("Run 'git meta <command> --help' for command-specific options.");
+    println!("See https://git-meta.com for the spec and full docs.");
 }

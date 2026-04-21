@@ -10,6 +10,7 @@
 #[allow(dead_code)]
 mod harness;
 
+mod help;
 mod list;
 mod materialize;
 mod promisor;
