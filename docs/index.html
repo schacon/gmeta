@@ -96,7 +96,7 @@
             <div class="cta-row">
               <a
                 class="btn btn-primary"
-                href="https://github.com/git-meta/git-meta"
+                href="#try"
               >
                 Try the git-meta CLI
                 <svg
@@ -675,6 +675,70 @@
         </div>
       </section>
 
+      <!-- TRY IT OUT -->
+      <section id="try" class="section">
+        <div class="wrap">
+          <div class="section-head">
+            <div class="eyebrow">Try it out</div>
+            <h2>Install, point at a remote, push your first key.</h2>
+            <p class="section-lede">
+              The reference implementation is a single Rust binary. Install
+              with <code>cargo</code>, wire up a remote for your metadata
+              refs, then set a value and push it like any other Git ref.
+            </p>
+          </div>
+
+          <div class="try-grid">
+            <article class="try-step">
+              <div class="try-step-num">01 &middot; Install</div>
+              <h3>Grab the CLI from crates.io</h3>
+              <p>
+                Builds with stable Rust. The crate is
+                <code>git-meta-cli</code>; the installed command is
+                <code>git meta</code>.
+              </p>
+              <pre
+                class="snippet"
+              ><span class="c-mut">$</span> cargo install git-meta-cli
+<span class="c-mut">$</span> git meta <span class="c-k">--version</span></pre>
+            </article>
+
+            <article class="try-step">
+              <div class="try-step-num">02 &middot; Set up</div>
+              <h3>Point at a meta remote</h3>
+              <p>
+                Metadata lives under its own ref namespace. Add a remote that
+                hosts those refs &mdash; the same repo as your code is fine.
+              </p>
+              <pre
+                class="snippet"
+              ><span class="c-mut">$</span> cd your-project
+<span class="c-mut">$</span> git meta remote add <span class="c-s">git@github.com:you/proj.git</span></pre>
+            </article>
+
+            <article class="try-step">
+              <div class="try-step-num">03 &middot; Set &amp; push</div>
+              <h3>Stamp a value, push the refs</h3>
+              <p>
+                Set a key on any target &mdash; <code>commit</code>,
+                <code>branch</code>, <code>path</code>, or
+                <code>project</code> &mdash; then push the metadata refs to
+                the remote.
+              </p>
+              <pre
+                class="snippet"
+              ><span class="c-mut">$</span> git meta set commit:HEAD <span class="c-k">review:status</span> <span class="c-s">approved</span>
+<span class="c-mut">$</span> git meta push</pre>
+            </article>
+          </div>
+
+          <p class="try-foot">
+            From here: <a href="spec/implementation/cli.html">browse the full CLI surface</a>
+            or read <a href="spec/exchange-format/targets.html">how targets &amp; keys work</a>.
+          </p>
+        </div>
+      </section>
+
       <!-- CONTRIBUTORS -->
       <section id="people" class="section">
         <div class="wrap">
@@ -837,7 +901,7 @@
           <div class="cta-row">
             <a
               class="btn btn-primary"
-              href="https://github.com/git-meta/git-meta"
+              href="#try"
               >Try the implementation</a
             >
             <a class="btn btn-ghost" href="spec/">Read the spec</a>
