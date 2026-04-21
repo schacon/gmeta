@@ -239,6 +239,15 @@ pub enum Commands {
         since: Option<String>,
     },
 
+    /// Initialize a metadata remote from a project-local `.git-meta` file
+    ///
+    /// Reads the remote URL from `.git-meta` at the repo root and then runs
+    /// the equivalent of `git meta remote add <url> --init`. The file format
+    /// is one URL per line, with `#` comments and blank lines ignored; only
+    /// the first usable line is used.
+    #[command(display_order = 33)]
+    Setup,
+
     /// Manage metadata remote sources
     #[command(display_order = 34)]
     Remote(RemoteArgs),
@@ -482,7 +491,7 @@ const HELP_GROUPS: &[HelpGroup] = &[
         heading: "setup and configuration",
         sections: &[HelpSection {
             label: None,
-            commands: &["remote", "config", "teardown"],
+            commands: &["setup", "remote", "config", "teardown"],
         }],
     },
 ];

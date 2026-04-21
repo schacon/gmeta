@@ -13,6 +13,7 @@ pub mod remote;
 pub mod rm;
 pub mod serialize;
 pub mod set;
+pub mod setup;
 pub mod show;
 pub mod stats;
 pub mod teardown;

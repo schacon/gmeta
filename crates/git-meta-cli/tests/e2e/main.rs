@@ -19,4 +19,5 @@ mod push_pull;
 mod remote;
 mod serialize;
 mod set_get;
+mod setup;
 mod version;

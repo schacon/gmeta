@@ -88,6 +88,8 @@ fn main() -> Result<()> {
             value,
         } => commands::set::run_rm(&target, &key, &value, json, timestamp),
 
+        Commands::Setup => commands::setup::run(),
+
         Commands::Remote(args) => match args.action {
             RemoteAction::Add {
                 url,
