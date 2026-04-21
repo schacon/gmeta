@@ -150,6 +150,18 @@ p  { color: var(--ink-2); margin: 0 0 12px; }
 }
 .hero-copy { min-width: 0; }
 
+.hero-title {
+  font: 600 clamp(40px, 5.4vw, 72px)/1 "JetBrains Mono", monospace;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0 0 20px;
+  white-space: nowrap;
+}
+.hero-title-brace {
+  color: var(--accent);
+  margin: 0 0.15em;
+}
+
 .headline {
   font-size: clamp(32px, 4.4vw, 56px);
   line-height: 1.04;
