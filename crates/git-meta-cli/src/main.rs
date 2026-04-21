@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod context;
 mod pager;
+mod style;
 
 #[cfg(feature = "bench")]
 mod bench;

@@ -707,12 +707,16 @@
                 <div class="try-step-num">02 &middot; Set up</div>
                 <h3>Point at a meta remote</h3>
                 <p>
-                  Metadata lives under its own ref namespace. Add a remote that
-                  hosts those refs &mdash; the same repo as your code is fine.
+                  Metadata lives under its own ref namespace. Pin the
+                  recommended remote in a <code>.git-meta</code> file at the
+                  repo root &mdash; the same repo as your code is fine
+                  &mdash; then run <code>git meta setup</code> to wire it up
+                  and seed <code>refs/meta/main</code>.
                 </p>
               </div>
               <pre class="snippet"><span class="c-mut">$</span> cd your-project
-<span class="c-mut">$</span> git meta remote add <span class="c-s">git@github.com:you/proj.git</span></pre>
+<span class="c-mut">$</span> echo <span class="c-s">'git@github.com:you/proj.git'</span> &gt; .git-meta
+<span class="c-mut">$</span> git meta setup</pre>
             </li>
 
             <li class="try-step">
@@ -737,16 +741,17 @@
                 <div class="try-step-num">04 &middot; Teammate</div>
                 <h3>Another user fetches and inspects it</h3>
                 <p>
-                  On a different machine, a collaborator clones the repo, points
-                  at the same meta remote, fetches the metadata refs, and
-                  inspects the values you wrote.
+                  On a different machine, a collaborator clones the repo and
+                  runs <code>git meta setup</code>. The committed
+                  <code>.git-meta</code> file from step 02 picks the remote
+                  for them, fetches the metadata refs, and gets them ready
+                  to inspect the values you wrote.
                 </p>
               </div>
               <pre
                 class="snippet"
               ><span class="c-mut">$</span> git clone <span class="c-s">git@github.com:you/proj.git</span> &amp;&amp; cd proj
-<span class="c-mut">$</span> git meta remote add <span class="c-s">git@github.com:you/proj.git</span>
-<span class="c-mut">$</span> git meta pull
+<span class="c-mut">$</span> git meta setup
 <span class="c-mut">$</span> git meta show <span class="c-k">HEAD</span></pre>
             </li>
           </ol>
