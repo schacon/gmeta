@@ -50,7 +50,7 @@
         </a>
         <nav class="nav-links" aria-label="Primary">
           <a href="#use-cases">Use cases</a>
-          <a href="#how">git-meta flow</a>
+          <a href="#flow">Flow</a>
           <a href="#people">Who's behind it</a>
           <a href="#faq">FAQ</a>
           <a href="spec/" class="nav-muted">Spec &rarr;</a>
@@ -513,166 +513,161 @@
         </div>
       </section>
 
-      <!-- HOW IT WORKS / DIAGRAM -->
-      <section id="how" class="section section-alt">
+      <!-- GIT-META FLOW / ANIMATION -->
+      <section id="flow" class="section section-alt">
         <div class="wrap how-grid">
           <div class="how-copy">
-            <div class="eyebrow">How it works</div>
-            <h2>Two halves, connected by plain Git refs.</h2>
+            <div class="eyebrow">git-meta flow</div>
+            <h2>Write locally. Sync with normal Git.</h2>
             <p class="section-lede">
-              Locally, metadata lives in a fast index keyed by target and field.
-              To share, git-meta
-              <strong>serializes</strong> it into a commit on a
-              <code>refs/meta/*</code> ref. When you fetch,
-              <strong>materialization</strong> merges incoming changes back into
-              the local index.
+              Every change lands in a fast local index first. To share, git-meta
+              serializes that index into commits on a
+              <code>refs/meta/*</code> ref and ships them with the same
+              <code>git push</code> and <code>git fetch</code> you already use
+              &mdash; no new daemons, protocols, or new wire formats.
             </p>
             <ul class="how-list">
+              <li><span>1. Write</span> Set values on any target locally.</li>
               <li>
-                <span>Local index</span> &mdash; fast queries, cheap mutations,
-                per-key history.
+                <span>2. Push</span> Serialize and push to any Git remote
+                alongside your code.
               </li>
               <li>
-                <span>Serialize</span> &mdash; write current state as a Git tree
-                + commit on <code>refs/meta/&lt;name&gt;</code>.
+                <span>3. Fetch</span> Other users pull your changes with a
+                regular <code>git fetch</code>
               </li>
               <li>
-                <span>Transport</span> &mdash; <code>git push</code> /
-                <code>git fetch</code>. No new servers.
-              </li>
-              <li>
-                <span>Materialize</span> &mdash; deterministic three-way merge
-                back into the local index.
+                <span>4. Merge</span> Incoming updates merge into their local
+                index.
               </li>
             </ul>
           </div>
-          <div class="how-diagram" aria-hidden="true">
+          <div class="how-flow" aria-hidden="true">
             <svg
-              viewBox="0 0 520 360"
+              viewBox="0 0 540 360"
               width="100%"
               height="auto"
               role="img"
-              aria-label="Diagram showing local index serialized to a refs/meta commit and materialized back"
+              aria-label="Animated flow: alice writes metadata locally, pushes to a git remote, bob fetches it; bob writes his own metadata, pushes, and alice fetches it back."
             >
-              <defs>
-                <marker
-                  id="arr"
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M0 0 L10 5 L0 10 z" fill="currentColor" />
-                </marker>
-              </defs>
-
-              <!-- Local index -->
-              <g class="diag-group">
+              <!-- Alice card -->
+              <g class="flow-side">
                 <rect
                   x="20"
-                  y="30"
-                  width="200"
-                  height="300"
+                  y="40"
+                  width="160"
+                  height="280"
                   rx="10"
-                  class="diag-box"
+                  class="flow-card-rect"
                 />
-                <text x="34" y="54" class="diag-title">Local index</text>
-                <text x="34" y="74" class="diag-sub">~/.git/meta</text>
-
-                <g class="diag-row">
-                  <rect x="34" y="92" width="172" height="34" rx="5" />
-                  <text x="44" y="106" class="diag-k">commit:314e7f0</text>
-                  <text x="44" y="120" class="diag-v">
-                    agent:model &rarr; claude-4.6
-                  </text>
-                </g>
-                <g class="diag-row">
-                  <rect x="34" y="136" width="172" height="34" rx="5" />
-                  <text x="44" y="150" class="diag-k">path:src/metrics</text>
-                  <text x="44" y="164" class="diag-v">
-                    owners {schacon, caleb}
-                  </text>
-                </g>
-                <g class="diag-row">
-                  <rect x="34" y="180" width="172" height="34" rx="5" />
-                  <text x="44" y="194" class="diag-k">branch:feat-x</text>
-                  <text x="44" y="208" class="diag-v">
-                    review:status approved
-                  </text>
-                </g>
-                <g class="diag-row">
-                  <rect x="34" y="224" width="172" height="34" rx="5" />
-                  <text x="44" y="238" class="diag-k">commit:9a3f&hellip;</text>
-                  <text x="44" y="252" class="diag-v">ci:status passed</text>
-                </g>
-                <text x="34" y="288" class="diag-foot">
-                  fast reads &middot; per-key history
+                <text
+                  x="100"
+                  y="62"
+                  text-anchor="middle"
+                  class="flow-card-title"
+                >
+                  alice
                 </text>
+                <text x="100" y="78" text-anchor="middle" class="flow-card-sub">
+                  local index
+                </text>
+                <line
+                  x1="32"
+                  y1="88"
+                  x2="168"
+                  y2="88"
+                  class="flow-card-divider"
+                />
               </g>
 
-              <!-- Arrows + labels -->
-              <g class="diag-arrows">
-                <path d="M222 130 L300 130" marker-end="url(#arr)" />
-                <text x="261" y="122" text-anchor="middle" class="diag-label">
-                  serialize
-                </text>
-                <path d="M300 230 L222 230" marker-end="url(#arr)" />
-                <text x="261" y="248" text-anchor="middle" class="diag-label">
-                  materialize
-                </text>
-              </g>
-
-              <!-- refs/meta commit -->
-              <g class="diag-group">
+              <!-- Bob card -->
+              <g class="flow-side">
                 <rect
-                  x="300"
-                  y="30"
-                  width="200"
-                  height="300"
+                  x="360"
+                  y="40"
+                  width="160"
+                  height="280"
                   rx="10"
-                  class="diag-box"
+                  class="flow-card-rect"
                 />
-                <text x="314" y="54" class="diag-title">refs/meta/main</text>
-                <text x="314" y="74" class="diag-sub">normal git commit</text>
+                <text
+                  x="440"
+                  y="62"
+                  text-anchor="middle"
+                  class="flow-card-title"
+                >
+                  bob
+                </text>
+                <text x="440" y="78" text-anchor="middle" class="flow-card-sub">
+                  local index
+                </text>
+                <line
+                  x1="372"
+                  y1="88"
+                  x2="508"
+                  y2="88"
+                  class="flow-card-divider"
+                />
+              </g>
 
-                <!-- tree shape -->
-                <g transform="translate(314 92)">
-                  <circle cx="12" cy="12" r="6" class="tree-node head" />
-                  <text x="28" y="16" class="diag-v">commit 4c21&hellip;</text>
+              <!-- Static rows: each side's own writes -->
+              <g class="flow-row flow-row-static">
+                <rect x="32" y="100" width="136" height="32" rx="6" />
+                <text x="42" y="116" class="flow-k">commit:9a3f08</text>
+                <text x="42" y="128" class="flow-v">ci:status "passed"</text>
+              </g>
+              <g class="flow-row flow-row-static">
+                <rect x="372" y="180" width="136" height="32" rx="6" />
+                <text x="382" y="196" class="flow-k">branch:feat-x</text>
+                <text x="382" y="208" class="flow-v">review "approved"</text>
+              </g>
 
-                  <line x1="12" y1="18" x2="12" y2="44" class="tree-edge" />
-                  <circle cx="12" cy="50" r="5" class="tree-node" />
-                  <text x="28" y="54" class="diag-v">
-                    tree &middot; targets/
-                  </text>
+              <!-- Animated rows that materialize on the receiving side -->
+              <g class="flow-row flow-row-on-bob">
+                <rect x="372" y="100" width="136" height="32" rx="6" />
+                <text x="382" y="116" class="flow-k">commit:9a3f08</text>
+                <text x="382" y="128" class="flow-v">ci:status "passed"</text>
+              </g>
+              <g class="flow-row flow-row-on-alice">
+                <rect x="32" y="180" width="136" height="32" rx="6" />
+                <text x="42" y="196" class="flow-k">branch:feat-x</text>
+                <text x="42" y="208" class="flow-v">review "approved"</text>
+              </g>
 
-                  <line x1="12" y1="56" x2="12" y2="80" class="tree-edge" />
-                  <line x1="12" y1="80" x2="40" y2="80" class="tree-edge" />
-                  <line x1="12" y1="80" x2="12" y2="110" class="tree-edge" />
-                  <line x1="12" y1="110" x2="40" y2="110" class="tree-edge" />
-                  <line x1="12" y1="110" x2="12" y2="140" class="tree-edge" />
-                  <line x1="12" y1="140" x2="40" y2="140" class="tree-edge" />
+              <!-- Animated pills (drawn before remote so the cylinder hides them mid-flight) -->
+              <g class="flow-pill flow-pill-a">
+                <rect width="120" height="22" rx="11" />
+                <text x="60" y="15" text-anchor="middle">ci:status</text>
+              </g>
+              <g class="flow-pill flow-pill-b">
+                <rect width="120" height="22" rx="11" />
+                <text x="60" y="15" text-anchor="middle">review:status</text>
+              </g>
 
-                  <circle cx="44" cy="80" r="4" class="tree-node" />
-                  <text x="56" y="84" class="diag-v">commit:314e&hellip;</text>
-                  <circle cx="44" cy="110" r="4" class="tree-node" />
-                  <text x="56" y="114" class="diag-v">path:src/metrics</text>
-                  <circle cx="44" cy="140" r="4" class="tree-node" />
-                  <text x="56" y="144" class="diag-v">branch:feat-x</text>
-
-                  <line x1="44" y1="146" x2="44" y2="170" class="tree-edge" />
-                  <line x1="44" y1="170" x2="72" y2="170" class="tree-edge" />
-                  <line x1="44" y1="170" x2="44" y2="194" class="tree-edge" />
-                  <line x1="44" y1="194" x2="72" y2="194" class="tree-edge" />
-                  <circle cx="76" cy="170" r="3" class="tree-node leaf" />
-                  <text x="86" y="174" class="diag-v">review:status</text>
-                  <circle cx="76" cy="194" r="3" class="tree-node leaf" />
-                  <text x="86" y="198" class="diag-v">ci:status</text>
-                </g>
-                <text x="314" y="310" class="diag-foot">
-                  travels over any git remote
+              <!-- Remote cylinder, drawn last so pills slip behind it -->
+              <g class="flow-server" transform="translate(270 180)">
+                <ellipse
+                  cx="0"
+                  cy="46"
+                  rx="44"
+                  ry="10"
+                  class="flow-cyl-bottom"
+                />
+                <path
+                  d="M -44 -46 L -44 46 A 44 10 0 0 0 44 46 L 44 -46 Z"
+                  class="flow-cyl-body"
+                />
+                <ellipse cx="0" cy="-46" rx="44" ry="10" class="flow-cyl-top" />
+                <text
+                  x="0"
+                  y="-4"
+                  text-anchor="middle"
+                  class="flow-server-title"
+                >
+                  git remote
+                </text>
+                <text x="0" y="14" text-anchor="middle" class="flow-server-sub">
+                  refs/meta/*
                 </text>
               </g>
             </svg>
@@ -685,7 +680,7 @@
         <div class="wrap">
           <div class="section-head">
             <div class="eyebrow">Who's behind it</div>
-            <h2>Built in the open.</h2>
+            <h2>All the coolest people in modern version control tools.</h2>
             <p class="section-lede">
               git-meta is built and maintained by people from the projects and
               organizations working on the next generation of Git tooling.
@@ -821,7 +816,7 @@
       <section class="cta-strip">
         <div class="wrap cta-strip-inner">
           <div>
-            <h2>Read the spec. Try the CLI. Break it.</h2>
+            <h2>Read the spec. Try the CLI.</h2>
             <p>
               git-meta is small and sharp. The fastest way to make it better is
               to use it for something real.

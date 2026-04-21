@@ -415,29 +415,111 @@ html[data-theme="dark"] .meta-val.str { fill: oklch(0.72 0.13 145); }
   font-family: "JetBrains Mono", monospace; font-size: 13px;
   margin-right: 8px;
 }
-.how-diagram {
+.how-flow {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   padding: 18px;
   box-shadow: var(--shadow-card);
 }
+.how-flow svg { display: block; width: 100%; height: auto; overflow: visible; }
 
-/* diagram svg styles */
-.diag-box { fill: var(--bg-alt); stroke: var(--line); stroke-width: 1; }
-.diag-title { font: 600 13px "Inter", sans-serif; fill: var(--ink); }
-.diag-sub { font: 500 10.5px "JetBrains Mono", monospace; fill: var(--ink-3); letter-spacing: 0.03em; }
-.diag-foot { font: 400 10.5px "JetBrains Mono", monospace; fill: var(--ink-3); }
-.diag-row rect { fill: var(--surface); stroke: var(--line-2); }
-.diag-k { font: 500 10.5px "JetBrains Mono", monospace; fill: var(--ink); }
-.diag-v { font: 400 10.5px "JetBrains Mono", monospace; fill: var(--ink-2); }
-.diag-arrows { color: var(--accent); }
-.diag-arrows path { stroke: var(--accent); stroke-width: 1.5; fill: none; }
-.diag-label { font: 500 11px "JetBrains Mono", monospace; fill: var(--accent-2); letter-spacing: 0.04em; }
-.tree-node { fill: var(--accent); }
-.tree-node.head { fill: var(--ink); }
-.tree-node.leaf { fill: var(--ink-3); }
-.tree-edge { stroke: var(--line); stroke-width: 1; fill: none; }
+/* Cards on each side (alice / bob) */
+.flow-card-rect { fill: var(--bg-alt); stroke: var(--line); stroke-width: 1; }
+.flow-card-title { font: 600 14px "JetBrains Mono", monospace; fill: var(--ink); }
+.flow-card-sub { font: 400 10.5px "JetBrains Mono", monospace; fill: var(--ink-3); letter-spacing: 0.03em; }
+.flow-card-divider { stroke: var(--line); stroke-width: 1; }
+
+/* Metadata rows inside each card */
+.flow-row rect { fill: var(--surface); stroke: var(--line-2); stroke-width: 1; }
+.flow-k { font: 500 10.5px "JetBrains Mono", monospace; fill: var(--ink); }
+.flow-v { font: 400 10.5px "JetBrains Mono", monospace; fill: var(--ink-2); }
+
+/* Remote cylinder in the middle */
+.flow-cyl-body { fill: var(--bg-alt); stroke: var(--line); stroke-width: 1; }
+.flow-cyl-top { fill: var(--surface); stroke: var(--line); stroke-width: 1; }
+.flow-cyl-bottom { fill: var(--bg-alt); stroke: var(--line); stroke-width: 1; }
+.flow-server-title { font: 600 12px "JetBrains Mono", monospace; fill: var(--ink); }
+.flow-server-sub { font: 400 10px "JetBrains Mono", monospace; fill: var(--ink-3); }
+
+/* Flying pills (in-flight metadata) */
+.flow-pill rect {
+  fill: var(--accent);
+  stroke: var(--brand-dark);
+  stroke-width: 1;
+}
+.flow-pill text {
+  font: 600 11px "JetBrains Mono", monospace;
+  fill: #fff;
+  letter-spacing: 0.02em;
+}
+
+/* Animations: a single 12s loop tells the full Alice→Bob→Alice story.
+   Keyframes use translate() values that map to fixed positions in the SVG
+   viewBox (40,105 = alice row 1; 380,105 = bob row 1; 210,169 = remote;
+   380,185 = bob row 2; 40,185 = alice row 2). The remote cylinder is
+   drawn after the pills so the pill is naturally hidden behind it
+   while it sits at the remote position. */
+.flow-pill-a {
+  animation: flow-pill-a 12s ease-in-out infinite;
+}
+.flow-pill-b {
+  animation: flow-pill-b 12s ease-in-out infinite;
+}
+.flow-row-on-bob {
+  animation: flow-row-on-bob 12s ease-in-out infinite;
+  opacity: 0;
+}
+.flow-row-on-alice {
+  animation: flow-row-on-alice 12s ease-in-out infinite;
+  opacity: 0;
+}
+
+@keyframes flow-pill-a {
+  0%   { opacity: 0; transform: translate(40px, 105px); }
+  3%   { opacity: 1; transform: translate(40px, 105px); }
+  10%  { opacity: 1; transform: translate(40px, 105px); }
+  25%  { opacity: 1; transform: translate(210px, 169px); }
+  35%  { opacity: 1; transform: translate(210px, 169px); }
+  50%  { opacity: 1; transform: translate(380px, 105px); }
+  53%  { opacity: 0; transform: translate(380px, 105px); }
+  100% { opacity: 0; transform: translate(40px, 105px); }
+}
+
+@keyframes flow-pill-b {
+  0%, 50% { opacity: 0; transform: translate(380px, 185px); }
+  53%     { opacity: 1; transform: translate(380px, 185px); }
+  60%     { opacity: 1; transform: translate(380px, 185px); }
+  75%     { opacity: 1; transform: translate(210px, 169px); }
+  85%     { opacity: 1; transform: translate(210px, 169px); }
+  98%     { opacity: 1; transform: translate(40px, 185px); }
+  100%    { opacity: 0; transform: translate(40px, 185px); }
+}
+
+@keyframes flow-row-on-bob {
+  0%, 47% { opacity: 0; }
+  52%     { opacity: 1; }
+  96%     { opacity: 1; }
+  100%    { opacity: 0; }
+}
+
+@keyframes flow-row-on-alice {
+  0%, 95% { opacity: 0; }
+  98%     { opacity: 1; }
+  100%    { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-pill-a,
+  .flow-pill-b,
+  .flow-row-on-bob,
+  .flow-row-on-alice {
+    animation: none;
+    opacity: 1;
+  }
+  .flow-pill-a { transform: translate(210px, 169px); }
+  .flow-pill-b { display: none; }
+}
 
 /* ——— DEMO ——— */
 .demo { display: grid; grid-template-columns: 1.6fr 1fr; gap: 28px; align-items: start; }
