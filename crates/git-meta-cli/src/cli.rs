@@ -449,10 +449,19 @@ const HELP_GROUPS: &[HelpGroup] = &[
     },
     HelpGroup {
         heading: "browse and exchange (porcelain)",
-        sections: &[HelpSection {
-            label: None,
-            commands: &["show", "inspect", "log", "stats", "push", "pull"],
-        }],
+        sections: &[
+            // push / pull are the two commands users reach for daily,
+            // so they go first as their own block, separated by a
+            // blank line from the read-only inspection commands below.
+            HelpSection {
+                label: None,
+                commands: &["push", "pull"],
+            },
+            HelpSection {
+                label: None,
+                commands: &["show", "inspect", "log", "stats"],
+            },
+        ],
     },
     HelpGroup {
         heading: "low-level git ref operations (plumbing)",
@@ -581,13 +590,16 @@ pub fn print_help() {
         println!();
         println!("{}{}{}{}", p.bold, p.yellow, group.heading, p.reset);
         for (idx, section) in group.sections.iter().enumerate() {
-            // Sub-labelled sections get a blank line *between* them so
-            // (strings) / (lists) / (sets) read as distinct blocks; the
-            // first sub-label sits flush against the group heading.
+            // Adjacent sub-sections always get a blank line between
+            // them so they read as distinct blocks — whether they're
+            // sub-labelled (e.g. (strings) / (lists) / (sets)) or
+            // unlabelled (e.g. push/pull above show/inspect/log/stats).
+            // The first section always sits flush against the group
+            // heading.
+            if idx > 0 {
+                println!();
+            }
             if let Some(label) = section.label {
-                if idx > 0 {
-                    println!();
-                }
                 println!("   {}{}{}", p.dim, label, p.reset);
             }
             for name in section.commands {
