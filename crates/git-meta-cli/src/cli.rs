@@ -380,6 +380,14 @@ pub enum RemoteAction {
         /// Metadata namespace to use (default: from git config or "meta")
         #[arg(long)]
         namespace: Option<String>,
+
+        /// Initialize the remote with a README commit on `refs/{namespace}/main`
+        /// when no metadata refs exist there yet.
+        ///
+        /// On an interactive terminal, you will be prompted instead. Use this
+        /// flag to skip the prompt (e.g. in CI).
+        #[arg(long)]
+        init: bool,
     },
 
     /// Remove a metadata remote source

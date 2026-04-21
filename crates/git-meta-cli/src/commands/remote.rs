@@ -73,19 +73,16 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
         bail!("remote '{name}' already exists");
     }
 
-    // Check the remote for meta refs before configuring
+    // Check the remote for meta refs before configuring. If none are found
+    // under the requested namespace and the user has opted in (either via
+    // `--init` or by confirming an interactive prompt), we will initialize
+    // the remote with a README commit on `refs/{ns}/main` after configuring.
     eprintln!("Checking {url}...");
+    let mut should_init = false;
     match check_remote_refs(&ctx.session, &url, &ns) {
         Ok((has_match, other_namespaces)) => {
             if !has_match {
-                if other_namespaces.is_empty() {
-                    bail!(
-                        "no metadata refs found on {url}\n\n\
-                         The remote does not have refs/{ns}/main or any other recognizable metadata refs.\n\
-                         If this is a new remote that will receive metadata via push, use:\n  \
-                         git meta remote add {url} --name {name} --namespace {ns}",
-                    );
-                } else {
+                if !other_namespaces.is_empty() {
                     let found_refs = other_namespaces
                         .iter()
                         .map(|alt| format!("  refs/{alt}/main"))
@@ -100,6 +97,18 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
                         "no metadata refs found under refs/{ns}/main on {url}\n\n\
                          However, metadata refs were found under other namespaces:\n{found_refs}\n\n\
                          To use one of these, re-run with --namespace:\n{suggestions}",
+                    );
+                }
+
+                // No metadata refs anywhere on the remote. Decide whether to
+                // initialize it with a starter README commit.
+                should_init = init || prompt_for_init(&url, &ns)?;
+                if !should_init {
+                    bail!(
+                        "no metadata refs found on {url}\n\n\
+                         The remote does not have refs/{ns}/main or any other recognizable metadata refs.\n\
+                         If this is a new metadata remote, re-run with --init to create refs/{ns}/main with a README:\n  \
+                         git meta remote add {url} --name {name} --namespace {ns} --init",
                     );
                 }
             }
@@ -143,6 +152,30 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>) -> Resul
     }
 
     println!("Added meta remote '{name}' -> {url}");
+
+    // If we are initializing a fresh remote, create a starter commit on
+    // `refs/{ns}/local/main` (or reuse one if it already exists) and push it
+    // so the subsequent fetch has something to track.
+    if should_init {
+        let origin_url = config
+            .string("remote.origin.url")
+            .map_or_else(|| url.clone(), |s| s.to_string());
+        ensure_local_meta_ref(&ctx, &ns, &origin_url, &url)?;
+
+        let push_refspec = format!("refs/{ns}/local/main:refs/{ns}/main");
+        eprint!("Initializing refs/{ns}/main on {name}...");
+        match git_meta_lib::git_utils::run_git(repo, &["push", name, &push_refspec]) {
+            Ok(_) => eprintln!(" done."),
+            Err(e) => {
+                eprintln!(" failed.");
+                bail!(
+                    "could not push the initial metadata commit to {name} ({url}): {e}\n\n\
+                     The remote was configured locally. To retry the push:\n  \
+                     git meta push --remote {name}",
+                );
+            }
+        }
+    }
 
     // Initial blobless fetch
     let fetch_refspec = format!("refs/{ns}/main:refs/{ns}/remotes/main");
