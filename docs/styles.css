@@ -651,7 +651,7 @@ html[data-theme="dark"] .cta-strip { background: var(--brand-dark); color: #fff;
   .nav-links a:not(.btn) { display: none; }
   .nav-links a.nav-muted { display: inline-flex; }
   .hero-grid { grid-template-columns: 1fr; gap: 40px; }
-  .hero-illustration { max-width: 540px; margin: 0 auto; width: 100%; }
+  .hero-illustration { display: none; }
   .headline { max-width: none; }
   .why-grid { grid-template-columns: repeat(2, 1fr); }
   .why-item:nth-child(2) { border-right: none; }
