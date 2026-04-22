@@ -65,7 +65,9 @@ PAGE_ORDER = [
     "implementation/cli.md",
     "implementation/output.md",
     "implementation/pruning.md",
+    "implementation/serialize-filters.md",
     "implementation/standard-keys.md",
+    "implementation/remotes.md",
     "implementation/auto-sync.md",
     "implementation/workflow.md",
 ]
@@ -88,9 +90,11 @@ PAGE_GROUPS = {
         "implementation/cli.md",
         "implementation/output.md",
         "implementation/pruning.md",
+        "implementation/serialize-filters.md",
     ],
     "Other Considerations": [
         "implementation/standard-keys.md",
+        "implementation/remotes.md",
         "implementation/auto-sync.md",
         "implementation/workflow.md",
     ]
@@ -845,6 +849,81 @@ def render_key_card(
     return "".join(parts), anchor, name_html
 
 
+def split_table_row(line: str) -> list[str]:
+    """Split a markdown pipe-table row into trimmed cell strings.
+
+    Respects inline-code spans (``` `…` ```) so a literal ``|`` inside
+    backticks is preserved as cell content instead of being treated as a
+    column separator. A single optional leading and trailing ``|`` is
+    stripped so both ``| a | b |`` and ``a | b`` parse identically.
+    Backslash-escaped pipes (``\\|``) are also preserved as literal
+    ``|`` characters within a cell.
+    """
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    cells: list[str] = []
+    buf: list[str] = []
+    in_code = False
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch == "`":
+            in_code = not in_code
+            buf.append(ch)
+        elif ch == "\\" and i + 1 < len(s) and s[i + 1] == "|":
+            buf.append("|")
+            i += 1
+        elif ch == "|" and not in_code:
+            cells.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+        i += 1
+    cells.append("".join(buf).strip())
+    return cells
+
+
+def is_table_separator(line: str) -> bool:
+    """True if ``line`` is a markdown pipe-table header/body separator.
+
+    A separator contains at least one ``|`` plus cells made entirely of
+    dashes with optional leading/trailing ``:`` for alignment hints
+    (``:---``, ``---:``, ``:---:``). Requiring a ``|`` prevents the
+    bare-``---`` horizontal-rule line from being misclassified.
+    """
+    s = line.strip()
+    if "|" not in s:
+        return False
+    cells = split_table_row(s)
+    if not cells:
+        return False
+    return all(re.match(r"^:?-+:?$", c) for c in cells)
+
+
+def table_alignments(separator_line: str) -> list[str]:
+    """Return per-column CSS ``text-align`` values from a separator row.
+
+    Empty string means "no explicit alignment" (let the browser default
+    apply). ``:---`` -> left, ``---:`` -> right, ``:---:`` -> center.
+    """
+    aligns: list[str] = []
+    for cell in split_table_row(separator_line):
+        left = cell.startswith(":")
+        right = cell.endswith(":")
+        if left and right:
+            aligns.append("center")
+        elif right:
+            aligns.append("right")
+        elif left:
+            aligns.append("left")
+        else:
+            aligns.append("")
+    return aligns
+
+
 def markdown_to_html(
     markdown_text: str, page_map: dict[str, str], current_page: Page
 ) -> tuple[str, str, bool, list[tuple[int, str, str]]]:
@@ -1051,6 +1130,48 @@ def markdown_to_html(
             else:
                 body = " ".join(quote_lines)
                 out.append(f"<blockquote><p>{inline_format(body, page_map, current_page)}</p></blockquote>")
+            continue
+
+        if (
+            stripped.startswith("|")
+            and i + 1 < len(lines)
+            and is_table_separator(lines[i + 1])
+        ):
+            flush_paragraph()
+            flush_lists()
+            header_cells = split_table_row(line)
+            aligns = table_alignments(lines[i + 1])
+            j = i + 2
+            body_rows: list[list[str]] = []
+            while j < len(lines) and lines[j].strip().startswith("|"):
+                body_rows.append(split_table_row(lines[j]))
+                j += 1
+
+            def _style(idx: int, aligns: list[str] = aligns) -> str:
+                if idx < len(aligns) and aligns[idx]:
+                    return f' style="text-align:{aligns[idx]}"'
+                return ""
+
+            parts: list[str] = ["<table><thead><tr>"]
+            for idx, cell in enumerate(header_cells):
+                parts.append(
+                    f"<th{_style(idx)}>{inline_format(cell, page_map, current_page)}</th>"
+                )
+            parts.append("</tr></thead>")
+            if body_rows:
+                parts.append("<tbody>")
+                for row in body_rows:
+                    parts.append("<tr>")
+                    for idx in range(len(header_cells)):
+                        cell = row[idx] if idx < len(row) else ""
+                        parts.append(
+                            f"<td{_style(idx)}>{inline_format(cell, page_map, current_page)}</td>"
+                        )
+                    parts.append("</tr>")
+                parts.append("</tbody>")
+            parts.append("</table>")
+            out.append("".join(parts))
+            i = j
             continue
 
         m_ul = re.match(r"^(\s*)[-*]\s+(.*)$", line.rstrip())

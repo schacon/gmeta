@@ -53,8 +53,16 @@
     <lastmod>2026-04-19</lastmod>
   </url>
   <url>
+    <loc>https://git-meta.com/spec/implementation/serialize-filters.html</loc>
+    <lastmod>2026-04-19</lastmod>
+  </url>
+  <url>
     <loc>https://git-meta.com/spec/implementation/standard-keys.html</loc>
     <lastmod>2026-04-22</lastmod>
+  </url>
+  <url>
+    <loc>https://git-meta.com/spec/implementation/remotes.html</loc>
+    <lastmod>2026-04-19</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/auto-sync.html</loc>

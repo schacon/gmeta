@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Serialize filters · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body class="has-toc">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a href="pruning.html">Auto-pruning</a><a class="active" href="serialize-filters.html">Serialize filters</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="standard-keys.html">Standard keys</a><a href="remotes.html">Remote Management</a><a href="auto-sync.html">Syncing with normal Git</a><a href="workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Serialize filters</h1>
+          </div>
+          <a class="page-source-link" href="https://raw.githubusercontent.com/git-meta/git-meta/main/spec/implementation/serialize-filters.md" rel="noopener" title="View raw markdown source on GitHub">
+            <span aria-hidden="true">{ }</span>
+            <span>markdown</span>
+          </a>
+        </header>
+        <article class="doc-content">
+          <p>This document describes how metadata keys can be excluded from serialization or routed to alternative refs during the serialize step.</p>
+<p>This allows the user to split up project metadata into different references for exchange - for example, public versus corporate data.</p>
+<h2 id="design">Design</h2>
+<h3 id="local-only-keys-via-the-metalocal-namespace">Local-only keys via the <code>meta:local:</code> namespace</h3>
+<p>Any key whose first segments are <code>meta:local</code> is <strong>never serialized</strong> to any ref. They are only available in the local storage.</p>
+<p>Examples:</p>
+<ul><li><code>meta:local:scratch</code></li><li><code>meta:local:editor:cursor</code></li><li><code>meta:local:build:last-status</code></li><li><code>meta:local:ai:draft-summary</code></li></ul>
+<p>The <code>meta:local:</code> prefix is a hard rule enforced by the serializer. No filter configuration is needed to make it work. Keys in this namespace are silently skipped during serialize and are never written into any git tree.</p>
+<h3 id="filter-rules">Filter rules</h3>
+<p>Users can define filter rules that control serialization behavior. Filter rules are stored as set members on the <strong>project</strong> target under either <code>meta:filter</code> or <code>meta:local:filter</code>. The <code>meta:filter</code> rules are shared (corporate rules), the local ones are not (personal rules).</p>
+<p>Each set member is a rule string with the format:</p>
+<pre><code>&lt;action&gt; &lt;pattern&gt; [&lt;destination&gt;]</code></pre>
+<h4 id="actions">Actions</h4>
+<table><thead><tr><th>Action</th><th>Meaning</th></tr></thead><tbody><tr><td><code>exclude</code></td><td>Never serialize matching keys to any ref. They remain local-only.</td></tr><tr><td><code>route</code></td><td>Serialize matching keys to a named secondary ref instead of the default local ref. Requires a <code>&lt;destination&gt;</code> argument.</td></tr></tbody></table>
+<h4 id="patterns">Patterns</h4>
+<p>Patterns match against the full key string using a simple glob-like syntax:</p>
+<table><thead><tr><th>Syntax</th><th>Meaning</th></tr></thead><tbody><tr><td><code>*</code></td><td>Matches any sequence of characters within a single key segment (between <code>:</code> delimiters)</td></tr><tr><td><code>**</code></td><td>Matches any number of complete key segments (including zero)</td></tr><tr><td>literal</td><td>Exact segment match</td></tr></tbody></table>
+<p>Segments are delimited by <code>:</code>.</p>
+<p>Examples:</p>
+<table><thead><tr><th>Pattern</th><th>Matches</th><th>Does not match</th></tr></thead><tbody><tr><td><code>draft:*</code></td><td><code>draft:summary</code>, <code>draft:notes</code></td><td><code>draft:ai:summary</code></td></tr><tr><td><code>draft:**</code></td><td><code>draft:summary</code>, <code>draft:ai:summary</code>, <code>draft:x:y:z</code></td><td><code>notes:draft:x</code></td></tr><tr><td><code>agent:*:prompt</code></td><td><code>agent:claude:prompt</code></td><td><code>agent:prompt</code>, <code>agent:x:y:prompt</code></td></tr><tr><td><code>myteam:**</code></td><td><code>myteam:anything:at:any:depth</code></td><td><code>yourteam:x</code></td></tr><tr><td><code>wip</code></td><td><code>wip</code></td><td><code>wip:notes</code></td></tr></tbody></table>
+<h4 id="route-destination">Route destination</h4>
+<p>The <code>route</code> action takes a third argument specifying the destination name. The destination becomes a sub-ref under the local ref:</p>
+<pre><code>refs/meta/local/&lt;destination&gt;</code></pre>
+<p>For example, <code>route myteam:** private</code> serializes matching keys to <code>refs/meta/local/private</code>.</p>
+<p>Each destination ref is a separate commit/tree that contains only the keys routed to it, using the same tree structure as the primary ref. Each can be pushed independently (e.g. to a personal remote or a different refspec).</p>
+<p>If a <code>route</code> rule matches, the key is <strong>excluded</strong> from the primary <code>refs/meta/local/main</code> tree and <strong>included</strong> only in its destination ref.</p>
+<p>If the namespace config is set (e.g. <code>meta.namespace = foo</code>), a destination <code>private</code> becomes <code>refs/foo/local/private</code>.</p>
+<p>Multiple route rules can target different destinations. Keys from all rules sharing the same destination are collected into a single ref.</p>
+<h4 id="multiple-routes">Multiple Routes</h4>
+<p>The <code>&lt;destination&gt;</code> can be a comma delimited list of destinations and the matching key values will be written to all of them.</p>
+<h3 id="rule-evaluation">Rule evaluation</h3>
+<p>Rules are evaluated in order of specificity:</p>
+<ol><li><code>meta:local:</code> keys are never serialized regardless of any filter rules.</li><li>Filter rules are evaluated.</li></ol>
+<ul><li>Filters in <code>meta:local:filter</code> are evaluated first, then <code>meta:filter</code> rules.</li><li>If multiple rules match the same key:<ul><li>any <code>exclude</code> match applies and key value is not serialized anywhere</li><li>otherwise, _all_ <code>route</code> rules apply</li></ul></li></ul>
+<ol><li>Keys that match no rule are serialized to the primary ref as usual.</li></ol>
+<h2 id="serialize-algorithm-changes">Serialize algorithm changes</h2>
+<p>The current serialize flow is:</p>
+<ol><li>Read all metadata from SQLite (<code>get_all_metadata</code>)</li><li>Read all tombstones</li><li>Build git tree entries for each key</li><li>Commit to <code>refs/meta/local/main</code></li></ol>
+<p>The new flow becomes:</p>
+<ol><li>Read all metadata from SQLite</li><li>Read all tombstones</li><li>Read filter rules from <code>meta:local:filter</code> on the project target</li><li>For each key:</li></ol>
+<ul><li>If key starts with <code>meta:local:</code> -&gt; skip entirely</li><li>If key matches an <code>exclude</code> rule -&gt; skip entirely</li><li>If key matches a <code>route</code> rule -&gt; add to the tree builder for that rule&#x27;s destination</li><li>Otherwise -&gt; add to the primary tree builder</li></ul>
+<ol><li>Apply the same skip/route logic to tombstones</li><li>Commit the primary tree to <code>refs/meta/local/main</code></li><li>For each destination that has entries, commit its tree to <code>refs/meta/local/&lt;destination&gt;</code></li></ol>
+<h2 id="cli-surface">CLI surface</h2>
+<p>No new commands are needed. Filter rules are managed with the existing <code>set</code> commands:</p>
+<pre><code># Add a filter rule
+git meta set:add project meta:filter &quot;exclude draft:**&quot;
+git meta set:add project meta:local:filter &quot;route myteam:** private&quot;
+git meta set:add project meta:local:filter &quot;route acme:** vendor&quot;
+
+# View current filter rules
+git meta get project meta:local:filter
+
+# Remove a filter rule
+git meta set:rm project meta:filter &quot;exclude draft:**&quot;</code></pre>
+<h2 id="examples">Examples</h2>
+<h3 id="keep-draft-notes-local">Keep draft notes local</h3>
+<pre><code>git meta set:add project meta:local:filter &quot;exclude draft:**&quot;
+git meta add commit:abc123 draft:summary &quot;WIP: still thinking about this&quot;
+git meta serialize   # draft:summary is not in the git tree</code></pre>
+<h3 id="route-personal-annotations-to-a-separate-ref">Route personal annotations to a separate ref</h3>
+<pre><code>git meta set:add project meta:local:filter &quot;route myname:** mine&quot;
+git meta set commit:abc123 myname:review-note &quot;looks good but check error handling&quot;
+git meta serialize   # review-note goes to refs/meta/local/mine, not refs/meta/local/main</code></pre>
+<h3 id="route-different-namespaces-to-different-refs">Route different namespaces to different refs</h3>
+<pre><code>git meta set:add project meta:local:filter &quot;route myname:** mine&quot;
+git meta set:add project meta:local:filter &quot;route acme:** vendor&quot;
+git meta serialize   # myname:* keys go to refs/meta/local/mine
+                  # acme:* keys go to refs/meta/local/vendor</code></pre>
+<h3 id="always-local-scratch-space">Always-local scratch space</h3>
+<pre><code>git meta set commit:abc123 meta:local:cursor-pos &quot;line 42&quot;
+git meta serialize   # meta:local:cursor-pos is never serialized, no filter needed</code></pre>
+<h2 id="non-goals">Non-goals</h2>
+<ul><li>Per-target filtering (all filters apply globally across targets)</li><li>Regex patterns (glob syntax is sufficient)</li><li>Filter rules on non-project targets</li><li>Nested destination refs (destination is a single name, not a path)</li></ul>
+        </article>
+      </main>
+      <aside class="toc-aside" aria-label="On this page"><div class="toc-title">On this page</div><ul class="toc-list"><li class="toc-h2"><a href="#design">Design</a><ul class="toc-sub"><li class="toc-h3"><a href="#local-only-keys-via-the-metalocal-namespace">Local-only keys via the <code>meta:local:</code> namespace</a></li><li class="toc-h3"><a href="#filter-rules">Filter rules</a></li><li class="toc-h3"><a href="#rule-evaluation">Rule evaluation</a></li></ul></li><li class="toc-h2"><a href="#serialize-algorithm-changes">Serialize algorithm changes</a></li><li class="toc-h2"><a href="#cli-surface">CLI surface</a></li><li class="toc-h2"><a href="#examples">Examples</a><ul class="toc-sub"><li class="toc-h3"><a href="#keep-draft-notes-local">Keep draft notes local</a></li><li class="toc-h3"><a href="#route-personal-annotations-to-a-separate-ref">Route personal annotations to a separate ref</a></li><li class="toc-h3"><a href="#route-different-namespaces-to-different-refs">Route different namespaces to different refs</a></li><li class="toc-h3"><a href="#always-local-scratch-space">Always-local scratch space</a></li></ul></li><li class="toc-h2"><a href="#non-goals">Non-goals</a></li></ul></aside>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+
+        // Right-hand TOC scroll-spy: highlight the toc link whose target
+        // heading is currently nearest the top of the viewport. Uses
+        // IntersectionObserver so it stays cheap on long pages.
+        const tocLinks = document.querySelectorAll('.toc-aside a[href^="#"]');
+        if (tocLinks.length) {
+          const linkByAnchor = new Map();
+          const headings = [];
+          tocLinks.forEach((a) => {
+            const id = a.getAttribute('href').slice(1);
+            const heading = id ? document.getElementById(id) : null;
+            if (heading) {
+              linkByAnchor.set(id, a);
+              headings.push(heading);
+            }
+          });
+          const setActive = (id) => {
+            tocLinks.forEach((a) => a.classList.remove('active'));
+            const link = id && linkByAnchor.get(id);
+            if (link) link.classList.add('active');
+          };
+          const observer = new IntersectionObserver(
+            (entries) => {
+              const visible = entries
+                .filter((e) => e.isIntersecting)
+                .sort((a, b) => a.target.getBoundingClientRect().top - b.target.getBoundingClientRect().top);
+              if (visible.length) setActive(visible[0].target.id);
+            },
+            { rootMargin: '-15% 0% -75% 0%', threshold: 0 }
+          );
+          headings.forEach((h) => observer.observe(h));
+        }
+      })();
+    </script>
+  </body>
+</html>

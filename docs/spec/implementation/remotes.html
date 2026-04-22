@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Remote Management · git-meta</title>
+    <meta name="description" content="git-meta project documentation generated from the canonical spec markdown files.">
+    <link rel="stylesheet" href="../assets/style.css">
+    <script>
+      (() => {
+        const stored = localStorage.getItem('git-meta-theme');
+        document.documentElement.dataset.theme = stored || 'system';
+      })();
+    </script>
+  </head>
+  <body class="has-toc">
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-main">
+          <a class="brand" href="../index.html">
+            <img class="brand-icon" src="../../other/git-meta-icon.png" alt="" width="40" height="40">
+            <span class="brand-text">git-meta</span>
+          </a>
+          <p class="tagline">Git metadata specification and project docs</p>
+          <nav class="nav">
+            <div class="nav-group"><a href="../index.html">Overview</a></div><div class="nav-group"><h2>Exchange format</h2><a href="../exchange-format/targets.html">Targets and keys</a><a href="../exchange-format/exchange.html">Serialization</a><a href="../exchange-format/materialization.html">Materialization</a></div><div class="nav-group"><h2>Value types</h2><a href="../exchange-format/strings.html">Strings</a><a href="../exchange-format/lists.html">Lists</a><a href="../exchange-format/sets.html">Sets</a></div><div class="nav-group"><h2>Implementation</h2><a href="overview.html">Implementation Overview</a><a href="storage.html">Local storage</a><a href="cli.html">CLI surface</a><a href="output.html">Output and query semantics</a><a href="pruning.html">Auto-pruning</a><a href="serialize-filters.html">Serialize filters</a></div><div class="nav-group"><h2>Other Considerations</h2><a href="standard-keys.html">Standard keys</a><a class="active" href="remotes.html">Remote Management</a><a href="auto-sync.html">Syncing with normal Git</a><a href="workflow.html">Workflow</a></div>
+          </nav>
+        </div>
+        <div class="sidebar-footer">
+          <div class="theme-control" aria-label="Theme switcher">
+            <button type="button" class="theme-icon-button" data-theme-value="light" aria-label="Use light theme" title="Light theme">
+              <span aria-hidden="true">☀️</span>
+            </button>
+            <button type="button" class="theme-icon-button" data-theme-value="dark" aria-label="Use dark theme" title="Dark theme">
+              <span aria-hidden="true">🌙</span>
+            </button>
+          </div>
+          <button type="button" class="sidebar-toggle" aria-label="Collapse sidebar" title="Collapse sidebar">
+            <span class="collapse-icon" aria-hidden="true">◧</span>
+          </button>
+        </div>
+      </aside>
+      <main class="content">
+        <header class="page-header">
+          <div class="page-header-main">
+            <div class="eyebrow">Generated from <a href="https://github.com/git-meta/git-meta/tree/main/spec"><code>spec/*.md</code></a></div>
+            <h1>Remote Management</h1>
+          </div>
+          <a class="page-source-link" href="https://raw.githubusercontent.com/git-meta/git-meta/main/spec/implementation/remotes.md" rel="noopener" title="View raw markdown source on GitHub">
+            <span aria-hidden="true">{ }</span>
+            <span>markdown</span>
+          </a>
+        </header>
+        <article class="doc-content">
+          <p>Some implementation examples of how we would ideally do remote mangement and serialization/materialization coordination.</p>
+<h2 id="adding-a-remote-meta-source">Adding a remote meta source</h2>
+<p>The workflow starts by adding a remote source. This could be automatically done by GitButler if we see it&#x27;s setup (via local .gitmeta or something).</p>
+<pre><code>$ git meta remote add (url)</code></pre>
+<p>Could <code>ls-remote</code> the server and look for <code>refs/meta/*</code>, but should generally be <code>refs/meta/main</code>. Setup a fetch spec.</p>
+<pre><code>[remote &quot;meta&quot;]
+        url = git@github.com:schacon/entire-meta.git
+        fetch = +refs/meta/main:refs/meta/remote/main
+        meta = true
+        serialize = main[:refs/meta/main]
+        promisor = true
+        partialclonefilter = blob:none</code></pre>
+<p>We will use the fetchspec for mapping remote ref to local ref. If there are multiple fetchspecs, we have multiple sources on one remote (a history branch).</p>
+<p>We&#x27;ll add the <code>meta</code> boolean so it&#x27;s easy to see which are our meta sources. The URL _could_ be the same as an &quot;origin&quot; remote, but we&#x27;ll keep it separate anyhow.</p>
+<p>We also add the <code>serialize = [name]</code> entry so we know where to write serialized values. If you have serialization filters writing to different destinations (ie, <code>internal</code> or <code>mine</code>), we will need this value to know to which remote to push them. Each serialized local ref head should have a remote entry with a matching value. This is also how we construct the push refspec.</p>
+<p>After checking the source and setting up the Git remote, we do an initial blobless fetch of the ref.</p>
+<pre><code>git fetch --filter=blob:none meta refs/meta/main:refs/meta/remotes/main</code></pre>
+<p>Next we need to do the equivalent of a <code>git checkout</code> on that head, so Git will do the promisor remote &quot;want&quot; conversation to get everything in the tip tree.</p>
+<p>The best way to do this that I can find is to get all the blobs with <code>ls-tree</code> and pipe the list into <code>fetch</code> (with some complicated options) which seems to do what we want.</p>
+<pre><code>git ls-tree -r --object-only meta/remotes/main | git -c fetch.negotiationAlgorithm=noop fetch origin --no-tags --no-write-fetch-head --recurse-submodules=no --filter=blob:none --stdin</code></pre>
+<p>Now we have the tip tree data and can do some fast metadata lookups for recent stuff. If we need to get other blobs, we can do the same basic trick - figure out the list of blobs you need from the commit tree history, run them through <code>fetch</code> to get a packfile of them.</p>
+<p>It doesn&#x27;t have to be a top level tree, we could look up any set of blob values we want and send them to <code>fetch</code> this way. Imagine wanting all the metadata for a range of commits - we walk the history past prune metadata commits to the last times we&#x27;ve seen any of these SHAs and walk the subtress to see what all blobs are referenced in any of them and then _just_ ask for those dozens of content blobs.</p>
+<h2 id="pushing-and-pulling">Pushing and Pulling</h2>
+<p>Eventually we&#x27;ll need to incorporate some automatic version of this into GitButler itself, but as a mid-level plumbing solution, we can do a <code>git meta push</code> and <code>git meta pull</code> that could be called by something else (like Git hooks or whatever).</p>
+<h3 id="pushing">Pushing</h3>
+<p>So <code>git meta push</code> would rely on the <code>fetch</code> and <code>serialize</code> config values on the <code>meta</code> tagged remote (there should only be one, but fallback would be to choose the first one).</p>
+<p>The simplest outcome of a <code>git meta push</code> would be to serialize a new tree and commit on the metadata history and push it upstream as a fast-forward.</p>
+<p>The more complex case is that there is data we have not seen yet upstream, so we need to pull that down, serialize our own tree, merge the trees, materialize the outcome, then write a new tree and commit on top and try to push again. If we weren&#x27;t fast enough and there is new data upstream again, we repeat. It should _always_ result in a single new commit written locally, even if we had to try several times.</p>
+<h3 id="pulling">Pulling</h3>
+<p>A <code>git meta pull</code> should simply do the first part of the complex push process. Fetch the new data, serialize our side if we have new data and use Git to merge the trees with <code>ours</code> strategy, then materialize the new tree locally.</p>
+<h3 id="serializing-for-push">Serializing for Push</h3>
+<p>We may want to keep our last serialized commit locally, but if we go to write another one and the last one was ours and unpushed, rewrite it. Always keep and push the minimum number of new commits necessary.</p>
+<h3 id="serialize-commit-messages">Serialize Commit Messages</h3>
+<p>Serialization commits encode a diffstat of the changes they introduce. This allows fast key-list compilation from commit history without fetching any blob data — critical for blobless clones where the tree and commit objects are cheap but blob fetches are expensive. Walking the commit messages to reconstruct which keys exist is orders of magnitude faster than materializing trees.</p>
+<p>There are two commit message formats:</p>
+<p><strong>Normal</strong> (up to 1000 changes):</p>
+<pre><code>git-meta: serialize (3 changes)
+
+A	commit:abc123...	agent:model
+M	commit:abc123...	agent:cost
+D	project	meta:old-key</code></pre>
+<p>Each change line is: <code>A</code>/<code>M</code>/<code>D</code> (add/modify/delete), a tab, the target, a tab, the key.</p>
+<p><strong>Large</strong> (over 1000 changes):</p>
+<pre><code>git-meta: serialize (5432 changes)
+
+changes-omitted: true
+count: 5432</code></pre>
+<p>When the change count exceeds 1000, the individual lines are omitted to keep commit objects small. Consumers should fall back to tree diffing for these commits.</p>
+<h2 id="removing-a-remote-meta-source">Removing a remote meta source</h2>
+<p>A user may want to get rid of a meta source they are no longer using.</p>
+<p><code>git meta remote remove [name]</code></p>
+<p>It should remove the <code>.git/config</code> entry for that remote, any <code>refs/meta/local/<em></code> and any <code>refs/meta/remote/</em></code> pointers.</p>
+        </article>
+      </main>
+      <aside class="toc-aside" aria-label="On this page"><div class="toc-title">On this page</div><ul class="toc-list"><li class="toc-h2"><a href="#adding-a-remote-meta-source">Adding a remote meta source</a></li><li class="toc-h2"><a href="#pushing-and-pulling">Pushing and Pulling</a><ul class="toc-sub"><li class="toc-h3"><a href="#pushing">Pushing</a></li><li class="toc-h3"><a href="#pulling">Pulling</a></li><li class="toc-h3"><a href="#serializing-for-push">Serializing for Push</a></li><li class="toc-h3"><a href="#serialize-commit-messages">Serialize Commit Messages</a></li></ul></li><li class="toc-h2"><a href="#removing-a-remote-meta-source">Removing a remote meta source</a></li></ul></aside>
+    </div>
+    <script>
+      (() => {
+        const root = document.documentElement;
+        const sidebar = document.querySelector('.sidebar');
+        const themeButtons = document.querySelectorAll('.theme-icon-button');
+        const sidebarToggle = document.querySelector('.sidebar-toggle');
+        const media = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function currentTheme() {
+          return localStorage.getItem('git-meta-theme') || 'system';
+        }
+
+        function applyTheme(theme) {
+          root.dataset.theme = theme;
+          const effective = theme === 'system' ? (media.matches ? 'dark' : 'light') : theme;
+          themeButtons.forEach((button) => {
+            button.classList.toggle('active', button.dataset.themeValue === effective);
+          });
+        }
+
+        function currentSidebarState() {
+          return localStorage.getItem('git-meta-sidebar') || 'expanded';
+        }
+
+        function applySidebarState(state) {
+          const collapsed = state === 'collapsed';
+          sidebar.classList.toggle('collapsed', collapsed);
+          document.body.classList.toggle('sidebar-collapsed', collapsed);
+          sidebarToggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+          sidebarToggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+        }
+
+        themeButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            localStorage.setItem('git-meta-theme', button.dataset.themeValue);
+            applyTheme(button.dataset.themeValue);
+          });
+        });
+
+        sidebarToggle.addEventListener('click', () => {
+          const next = currentSidebarState() === 'collapsed' ? 'expanded' : 'collapsed';
+          localStorage.setItem('git-meta-sidebar', next);
+          applySidebarState(next);
+        });
+
+        media.addEventListener?.('change', () => {
+          if (currentTheme() === 'system') {
+            applyTheme('system');
+          }
+        });
+
+        applyTheme(currentTheme());
+        applySidebarState(currentSidebarState());
+
+        // Right-hand TOC scroll-spy: highlight the toc link whose target
+        // heading is currently nearest the top of the viewport. Uses
+        // IntersectionObserver so it stays cheap on long pages.
+        const tocLinks = document.querySelectorAll('.toc-aside a[href^="#"]');
+        if (tocLinks.length) {
+          const linkByAnchor = new Map();
+          const headings = [];
+          tocLinks.forEach((a) => {
+            const id = a.getAttribute('href').slice(1);
+            const heading = id ? document.getElementById(id) : null;
+            if (heading) {
+              linkByAnchor.set(id, a);
+              headings.push(heading);
+            }
+          });
+          const setActive = (id) => {
+            tocLinks.forEach((a) => a.classList.remove('active'));
+            const link = id && linkByAnchor.get(id);
+            if (link) link.classList.add('active');
+          };
+          const observer = new IntersectionObserver(
+            (entries) => {
+              const visible = entries
+                .filter((e) => e.isIntersecting)
+                .sort((a, b) => a.target.getBoundingClientRect().top - b.target.getBoundingClientRect().top);
+              if (visible.length) setActive(visible[0].target.id);
+            },
+            { rootMargin: '-15% 0% -75% 0%', threshold: 0 }
+          );
+          headings.forEach((h) => observer.observe(h));
+        }
+      })();
+    </script>
+  </body>
+</html>
