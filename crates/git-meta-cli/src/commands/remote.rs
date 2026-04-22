@@ -349,7 +349,7 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>, init: bo
                 bail!(
                     "could not push the initial metadata commit to {name} ({url}): {e}\n\n\
                      The remote was configured locally. To retry the push:\n  \
-                     git meta push --remote {name}",
+                     git meta push {name}",
                 );
             }
         }
