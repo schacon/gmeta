@@ -414,24 +414,34 @@ body.has-toc .layout {
    Renders as a structured card with a name pill, a type badge, the
    meaning, and either an examples chip row or a format string. */
 .key-card {
+  /* `--key-color` is overridden per type below; defaults to the
+     neutral border so untyped cards still render cleanly. */
+  --key-color: var(--border);
+  position: relative;
   border: 1px solid var(--border);
+  border-top: 3px solid var(--key-color);
   background: color-mix(in srgb, var(--text) 3%, transparent);
-  border-radius: 12px;
-  padding: 18px 20px;
-  margin: 0 0 1.25rem;
+  border-radius: 8px;
+  padding: 0 14px 12px;
+  margin: 0 0 0.85rem;
+  overflow: hidden;
 }
-.key-card + .key-card { margin-top: 1.25rem; }
+.key-card + .key-card { margin-top: 0.85rem; }
+.key-card.is-string { --key-color: #38bdf8; }
+.key-card.is-list   { --key-color: #34d399; }
+.key-card.is-set    { --key-color: #c084fc; }
 .key-card-header {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  margin: 0 -14px 10px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--key-color) 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--key-color) 30%, var(--border));
 }
 .key-card-name {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 700;
 }
 .key-card-name code {
@@ -441,52 +451,43 @@ body.has-toc .layout {
 }
 .key-card-type {
   margin-left: auto;
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 700;
-  color: var(--muted);
+  color: color-mix(in srgb, var(--key-color) 70%, var(--text));
   background: var(--bg);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--key-color) 45%, var(--border));
   border-radius: 999px;
-  padding: 3px 10px;
+  padding: 2px 9px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-.key-card-type-string {
-  color: color-mix(in srgb, var(--accent) 80%, var(--text));
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
-}
-.key-card-type-list,
-.key-card-type-set {
-  color: color-mix(in srgb, var(--link) 80%, var(--text));
-  border-color: color-mix(in srgb, var(--link) 35%, var(--border));
-}
 .key-card-meaning {
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   color: var(--text);
 }
 .key-card-meaning:last-child { margin-bottom: 0; }
-.key-card-section { margin-top: 14px; }
+.key-card-section { margin-top: 10px; }
 .key-card-section:first-of-type { margin-top: 0; }
 .key-card-section p { margin: 0; }
 .key-card-label {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 600;
   color: var(--muted);
-  margin-bottom: 6px;
+  margin-bottom: 5px;
 }
 .key-card-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 .key-card-chip {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 2px 8px;
+  padding: 1px 7px;
   font-size: 0.85rem;
 }
 
@@ -705,14 +706,18 @@ def render_key_card(
     anchor = slugify(name)
     name_html = f"<code>{html.escape(name)}</code>"
 
-    parts: list[str] = [f'<section class="key-card" id="{html.escape(anchor)}">']
-    header: list[str] = [f'<h3 class="key-card-name">{name_html}</h3>']
     type_value = data.get("type")
+    # `is-{type}` on the card root drives the per-type color stripe,
+    # header tint, and pill accent (see `--key-color` in the CSS).
+    type_class = (
+        f" is-{html.escape(type_value)}"
+        if isinstance(type_value, str) and type_value
+        else ""
+    )
+    parts: list[str] = [f'<section class="key-card{type_class}" id="{html.escape(anchor)}">']
+    header: list[str] = [f'<h3 class="key-card-name">{name_html}</h3>']
     if isinstance(type_value, str) and type_value:
-        header.append(
-            f'<span class="key-card-type key-card-type-{html.escape(type_value)}">'
-            f'{html.escape(type_value)}</span>'
-        )
+        header.append(f'<span class="key-card-type">{html.escape(type_value)}</span>')
     parts.append(f'<div class="key-card-header">{"".join(header)}</div>')
 
     meaning = data.get("meaning")
