@@ -65,7 +65,9 @@ PAGE_ORDER = [
     "implementation/cli.md",
     "implementation/output.md",
     "implementation/pruning.md",
+    "implementation/serialize-filters.md",
     "implementation/standard-keys.md",
+    "implementation/remotes.md",
     "implementation/auto-sync.md",
     "implementation/workflow.md",
 ]
@@ -88,9 +90,11 @@ PAGE_GROUPS = {
         "implementation/cli.md",
         "implementation/output.md",
         "implementation/pruning.md",
+        "implementation/serialize-filters.md",
     ],
     "Other Considerations": [
         "implementation/standard-keys.md",
+        "implementation/remotes.md",
         "implementation/auto-sync.md",
         "implementation/workflow.md",
     ]
