@@ -44,6 +44,24 @@
   --shadow-card: 0 1px 0 oklch(0.92 0.005 260 / 1), 0 12px 32px -18px oklch(0.2 0.02 260 / 0.18);
   --shadow-term: 0 1px 0 oklch(0.82 0.005 260 / 0.4), 0 30px 60px -30px oklch(0.2 0.02 260 / 0.35);
 
+  /* Theme-keyed component colors. Declared as variables (rather than
+     hardcoded into individual selectors) so dark mode can be opted into
+     either explicitly via `html[data-theme="dark"]` or implicitly via the
+     OS preference under `html[data-theme="system"]` without duplicating
+     every rule. Light values live here; dark overrides live in the dark
+     and system+prefers-dark blocks below. */
+  --card-h-project: #ece6d6;
+  --card-h-commit:  #dce8f0;
+  --card-h-branch:  #e6dff0;
+  --pill-string-bg: #ecdfc4; --pill-string-fg: #6b5024;
+  --pill-int-bg:    #f0e1a8; --pill-int-fg:    #5d4f1a;
+  --pill-list-bg:   #cfe1ec; --pill-list-fg:   #27556e;
+  --pill-set-bg:    #d4e4d2; --pill-set-fg:    #2f5e36;
+  --pill-bool-bg:   #ddd1ea; --pill-bool-fg:   #553a87;
+  --meta-val-str:   oklch(0.5 0.13 145);
+  --cta-strip-bg:   var(--brand);
+  --org-logo-bg:    #fff;
+
   --fs-base: 16px;
   --wrap: 1180px;
 }
@@ -61,6 +79,46 @@ html[data-theme="dark"] {
   --accent-tint: oklch(0.28 0.06 var(--accent-h));
   --shadow-card: 0 1px 0 oklch(0.30 0.01 40 / 1), 0 12px 32px -18px oklch(0 0 0 / 0.6);
   --shadow-term: 0 1px 0 oklch(0.30 0.01 40 / 0.8), 0 30px 60px -30px oklch(0 0 0 / 0.7);
+
+  --card-h-project: #332c1f;
+  --card-h-commit:  #1a2c39;
+  --card-h-branch:  #2a2438;
+  --pill-string-bg: #4a3d22; --pill-string-fg: #ecdfc4;
+  --pill-int-bg:    #4d4220; --pill-int-fg:    #f0e1a8;
+  --pill-list-bg:   #1f3a4a; --pill-list-fg:   #cfe1ec;
+  --pill-set-bg:    #244327; --pill-set-fg:    #d4e4d2;
+  --pill-bool-bg:   #3a2f4f; --pill-bool-fg:   #ddd1ea;
+  --meta-val-str:   oklch(0.72 0.13 145);
+  --cta-strip-bg:   var(--brand-dark);
+  --org-logo-bg:    #f5efe2;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-theme="system"] {
+    --bg:        #151210;
+    --bg-alt:    #1c1815;
+    --surface:   #221d19;
+    --ink:       oklch(0.96 0.01 50);
+    --ink-2:     oklch(0.80 0.015 50);
+    --ink-3:     oklch(0.62 0.015 50);
+    --line:      oklch(0.30 0.015 40);
+    --line-2:    oklch(0.26 0.015 40);
+    --code-bg:   oklch(0.22 0.015 40);
+    --accent-tint: oklch(0.28 0.06 var(--accent-h));
+    --shadow-card: 0 1px 0 oklch(0.30 0.01 40 / 1), 0 12px 32px -18px oklch(0 0 0 / 0.6);
+    --shadow-term: 0 1px 0 oklch(0.30 0.01 40 / 0.8), 0 30px 60px -30px oklch(0 0 0 / 0.7);
+
+    --card-h-project: #332c1f;
+    --card-h-commit:  #1a2c39;
+    --card-h-branch:  #2a2438;
+    --pill-string-bg: #4a3d22; --pill-string-fg: #ecdfc4;
+    --pill-int-bg:    #4d4220; --pill-int-fg:    #f0e1a8;
+    --pill-list-bg:   #1f3a4a; --pill-list-fg:   #cfe1ec;
+    --pill-set-bg:    #244327; --pill-set-fg:    #d4e4d2;
+    --pill-bool-bg:   #3a2f4f; --pill-bool-fg:   #ddd1ea;
+    --meta-val-str:   oklch(0.72 0.13 145);
+    --cta-strip-bg:   var(--brand-dark);
+    --org-logo-bg:    #f5efe2;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -115,6 +173,44 @@ p  { color: var(--ink-2); margin: 0 0 12px; }
 .nav-links a { transition: color .15s ease; }
 .nav-links a:hover { color: var(--ink); }
 .nav-muted { color: var(--ink-3); }
+
+/* Theme toggle pill: two icon buttons (light / dark) inside a rounded
+   container. Matches the spec docs sidebar for visual consistency. The
+   `active` modifier reflects the *effective* theme, so under `system`
+   one of the two buttons is highlighted depending on the OS preference. */
+.theme-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+}
+.theme-icon-button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-3);
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  transition: color .15s ease, background .15s ease;
+}
+.theme-icon-button:hover {
+  background: var(--bg-alt);
+  color: var(--ink);
+}
+.theme-icon-button.active {
+  background: var(--accent-tint);
+  color: var(--brand-dark);
+}
 
 /* ——— BUTTONS ——— */
 .btn {
@@ -274,37 +370,24 @@ p  { color: var(--ink-2); margin: 0 0 12px; }
 }
 
 /* Card header tint, keyed by target type. Lighter than the type pills so
-   pills inside the card body still pop. */
+   pills inside the card body still pop. Colors come from CSS variables
+   that swap automatically in dark/system+OS-dark themes. */
 .meta-card-header { stroke: none; }
-.meta-card.type-project .meta-card-header { fill: #ece6d6; }
-.meta-card.type-commit  .meta-card-header { fill: #dce8f0; }
-.meta-card.type-branch  .meta-card-header { fill: #e6dff0; }
-html[data-theme="dark"] .meta-card.type-project .meta-card-header { fill: #332c1f; }
-html[data-theme="dark"] .meta-card.type-commit  .meta-card-header { fill: #1a2c39; }
-html[data-theme="dark"] .meta-card.type-branch  .meta-card-header { fill: #2a2438; }
+.meta-card.type-project .meta-card-header { fill: var(--card-h-project); }
+.meta-card.type-commit  .meta-card-header { fill: var(--card-h-commit); }
+.meta-card.type-branch  .meta-card-header { fill: var(--card-h-branch); }
 
 .pill text { font: 600 11px "JetBrains Mono", monospace; letter-spacing: 0.02em; }
-.pill.type-string rect { fill: #ecdfc4; }
-.pill.type-string text { fill: #6b5024; }
-.pill.type-int rect    { fill: #f0e1a8; }
-.pill.type-int text    { fill: #5d4f1a; }
-.pill.type-list rect   { fill: #cfe1ec; }
-.pill.type-list text   { fill: #27556e; }
-.pill.type-set rect    { fill: #d4e4d2; }
-.pill.type-set text    { fill: #2f5e36; }
-.pill.type-bool rect   { fill: #ddd1ea; }
-.pill.type-bool text   { fill: #553a87; }
-
-html[data-theme="dark"] .pill.type-string rect { fill: #4a3d22; }
-html[data-theme="dark"] .pill.type-string text { fill: #ecdfc4; }
-html[data-theme="dark"] .pill.type-int rect    { fill: #4d4220; }
-html[data-theme="dark"] .pill.type-int text    { fill: #f0e1a8; }
-html[data-theme="dark"] .pill.type-list rect   { fill: #1f3a4a; }
-html[data-theme="dark"] .pill.type-list text   { fill: #cfe1ec; }
-html[data-theme="dark"] .pill.type-set rect    { fill: #244327; }
-html[data-theme="dark"] .pill.type-set text    { fill: #d4e4d2; }
-html[data-theme="dark"] .pill.type-bool rect   { fill: #3a2f4f; }
-html[data-theme="dark"] .pill.type-bool text   { fill: #ddd1ea; }
+.pill.type-string rect { fill: var(--pill-string-bg); }
+.pill.type-string text { fill: var(--pill-string-fg); }
+.pill.type-int rect    { fill: var(--pill-int-bg); }
+.pill.type-int text    { fill: var(--pill-int-fg); }
+.pill.type-list rect   { fill: var(--pill-list-bg); }
+.pill.type-list text   { fill: var(--pill-list-fg); }
+.pill.type-set rect    { fill: var(--pill-set-bg); }
+.pill.type-set text    { fill: var(--pill-set-fg); }
+.pill.type-bool rect   { fill: var(--pill-bool-bg); }
+.pill.type-bool text   { fill: var(--pill-bool-fg); }
 
 .meta-key {
   font: 500 13px "JetBrains Mono", monospace;
@@ -314,8 +397,7 @@ html[data-theme="dark"] .pill.type-bool text   { fill: #ddd1ea; }
   font: 400 13px "JetBrains Mono", monospace;
   fill: var(--ink-2);
 }
-.meta-val.str { fill: oklch(0.5 0.13 145); }
-html[data-theme="dark"] .meta-val.str { fill: oklch(0.72 0.13 145); }
+.meta-val.str { fill: var(--meta-val-str); }
 
 /* Legacy hero terminal styles (kept for shared term-chrome usage if needed) */
 .term-chrome {
@@ -786,13 +868,15 @@ html[data-theme="dark"] .meta-val.str { fill: oklch(0.72 0.13 145); }
 .org-logo {
   width: 56px; height: 56px;
   border-radius: 12px;
-  background: #fff;
+  background: var(--org-logo-bg);
   border: 1px solid var(--line);
   display: flex; align-items: center; justify-content: center;
   flex: 0 0 auto;
   overflow: hidden;
 }
 .org-logo img { width: 40px; height: 40px; display: block; }
+/* The "dark" variant pins a cream backdrop so logos that ship as dark
+   ink-on-transparent (e.g. Entire) remain readable on both themes. */
 .org-logo-dark { background: #f5efe2; }
 .org-name { font-weight: 600; color: var(--ink); font-size: 15px; }
 .org-role { font-size: 13px; color: var(--ink-3); font-family: "JetBrains Mono", monospace; margin-top: 2px; }
@@ -834,7 +918,7 @@ details[open] summary::after { content: "−"; }
 /* ——— CTA STRIP ——— */
 .cta-strip {
   padding: 72px 0;
-  background: var(--brand);
+  background: var(--cta-strip-bg);
   color: #fff;
   position: relative;
   overflow: hidden;
@@ -845,7 +929,6 @@ details[open] summary::after { content: "−"; }
   background-image: repeating-linear-gradient(135deg, transparent 0 22px, color-mix(in oklab, #fff 8%, transparent) 22px 24px);
   pointer-events: none;
 }
-html[data-theme="dark"] .cta-strip { background: var(--brand-dark); color: #fff; }
 .cta-strip-inner {
   display: flex; align-items: center; justify-content: space-between; gap: 40px;
   position: relative;
