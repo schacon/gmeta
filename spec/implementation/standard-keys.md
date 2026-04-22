@@ -21,10 +21,12 @@ Keys should use a stable namespace-like structure with `:` separators.
 Recommended conventions:
 
 - use short, lowercase segments
+- kebab/dash case preferred (`branch-id` rather than `branchId` or `branch_id`)
 - use a broad domain first, then more specific segments
 - prefer singular nouns for scalar values
 - reserve plural concepts for collection-typed keys
 - keep the same key meaning across all target types when possible
+- tool specific fields should top-level namespace (ie `gitbutler:` or `google:`)
 
 Examples:
 
