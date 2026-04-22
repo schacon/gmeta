@@ -86,24 +86,6 @@ meaning: identities that approved the change (a subset of reviewers with an expl
 format: each entry is `Name <email>` or another stable identifier for the signer
 ```
 
-```key review:url
-type: string
-meaning: canonical pull-request, merge-request, or change-list URL or identifier the commit was merged through
-```
-
-```key issue:id
-type: set
-meaning: external issue or ticket references the commit addresses
-examples:
-  - GH-1234
-  - JIRA-5678
-```
-
-```key issue:url
-type: set
-meaning: canonical URLs for issues this change addresses
-```
-
 ```key conventional:type
 type: set
 meaning: conventional commit style high-level classification of the change
