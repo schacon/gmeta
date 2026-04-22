@@ -572,8 +572,11 @@ def markdown_to_html(
     out: list[str] = []
     in_code = False
     code_lines: list[str] = []
-    ul_items: list[str] = []
-    ol_items: list[str] = []
+    # List items carry the source indent (in raw whitespace columns) so
+    # `render_list` below can fold sibling/child rows into nested
+    # `<ul>`/`<ol>` structures rather than emitting one flat list.
+    ul_items: list[tuple[int, str]] = []
+    ol_items: list[tuple[int, str]] = []
     paragraph: list[str] = []
     title = "Untitled"
     has_callout = False
@@ -585,13 +588,55 @@ def markdown_to_html(
             out.append(f"<p>{inline_format(' '.join(paragraph).strip(), page_map, current_page)}</p>")
             paragraph = []
 
+    def render_list(items: list[tuple[int, str]], tag: str) -> str:
+        """Render a flat (indent, content) list as nested ``<ul>``/``<ol>``.
+
+        Items with an indent strictly greater than the previous one are
+        wrapped in a child list that lives inside the previous ``<li>``,
+        mirroring the way Markdown indents continuation bullets. Returns
+        a single concatenated HTML string with no leading/trailing
+        whitespace.
+        """
+        parts: list[str] = []
+        open_indents: list[int] = []
+        pending_li_close = False
+        for indent, content in items:
+            while open_indents and open_indents[-1] > indent:
+                if pending_li_close:
+                    parts.append("</li>")
+                    pending_li_close = False
+                parts.append(f"</{tag}>")
+                open_indents.pop()
+                # The parent <li> at the now-current indent is still
+                # open and will need closing before the next sibling.
+                pending_li_close = True
+
+            if not open_indents or open_indents[-1] < indent:
+                parts.append(f"<{tag}>")
+                open_indents.append(indent)
+                pending_li_close = False
+            elif pending_li_close:
+                parts.append("</li>")
+
+            parts.append(f"<li>{content}")
+            pending_li_close = True
+
+        while open_indents:
+            if pending_li_close:
+                parts.append("</li>")
+                pending_li_close = False
+            parts.append(f"</{tag}>")
+            open_indents.pop()
+            pending_li_close = bool(open_indents)
+        return "".join(parts)
+
     def flush_lists() -> None:
         nonlocal ul_items, ol_items
         if ul_items:
-            out.append("<ul>" + "".join(ul_items) + "</ul>")
+            out.append(render_list(ul_items, "ul"))
             ul_items = []
         if ol_items:
-            out.append("<ol>" + "".join(ol_items) + "</ol>")
+            out.append(render_list(ol_items, "ol"))
             ol_items = []
 
     i = 0
@@ -697,19 +742,23 @@ def markdown_to_html(
                 out.append(f"<blockquote><p>{inline_format(body, page_map, current_page)}</p></blockquote>")
             continue
 
-        if re.match(r"^[-*]\s+", stripped):
+        m_ul = re.match(r"^(\s*)[-*]\s+(.*)$", line.rstrip())
+        if m_ul:
             flush_paragraph()
             if ol_items:
                 flush_lists()
-            ul_items.append(f"<li>{inline_format(re.sub(r'^[-*]\s+', '', stripped), page_map, current_page)}</li>")
+            indent = len(m_ul.group(1).expandtabs(4))
+            ul_items.append((indent, inline_format(m_ul.group(2), page_map, current_page)))
             i += 1
             continue
 
-        if re.match(r"^\d+\.\s+", stripped):
+        m_ol = re.match(r"^(\s*)\d+\.\s+(.*)$", line.rstrip())
+        if m_ol:
             flush_paragraph()
             if ul_items:
                 flush_lists()
-            ol_items.append(f"<li>{inline_format(re.sub(r'^\d+\.\s+', '', stripped), page_map, current_page)}</li>")
+            indent = len(m_ol.group(1).expandtabs(4))
+            ol_items.append((indent, inline_format(m_ol.group(2), page_map, current_page)))
             i += 1
             continue
 

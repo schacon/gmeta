@@ -118,7 +118,7 @@ git meta push [&lt;remote&gt;] --readme</code></pre>
 <p>confirmation and behaves as if <code>--init</code> had been passed when they accept</p>
 <p>hint to re-run with <code>--init</code></p>
 <p>hint to re-run with <code>--namespace=&lt;that-namespace&gt;</code></p>
-<ul><li>writes git config entries for the remote: <code>remote.&lt;name&gt;.url</code>,</li><li>inspects the remote with <code>git ls-remote</code> to check that</li><li>if no metadata refs are present on the remote:</li><li>with <code>--init</code>, creates (or reuses) <code>refs/&lt;ns&gt;/local/main</code> with a</li><li>on an interactive terminal without <code>--init</code>, prompts the user for</li><li>in non-interactive contexts (CI, pipes), bails with an actionable</li><li>if metadata refs are found under a different namespace, bails with a</li></ul>
+<ul><li>writes git config entries for the remote: <code>remote.&lt;name&gt;.url</code>,</li><li>inspects the remote with <code>git ls-remote</code> to check that</li><li>if no metadata refs are present on the remote:<ul><li>with <code>--init</code>, creates (or reuses) <code>refs/&lt;ns&gt;/local/main</code> with a</li><li>on an interactive terminal without <code>--init</code>, prompts the user for</li><li>in non-interactive contexts (CI, pipes), bails with an actionable</li></ul></li><li>if metadata refs are found under a different namespace, bails with a</li></ul>
 <p>Defaults:</p>
 <p><code>meta</code></p>
 <ul><li><code>--name</code>: <code>meta</code></li><li><code>--namespace</code>: from the <code>meta.namespace</code> git config, falling back to</li></ul>

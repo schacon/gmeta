@@ -50,17 +50,16 @@
         <article class="doc-content">
           <p>This document suggests a small set of commonly useful metadata keys.</p>
 <p>These are not mandatory exchange-format rules. They are implementation-level recommendations intended to improve interoperability between tools that use git-meta.</p>
-<p>The current set focuses on <strong>agent metadata</strong> — keys for recording which agent or model produced a piece of work and what it did. Other domains (ownership, review, automation, provenance) may be added in future revisions.</p>
 <h2 id="agent-metadata">Agent metadata</h2>
 <p>Agent-generated metadata is likely to be common, so a stable namespace is useful.</p>
 <p>These keys can be attached to <code>commit</code>, <code>change-id</code> or <code>branch</code> targets.</p>
 <p>Implementations should avoid storing secrets in agent metadata keys.</p>
 <h3 id="agentprovider"><code>agent:provider</code></h3>
-<ul><li>suggested type: <code>string</code></li><li>intended meaning: service or runtime provider that produced the content</li><li>examples:</li><li><code>openai</code></li><li><code>anthropic</code></li><li><code>local</code></li></ul>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: service or runtime provider that produced the content</li><li>examples:<ul><li><code>openai</code></li><li><code>anthropic</code></li><li><code>local</code></li></ul></li></ul>
 <h3 id="agentmodel"><code>agent:model</code></h3>
-<ul><li>suggested type: <code>string</code></li><li>intended meaning: model identifier used for generation or analysis</li><li>examples:</li><li><code>gpt-5</code></li><li><code>claude-sonnet-4</code></li><li><code>llama-3.3-70b</code></li></ul>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: model identifier used for generation or analysis</li><li>examples:<ul><li><code>gpt-5</code></li><li><code>claude-sonnet-4</code></li><li><code>llama-3.3-70b</code></li></ul></li></ul>
 <h3 id="agentsession-id"><code>agent:session-id</code></h3>
-<ul><li>suggested type: <code>string</code></li><li>intended meaning: provider or tool session identifier</li><li>suggested format:</li><li>opaque stable string from the originating system</li></ul>
+<ul><li>suggested type: <code>string</code></li><li>intended meaning: provider or tool session identifier</li><li>suggested format:<ul><li>opaque stable string from the originating system</li></ul></li></ul>
 <h3 id="agentprompt"><code>agent:prompt</code></h3>
 <ul><li>suggested type: <code>string</code></li><li>intended meaning: canonical prompt or final instruction associated with the target</li></ul>
 <h3 id="agentsummary"><code>agent:summary</code></h3>

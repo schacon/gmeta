@@ -4,8 +4,6 @@ This document suggests a small set of commonly useful metadata keys.
 
 These are not mandatory exchange-format rules. They are implementation-level recommendations intended to improve interoperability between tools that use git-meta.
 
-The current set focuses on **agent metadata** — keys for recording which agent or model produced a piece of work and what it did. Other domains (ownership, review, automation, provenance) may be added in future revisions.
-
 ## Agent metadata
 
 Agent-generated metadata is likely to be common, so a stable namespace is useful.
