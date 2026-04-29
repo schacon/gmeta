@@ -39,7 +39,8 @@ pub fn run(path: &str, rev: Option<&str>, porcelain: bool, json: bool) -> Result
     } else if json {
         println!("{}", serde_json::to_string_pretty(&json_groups(&groups))?);
     } else {
-        print_text(&groups);
+        let mut out = Pager::start(Some(ctx.session.repo()));
+        print_text(&mut out, &groups)?;
         if groups.iter().all(|group| group.branch_id.is_none()) {
             eprintln!("No PR metadata found; run `git meta import gh` to annotate commits.");
         }
