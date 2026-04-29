@@ -1,13 +1,16 @@
 use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
+use std::process::Command;
 
 use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::context::CommandContext;
 use git_meta_lib::db::Store;
-use git_meta_lib::types::{TargetType, ValueType, GIT_REF_THRESHOLD};
+use git_meta_lib::types::{Target, TargetType, ValueType, GIT_REF_THRESHOLD};
+use git_meta_lib::MetaValue;
 
 /// Supported import source formats.
 #[derive(Debug, Clone, PartialEq)]
@@ -30,7 +33,113 @@ impl ImportFormat {
 }
 
 pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<()> {
-    let since_epoch = match since {
+    let since_epoch = parse_since_epoch(since)?;
+
+    match format {
+        ImportFormat::Entire => run_entire(dry_run, since_epoch),
+        ImportFormat::GitAi => run_git_ai(dry_run, since_epoch),
+    }
+}
+
+/// Import merged GitHub pull request metadata using the `gh` CLI.
+///
+/// # Parameters
+///
+/// - `dry_run`: print planned metadata writes without mutating the store.
+/// - `limit`: maximum number of merged pull requests to fetch.
+/// - `since`: optional lower bound for merged PRs, formatted as `YYYY-MM-DD`.
+/// - `repo`: optional GitHub repository in `OWNER/NAME` form.
+/// - `include_comments`: whether to import PR comments and review bodies.
+/// - `no_tags`: reserved for release tag mapping; currently skips that phase.
+///
+/// # Errors
+///
+/// Returns an error if `gh` is missing or unauthenticated, GitHub output cannot
+/// be parsed, or the metadata store fails to write an imported value.
+pub fn run_gh(
+    dry_run: bool,
+    limit: Option<usize>,
+    since: Option<&str>,
+    repo: Option<&str>,
+    include_comments: bool,
+    no_tags: bool,
+) -> Result<()> {
+    let since_epoch = parse_since_epoch(since)?;
+    ensure_gh_auth()?;
+
+    let ctx = CommandContext::open(None)?;
+    let repo_name = match repo {
+        Some(repo) => repo.to_string(),
+        None => resolve_gh_repo()?,
+    };
+    let prs = fetch_merged_prs(&repo_name, limit.unwrap_or(100), include_comments)?;
+    let imported = imported_pr_numbers(ctx.session.store())?;
+
+    let mut summary = GhImportSummary::default();
+    for pr in prs {
+        summary.fetched += 1;
+        if let Some(cutoff) = since_epoch {
+            if pr.merged_timestamp_seconds().unwrap_or_default() < cutoff {
+                summary.skipped += 1;
+                continue;
+            }
+        }
+        if imported.contains(&pr.number.to_string()) {
+            summary.skipped += 1;
+            if since_epoch.is_none() && limit.is_none() {
+                break;
+            }
+            continue;
+        }
+
+        let pr = fetch_pr_detail(&repo_name, pr.number, include_comments)?;
+        let imported_pr = GitHubPullRequestImport::from_pr(pr);
+        summary.comments += imported_pr.comments.len() as u64;
+        eprintln!(
+            "importing PR #{}: {}",
+            imported_pr.number, imported_pr.title
+        );
+        summary.writes += apply_gh_import(
+            &ctx,
+            &repo_name,
+            &imported_pr,
+            dry_run,
+            &mut summary.missing_commits,
+        )?;
+        summary.imported += 1;
+    }
+
+    if !no_tags {
+        eprintln!("release tag mapping is not implemented yet; skipping tags");
+    }
+
+    if dry_run {
+        eprintln!(
+            "dry-run: would import {} PRs ({} fetched, {} skipped, {} comments, {} missing commits, {} writes)",
+            summary.imported,
+            summary.fetched,
+            summary.skipped,
+            summary.comments,
+            summary.missing_commits,
+            summary.writes,
+        );
+    } else {
+        eprintln!(
+            "imported {} PRs ({} fetched, {} skipped, {} comments, {} missing commits, {} writes)",
+            summary.imported,
+            summary.fetched,
+            summary.skipped,
+            summary.comments,
+            summary.missing_commits,
+            summary.writes,
+        );
+    }
+
+    Ok(())
+}
+
+fn parse_since_epoch(since: Option<&str>) -> Result<Option<i64>> {
+    match since {
         Some(date_str) => {
             let date_fmt =
                 time::format_description::parse("[year]-[month]-[day]").unwrap_or_default();
@@ -38,15 +147,772 @@ pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<(
                 format!("invalid --since date '{date_str}', expected YYYY-MM-DD")
             })?;
             let odt = time::OffsetDateTime::new_utc(date, time::Time::MIDNIGHT);
-            Some(odt.unix_timestamp())
+            Ok(Some(odt.unix_timestamp()))
         }
-        None => None,
-    };
-
-    match format {
-        ImportFormat::Entire => run_entire(dry_run, since_epoch),
-        ImportFormat::GitAi => run_git_ai(dry_run, since_epoch),
+        None => Ok(None),
     }
+}
+
+#[derive(Default)]
+struct GhImportSummary {
+    fetched: u64,
+    imported: u64,
+    skipped: u64,
+    comments: u64,
+    missing_commits: u64,
+    writes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhRepoView {
+    name: String,
+    owner: GhOwner,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum GhOwner {
+    Login { login: String },
+    Name(String),
+}
+
+impl GhOwner {
+    fn login(&self) -> &str {
+        match self {
+            GhOwner::Login { login } => login,
+            GhOwner::Name(name) => name,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhPullRequest {
+    number: u64,
+    title: String,
+    #[serde(default)]
+    body: Option<String>,
+    url: String,
+    #[serde(default)]
+    head_ref_name: Option<String>,
+    #[serde(default)]
+    base_ref_name: Option<String>,
+    #[serde(default)]
+    merged_at: Option<String>,
+    #[serde(default)]
+    merge_commit: Option<GhCommit>,
+    #[serde(default)]
+    commits: Vec<GhCommit>,
+    #[serde(default)]
+    comments: Vec<GhComment>,
+    #[serde(default)]
+    reviews: Vec<GhReview>,
+    #[serde(default, alias = "closingIssuesReferences")]
+    closing_issues: Vec<GhIssue>,
+}
+
+impl GhPullRequest {
+    fn merged_timestamp_seconds(&self) -> Option<i64> {
+        self.merged_at
+            .as_deref()
+            .and_then(|value| parse_rfc3339_seconds(value).ok())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhCommit {
+    oid: String,
+    #[serde(default, alias = "messageHeadline")]
+    message_headline: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhComment {
+    #[serde(default)]
+    author: Option<GhAuthor>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhReview {
+    #[serde(default)]
+    author: Option<GhAuthor>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    submitted_at: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhIssue {
+    #[serde(default)]
+    number: Option<u64>,
+    #[serde(default)]
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GhAuthor {
+    #[serde(default)]
+    login: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+}
+
+impl GhAuthor {
+    fn identity(&self) -> Option<String> {
+        self.login
+            .as_ref()
+            .or(self.name.as_ref())
+            .filter(|value| !value.trim().is_empty())
+            .cloned()
+    }
+}
+
+#[derive(Debug)]
+struct GitHubPullRequestImport {
+    number: u64,
+    branch_id: String,
+    title: String,
+    description: String,
+    url: String,
+    head_ref: String,
+    base_ref: Option<String>,
+    merged_timestamp_ms: i64,
+    issues: BTreeSet<String>,
+    issue_urls: BTreeSet<String>,
+    commits: Vec<GitHubCommitImport>,
+    comments: Vec<GitHubCommentImport>,
+    reviewed_by: BTreeSet<String>,
+    approved_by: BTreeSet<String>,
+}
+
+impl GitHubPullRequestImport {
+    fn from_pr(pr: GhPullRequest) -> Self {
+        let head_ref = pr.head_ref_name.unwrap_or_else(|| "unknown".to_string());
+        let branch_id = branch_id(&head_ref, pr.number);
+        let mut issues = pr
+            .closing_issues
+            .iter()
+            .filter_map(|issue| issue.number.map(|number| format!("#{number}")))
+            .collect::<BTreeSet<_>>();
+        let issue_urls = pr
+            .closing_issues
+            .iter()
+            .filter_map(|issue| issue.url.clone())
+            .collect::<BTreeSet<_>>();
+        if let Some(body) = &pr.body {
+            issues.extend(extract_closing_issue_ids(body));
+        }
+
+        let mut commits = pr
+            .commits
+            .into_iter()
+            .map(GitHubCommitImport::from)
+            .collect::<Vec<_>>();
+        if let Some(merge_commit) = pr.merge_commit {
+            let merge_import = GitHubCommitImport::from(merge_commit);
+            if !commits.iter().any(|commit| commit.oid == merge_import.oid) {
+                commits.push(merge_import);
+            }
+        }
+
+        let mut comments = pr
+            .comments
+            .into_iter()
+            .filter_map(GitHubCommentImport::from_comment)
+            .collect::<Vec<_>>();
+        let mut reviewed_by = BTreeSet::new();
+        let mut approved_by = BTreeSet::new();
+        for review in pr.reviews {
+            if let Some(author) = review.author.as_ref().and_then(GhAuthor::identity) {
+                reviewed_by.insert(author.clone());
+                if review
+                    .state
+                    .as_deref()
+                    .is_some_and(|state| state.eq_ignore_ascii_case("APPROVED"))
+                {
+                    approved_by.insert(author);
+                }
+            }
+            if let Some(comment) = GitHubCommentImport::from_review(review) {
+                comments.push(comment);
+            }
+        }
+
+        Self {
+            number: pr.number,
+            branch_id,
+            title: pr.title,
+            description: pr.body.unwrap_or_default(),
+            url: pr.url,
+            head_ref,
+            base_ref: pr.base_ref_name,
+            merged_timestamp_ms: pr
+                .merged_at
+                .as_deref()
+                .and_then(|value| parse_rfc3339_seconds(value).ok())
+                .unwrap_or_default()
+                * 1000,
+            issues,
+            issue_urls,
+            commits,
+            comments,
+            reviewed_by,
+            approved_by,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct GitHubCommitImport {
+    oid: String,
+    subject: String,
+}
+
+impl From<GhCommit> for GitHubCommitImport {
+    fn from(commit: GhCommit) -> Self {
+        Self {
+            oid: commit.oid,
+            subject: commit.message_headline.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct GitHubCommentImport {
+    kind: &'static str,
+    author: Option<String>,
+    body: String,
+    url: Option<String>,
+    created_at: Option<String>,
+}
+
+impl GitHubCommentImport {
+    fn from_comment(comment: GhComment) -> Option<Self> {
+        let body = comment.body.unwrap_or_default();
+        if body.trim().is_empty() {
+            return None;
+        }
+        Some(Self {
+            kind: "comment",
+            author: comment.author.as_ref().and_then(GhAuthor::identity),
+            body,
+            url: comment.url,
+            created_at: comment.created_at,
+        })
+    }
+
+    fn from_review(review: GhReview) -> Option<Self> {
+        let body = review.body.unwrap_or_default();
+        if body.trim().is_empty() {
+            return None;
+        }
+        Some(Self {
+            kind: "review",
+            author: review.author.as_ref().and_then(GhAuthor::identity),
+            body,
+            url: review.url,
+            created_at: review.submitted_at,
+        })
+    }
+}
+
+fn ensure_gh_auth() -> Result<()> {
+    let output = Command::new("gh")
+        .args(["auth", "status"])
+        .output()
+        .context("git meta import gh requires the GitHub CLI ('gh')")?;
+    if !output.status.success() {
+        bail!("GitHub CLI is not authenticated; run `gh auth login` before `git meta import gh`");
+    }
+    Ok(())
+}
+
+fn resolve_gh_repo() -> Result<String> {
+    let output = Command::new("gh")
+        .args(["repo", "view", "--json", "owner,name"])
+        .output()
+        .context("failed to run `gh repo view`")?;
+    if !output.status.success() {
+        bail!("could not infer GitHub repository; pass --repo OWNER/NAME");
+    }
+    let view: GhRepoView =
+        serde_json::from_slice(&output.stdout).context("parsing `gh repo view` JSON")?;
+    Ok(format!("{}/{}", view.owner.login(), view.name))
+}
+
+fn fetch_merged_prs(
+    repo: &str,
+    limit: usize,
+    _include_comments: bool,
+) -> Result<Vec<GhPullRequest>> {
+    let fields = [
+        "number",
+        "title",
+        "body",
+        "url",
+        "headRefName",
+        "baseRefName",
+        "mergedAt",
+        "mergeCommit",
+    ];
+
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--state",
+            "merged",
+            "--limit",
+            &limit.to_string(),
+            "--repo",
+            repo,
+            "--json",
+            &fields.join(","),
+        ])
+        .output()
+        .context("failed to run `gh pr list`")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("failed to fetch merged GitHub PRs: {}", stderr.trim());
+    }
+
+    serde_json::from_slice(&output.stdout).context("parsing `gh pr list` JSON")
+}
+
+fn fetch_pr_detail(repo: &str, number: u64, include_comments: bool) -> Result<GhPullRequest> {
+    let mut fields = vec![
+        "number",
+        "title",
+        "body",
+        "url",
+        "headRefName",
+        "baseRefName",
+        "mergedAt",
+        "mergeCommit",
+        "commits",
+        "reviews",
+    ];
+    if include_comments {
+        fields.push("comments");
+    }
+
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &number.to_string(),
+            "--repo",
+            repo,
+            "--json",
+            &fields.join(","),
+        ])
+        .output()
+        .with_context(|| format!("failed to run `gh pr view {number}`"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("failed to fetch GitHub PR #{number}: {}", stderr.trim());
+    }
+
+    serde_json::from_slice(&output.stdout).with_context(|| format!("parsing PR #{number} JSON"))
+}
+
+fn imported_pr_numbers(db: &Store) -> Result<HashSet<String>> {
+    let target = Target::project();
+    match db.get_value(&target, "github:imported-pr")? {
+        Some(MetaValue::Set(values)) => Ok(values.into_iter().collect()),
+        _ => Ok(HashSet::new()),
+    }
+}
+
+fn apply_gh_import(
+    ctx: &CommandContext,
+    repo_name: &str,
+    pr: &GitHubPullRequestImport,
+    dry_run: bool,
+    missing_commits: &mut u64,
+) -> Result<u64> {
+    let mut writes = 0u64;
+    let db = ctx.session.store();
+    let repo = ctx.session.repo();
+    let email = ctx.session.email();
+    let branch_target = Target::branch(&pr.branch_id);
+    let project_target = Target::project();
+    let mut ts = pr.merged_timestamp_ms;
+
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &branch_target,
+        "title",
+        &pr.title,
+        email,
+        ts,
+    )?;
+    ts += 1;
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &branch_target,
+        "description",
+        &pr.description,
+        email,
+        ts,
+    )?;
+    ts += 1;
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &branch_target,
+        "review:number",
+        &pr.number.to_string(),
+        email,
+        ts,
+    )?;
+    ts += 1;
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &branch_target,
+        "review:url",
+        &pr.url,
+        email,
+        ts,
+    )?;
+    ts += 1;
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &branch_target,
+        "github:head-ref",
+        &pr.head_ref,
+        email,
+        ts,
+    )?;
+    ts += 1;
+    if let Some(base_ref) = &pr.base_ref {
+        writes += set_import_string(
+            db,
+            repo,
+            dry_run,
+            &branch_target,
+            "github:base-ref",
+            base_ref,
+            email,
+            ts,
+        )?;
+        ts += 1;
+    }
+
+    for issue in &pr.issues {
+        writes += set_import_member(db, dry_run, &branch_target, "issue:id", issue, email, ts)?;
+        ts += 1;
+    }
+    for issue_url in &pr.issue_urls {
+        writes += set_import_member(
+            db,
+            dry_run,
+            &branch_target,
+            "issue:url",
+            issue_url,
+            email,
+            ts,
+        )?;
+        ts += 1;
+    }
+    for reviewer in &pr.reviewed_by {
+        writes += set_import_member(
+            db,
+            dry_run,
+            &branch_target,
+            "review:reviewed",
+            reviewer,
+            email,
+            ts,
+        )?;
+        ts += 1;
+    }
+    for approver in &pr.approved_by {
+        writes += set_import_member(
+            db,
+            dry_run,
+            &branch_target,
+            "review:approved",
+            approver,
+            email,
+            ts,
+        )?;
+        ts += 1;
+    }
+    for comment in &pr.comments {
+        let value = serde_json::to_string(comment)?;
+        writes += push_import_list(
+            db,
+            repo,
+            dry_run,
+            &branch_target,
+            "review:comment",
+            &value,
+            email,
+            ts,
+        )?;
+        ts += 1;
+    }
+
+    for commit in &pr.commits {
+        if !commit_exists(repo, &commit.oid) {
+            *missing_commits += 1;
+            continue;
+        }
+        let commit_target = Target::from_parts(TargetType::Commit, Some(commit.oid.clone()));
+        writes += set_import_string(
+            db,
+            repo,
+            dry_run,
+            &commit_target,
+            "branch-id",
+            &pr.branch_id,
+            email,
+            ts,
+        )?;
+        ts += 1;
+        if let Some(conventional) = ConventionalType::parse(&commit.subject) {
+            writes += set_import_member(
+                db,
+                dry_run,
+                &commit_target,
+                "conventional:type",
+                &conventional.kind,
+                email,
+                ts,
+            )?;
+            ts += 1;
+            if conventional.breaking {
+                writes += set_import_member(
+                    db,
+                    dry_run,
+                    &commit_target,
+                    "conventional:type",
+                    "breaking",
+                    email,
+                    ts,
+                )?;
+                ts += 1;
+            }
+        }
+    }
+
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &project_target,
+        "github:repo",
+        repo_name,
+        email,
+        ts,
+    )?;
+    ts += 1;
+    writes += set_import_string(
+        db,
+        repo,
+        dry_run,
+        &project_target,
+        "github:last-imported-merged-at",
+        &pr.merged_timestamp_ms.to_string(),
+        email,
+        ts,
+    )?;
+    ts += 1;
+    writes += set_import_member(
+        db,
+        dry_run,
+        &project_target,
+        "github:imported-pr",
+        &pr.number.to_string(),
+        email,
+        ts,
+    )?;
+
+    Ok(writes)
+}
+
+fn set_import_string(
+    db: &Store,
+    repo: &gix::Repository,
+    dry_run: bool,
+    target: &Target,
+    key: &str,
+    value: &str,
+    email: &str,
+    timestamp: i64,
+) -> Result<u64> {
+    let encoded = json_string(value);
+    let use_git_ref = encoded.len() > GIT_REF_THRESHOLD;
+    if dry_run {
+        eprintln!(
+            "    [dry-run] {} {} = {}{}",
+            target,
+            key,
+            truncate(&encoded, 80),
+            if use_git_ref { " [git-ref]" } else { "" },
+        );
+        return Ok(1);
+    }
+    if use_git_ref {
+        let blob_oid: gix::ObjectId = repo.write_blob(encoded.as_bytes())?.into();
+        db.set_with_git_ref(
+            None,
+            target,
+            key,
+            &blob_oid.to_string(),
+            &ValueType::String,
+            email,
+            timestamp,
+            true,
+        )?;
+    } else {
+        db.set(target, key, &encoded, &ValueType::String, email, timestamp)?;
+    }
+    Ok(1)
+}
+
+fn set_import_member(
+    db: &Store,
+    dry_run: bool,
+    target: &Target,
+    key: &str,
+    value: &str,
+    email: &str,
+    timestamp: i64,
+) -> Result<u64> {
+    if dry_run {
+        eprintln!("    [dry-run] {target} {key} += {value}");
+        return Ok(1);
+    }
+    db.set_add(target, key, value, email, timestamp)?;
+    Ok(1)
+}
+
+fn push_import_list(
+    db: &Store,
+    repo: &gix::Repository,
+    dry_run: bool,
+    target: &Target,
+    key: &str,
+    value: &str,
+    email: &str,
+    timestamp: i64,
+) -> Result<u64> {
+    if dry_run {
+        eprintln!("    [dry-run] {target} {key} << {}", truncate(value, 80));
+        return Ok(1);
+    }
+    db.list_push_with_repo(Some(repo), target, key, value, email, timestamp)?;
+    Ok(1)
+}
+
+fn commit_exists(repo: &gix::Repository, oid: &str) -> bool {
+    let Ok(object_id) = gix::ObjectId::from_hex(oid.as_bytes()) else {
+        return false;
+    };
+    object_id.attach(repo).object().is_ok()
+}
+
+fn branch_id(head_ref: &str, number: u64) -> String {
+    let sanitized = head_ref
+        .chars()
+        .map(|c| match c {
+            '/' | ':' | '\0' => '-',
+            other => other,
+        })
+        .collect::<String>();
+    format!("{sanitized}#{number}")
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ConventionalType {
+    kind: String,
+    breaking: bool,
+}
+
+impl ConventionalType {
+    fn parse(subject: &str) -> Option<Self> {
+        let (prefix, _) = subject.split_once(':')?;
+        let mut prefix = prefix.trim();
+        if prefix.is_empty() || prefix.contains(' ') {
+            return None;
+        }
+
+        let breaking = prefix.ends_with('!');
+        if breaking {
+            prefix = &prefix[..prefix.len().saturating_sub(1)];
+        }
+        let kind = prefix
+            .split_once('(')
+            .map_or(prefix, |(kind, _scope)| kind)
+            .trim();
+        if kind.is_empty()
+            || !kind
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return None;
+        }
+
+        Some(Self {
+            kind: kind.to_string(),
+            breaking,
+        })
+    }
+}
+
+fn extract_closing_issue_ids(body: &str) -> BTreeSet<String> {
+    let closing_words = [
+        "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved",
+    ];
+    let tokens = body.split_whitespace().collect::<Vec<_>>();
+    let mut issues = BTreeSet::new();
+    for pair in tokens.windows(2) {
+        let keyword = pair[0]
+            .trim_matches(|c: char| !c.is_ascii_alphabetic())
+            .to_ascii_lowercase();
+        if !closing_words.contains(&keyword.as_str()) {
+            continue;
+        }
+        let issue = pair[1].trim_matches(|c: char| c == '.' || c == ',' || c == ')' || c == '(');
+        if issue.starts_with('#') && issue[1..].chars().all(|c| c.is_ascii_digit()) {
+            issues.insert(issue.to_string());
+        }
+    }
+    issues
+}
+
+fn parse_rfc3339_seconds(value: &str) -> Result<i64> {
+    let parsed = time::OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        .with_context(|| format!("invalid RFC3339 timestamp: {value}"))?;
+    Ok(parsed.unix_timestamp())
 }
 
 fn run_entire(dry_run: bool, since_epoch: Option<i64>) -> Result<()> {
