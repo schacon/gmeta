@@ -11,7 +11,7 @@ mod bench;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands, RemoteAction};
+use cli::{Cli, Commands, ImportAction, RemoteAction};
 
 /// Returns `true` when the user invoked `git meta` in a way that should
 /// trigger our curated top-level help instead of clap's auto-generated
@@ -126,14 +126,23 @@ fn main() -> Result<()> {
             verbose,
         } => commands::materialize::run(remote.as_deref(), dry_run, verbose),
 
-        Commands::Import {
-            format,
-            dry_run,
-            since,
-        } => {
-            let fmt = commands::import::ImportFormat::from_str(&format)?;
-            commands::import::run(fmt, dry_run, since.as_deref())
-        }
+        Commands::Import(args) => match args.action {
+            Some(ImportAction::Gh(gh_args)) => commands::import::run_gh(
+                gh_args.dry_run,
+                gh_args.limit,
+                gh_args.since.as_deref(),
+                gh_args.repo.as_deref(),
+                gh_args.include_comments,
+                gh_args.no_tags,
+            ),
+            None => {
+                let format = args.format.ok_or_else(|| {
+                    anyhow::anyhow!("missing import source; try `git meta import gh`")
+                })?;
+                let fmt = commands::import::ImportFormat::from_str(&format)?;
+                commands::import::run(fmt, args.dry_run, args.since.as_deref())
+            }
+        },
 
         Commands::Show { commit } => commands::show::run(&commit),
 
@@ -151,6 +160,13 @@ fn main() -> Result<()> {
             count,
             metadata_only,
         } => commands::log::run(start_ref.as_deref(), count, metadata_only),
+
+        Commands::Blame {
+            json,
+            porcelain,
+            rev,
+            path,
+        } => commands::blame::run(&path, rev.as_deref(), porcelain, json),
 
         #[cfg(feature = "bench")]
         Commands::Bench => bench::db::run(),

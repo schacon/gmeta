@@ -78,5 +78,4 @@ filename Cargo.toml
         resolver = "2"
 ```
 
-We want to make a blame TUI
-Look up the commits referenced
+We want to make a blame TUI that pulls in this information, pulls PR data connected to the change-ids that are attached to the commits referenced and provides an alternative blame UX that shows the PR that was introduced per block of lines rather than the commit.

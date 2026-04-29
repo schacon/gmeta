@@ -23,6 +23,7 @@ const VISIBLE_COMMANDS: &[&str] = &[
     "show",
     "inspect",
     "log",
+    "blame",
     "stats",
     "push",
     "pull",

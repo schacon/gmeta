@@ -11,6 +11,7 @@
 mod harness;
 
 mod help;
+mod import_gh;
 mod list;
 mod log;
 mod materialize;

@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 
 /// Top-level command-line interface for the `git-meta` binary.
 //
@@ -225,18 +225,25 @@ pub enum Commands {
 
     /// Import metadata from another format
     #[command(display_order = 32, hide = true)]
-    Import {
-        /// Source format: "entire" or "git-ai"
-        #[arg(long)]
-        format: String,
+    Import(ImportArgs),
 
-        /// Show what would be imported without writing
-        #[arg(long = "dry-run")]
-        dry_run: bool,
-
-        /// Only import metadata for commits on or after this date (YYYY-MM-DD)
+    /// Show file blame grouped by pull request metadata
+    #[command(display_order = 24)]
+    Blame {
+        /// Output compact JSON with line ranges and PR metadata
         #[arg(long)]
-        since: Option<String>,
+        json: bool,
+
+        /// Output machine-readable JSON
+        #[arg(long)]
+        porcelain: bool,
+
+        /// Revision to blame from (default: HEAD)
+        #[arg(long)]
+        rev: Option<String>,
+
+        /// Path to blame
+        path: String,
     },
 
     /// Initialize a metadata remote from a project-local `.git-meta` file
@@ -386,6 +393,61 @@ pub struct RemoteArgs {
     pub action: RemoteAction,
 }
 
+/// Arguments for importing metadata from external tools and services.
+#[derive(Args)]
+pub struct ImportArgs {
+    /// Import source to use.
+    #[command(subcommand)]
+    pub action: Option<ImportAction>,
+
+    /// Legacy source format: "entire" or "git-ai".
+    #[arg(long, hide = true)]
+    pub format: Option<String>,
+
+    /// Show what would be imported without writing.
+    #[arg(long = "dry-run", hide = true)]
+    pub dry_run: bool,
+
+    /// Only import metadata for commits on or after this date (YYYY-MM-DD).
+    #[arg(long, hide = true)]
+    pub since: Option<String>,
+}
+
+/// Supported import sources.
+#[derive(Subcommand)]
+pub enum ImportAction {
+    /// Import merged pull request metadata from GitHub using gh
+    Gh(GhImportArgs),
+}
+
+/// Arguments for `git meta import gh`.
+#[derive(Args)]
+pub struct GhImportArgs {
+    /// Show what would be imported without writing
+    #[arg(long = "dry-run")]
+    pub dry_run: bool,
+
+    /// Maximum number of merged PRs to fetch
+    #[arg(long)]
+    pub limit: Option<usize>,
+
+    /// Only import PRs merged on or after this date (YYYY-MM-DD)
+    #[arg(long)]
+    pub since: Option<String>,
+
+    /// GitHub repository in OWNER/NAME form
+    #[arg(long)]
+    pub repo: Option<String>,
+
+    /// Import PR comments and review bodies
+    #[arg(long, action = ArgAction::SetTrue, default_value_t = true)]
+    pub include_comments: bool,
+
+    /// Skip release tag mapping
+    #[arg(long = "no-tags")]
+    pub no_tags: bool,
+}
+
 #[derive(Subcommand)]
 pub enum RemoteAction {
     /// Add a metadata remote source
@@ -487,7 +549,7 @@ const HELP_GROUPS: &[HelpGroup] = &[
             },
             HelpSection {
                 label: None,
-                commands: &["show", "inspect", "log", "stats"],
+                commands: &["show", "inspect", "log", "blame", "stats"],
             },
         ],
     },
