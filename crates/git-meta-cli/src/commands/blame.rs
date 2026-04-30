@@ -149,6 +149,8 @@ struct BranchMetadata {
     title: Option<String>,
     review_number: Option<String>,
     review_url: Option<String>,
+    commit_authors: Vec<String>,
+    commit_author_dates: Vec<String>,
     reviewed_by: Vec<String>,
     approved_by: Vec<String>,
     released_in: Vec<String>,
@@ -190,6 +192,9 @@ struct JsonPullRequest {
     number: Option<String>,
     title: Option<String>,
     url: Option<String>,
+    commit_authors: Vec<String>,
+    commit_author_dates: Vec<String>,
+    commit_author_date_range: Option<String>,
     reviewed_by: Vec<String>,
     approved_by: Vec<String>,
     released_in: Vec<String>,
@@ -207,6 +212,9 @@ fn json_groups(groups: &[BlameGroup]) -> Vec<JsonBlameGroup> {
                 number: branch.review_number.clone(),
                 title: branch.title.clone(),
                 url: branch.review_url.clone(),
+                commit_authors: branch.commit_authors.clone(),
+                commit_author_dates: branch.commit_author_dates.clone(),
+                commit_author_date_range: author_date_range(&branch.commit_author_dates),
                 reviewed_by: branch.reviewed_by.clone(),
                 approved_by: branch.approved_by.clone(),
                 released_in: branch.released_in.clone(),
@@ -295,6 +303,8 @@ fn load_branch_metadata(db: &git_meta_lib::db::Store, branch_id: &str) -> Result
         title: get_string(db, &target, "title")?,
         review_number: get_string(db, &target, "review:number")?,
         review_url: get_string(db, &target, "review:url")?,
+        commit_authors: get_set(db, &target, "commits:author")?,
+        commit_author_dates: get_set(db, &target, "commits:author-date")?,
         reviewed_by: get_set(db, &target, "review:reviewed")?,
         approved_by: get_set(db, &target, "review:approved")?,
         released_in: get_set(db, &target, "released-in")?,
@@ -335,6 +345,11 @@ fn print_text(out: &mut impl Write, groups: &[BlameGroup]) -> Result<()> {
             .branch
             .as_ref()
             .and_then(|branch| branch.review_url.as_deref());
+        let details = group
+            .branch
+            .as_ref()
+            .map(branch_detail_lines)
+            .unwrap_or_default();
         print_section_header(
             out,
             &style,
@@ -342,6 +357,7 @@ fn print_text(out: &mut impl Write, groups: &[BlameGroup]) -> Result<()> {
             pr_number.as_deref(),
             description,
             url,
+            &details,
             width,
         )?;
         for line in &group.lines {
@@ -368,6 +384,7 @@ fn print_section_header(
     pr_number: Option<&str>,
     description: &str,
     url: Option<&str>,
+    details: &[DetailLine],
     width: usize,
 ) -> Result<()> {
     let max_header_width = width.saturating_sub(1).max(1);
@@ -376,6 +393,12 @@ fn print_section_header(
     if let Some(url) = url {
         lines.push(truncate_to_width(url, max_header_width));
     }
+    lines.extend(details.iter().map(|detail| {
+        truncate_to_width(
+            &format!("{}: {}", detail.label, detail.value),
+            max_header_width,
+        )
+    }));
     let box_width = lines
         .iter()
         .map(|line| line.chars().count())
@@ -385,8 +408,14 @@ fn print_section_header(
     writeln!(out, "{}", ansi(style, "32", &format!("{horizontal}╮")))?;
     for (idx, line) in lines.iter().enumerate() {
         let padding = " ".repeat(box_width.saturating_sub(line.chars().count()));
+        let detail_idx = idx.checked_sub(usize::from(url.is_some()) + 1);
         let styled_line = if idx == 0 {
             styled_header(style, range, pr_number, description, box_width)
+        } else if let Some(detail_idx) = detail_idx {
+            details.get(detail_idx).map_or_else(
+                || format!("{}{}", style.dim(line), padding),
+                |detail| styled_detail_line(style, detail, box_width),
+            )
         } else {
             format!("{}{}", style.dim(line), padding)
         };
@@ -394,6 +423,88 @@ fn print_section_header(
     }
     writeln!(out, "{}", ansi(style, "32", &format!("{horizontal}╯")))?;
     Ok(())
+}
+
+struct DetailLine {
+    label: &'static str,
+    value: String,
+}
+
+fn branch_detail_lines(branch: &BranchMetadata) -> Vec<DetailLine> {
+    let mut lines = Vec::new();
+    if let Some(authors) = author_email_list(&branch.commit_authors) {
+        lines.push(DetailLine {
+            label: "authors",
+            value: authors,
+        });
+    }
+    if let Some(date_range) = author_date_range(&branch.commit_author_dates) {
+        lines.push(DetailLine {
+            label: "dates",
+            value: date_range,
+        });
+    }
+    lines
+}
+
+fn styled_detail_line(style: &Style, detail: &DetailLine, box_width: usize) -> String {
+    let visible = format!("{}: {}", detail.label, detail.value);
+    let visible = truncate_to_width(&visible, box_width);
+    let label = format!("{}:", detail.label);
+    if !visible.starts_with(&label) {
+        let padding = " ".repeat(box_width.saturating_sub(visible.chars().count()));
+        return format!("{}{}", style.dim(&visible), padding);
+    }
+
+    let value = visible[label.len()..].to_string();
+    let padding = " ".repeat(box_width.saturating_sub(visible.chars().count()));
+    format!(
+        "{}{}{}",
+        ansi(style, "34", &label),
+        style.dim(&value),
+        padding
+    )
+}
+
+fn author_email_list(authors: &[String]) -> Option<String> {
+    let emails = authors
+        .iter()
+        .map(|author| extract_email(author).unwrap_or_else(|| author.clone()))
+        .filter(|author| !author.trim().is_empty())
+        .collect::<Vec<_>>();
+    (!emails.is_empty()).then(|| emails.join(", "))
+}
+
+fn extract_email(author: &str) -> Option<String> {
+    let start = author.find('<')?;
+    let end = author[start + 1..].find('>')? + start + 1;
+    Some(author[start + 1..end].to_string())
+}
+
+fn author_date_range(author_dates: &[String]) -> Option<String> {
+    let mut timestamps = author_dates
+        .iter()
+        .filter_map(|value| value.parse::<i64>().ok())
+        .collect::<Vec<_>>();
+    if timestamps.is_empty() {
+        return None;
+    }
+    timestamps.sort_unstable();
+    let min = format_author_date(*timestamps.first()?);
+    let max = format_author_date(*timestamps.last()?);
+    if min == max {
+        Some(min)
+    } else {
+        Some(format!("{min}..{max}"))
+    }
+}
+
+fn format_author_date(seconds: i64) -> String {
+    let format = time::macros::format_description!("[year]-[month]-[day]");
+    time::OffsetDateTime::from_unix_timestamp(seconds)
+        .ok()
+        .and_then(|date| date.format(format).ok())
+        .unwrap_or_else(|| seconds.to_string())
 }
 
 fn visible_header(range: &str, pr_number: Option<&str>, description: &str) -> String {

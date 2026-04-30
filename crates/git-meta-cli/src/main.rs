@@ -6,9 +6,6 @@ mod context;
 mod pager;
 mod style;
 
-#[cfg(feature = "bench")]
-mod bench;
-
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands, ImportAction, RemoteAction};
@@ -134,6 +131,7 @@ fn main() -> Result<()> {
                 gh_args.repo.as_deref(),
                 gh_args.include_comments,
                 gh_args.no_tags,
+                gh_args.force,
             ),
             None => {
                 let format = args.format.ok_or_else(|| {
@@ -167,18 +165,6 @@ fn main() -> Result<()> {
             rev,
             path,
         } => commands::blame::run(&path, rev.as_deref(), porcelain, json),
-
-        #[cfg(feature = "bench")]
-        Commands::Bench => bench::db::run(),
-
-        #[cfg(feature = "bench")]
-        Commands::FanoutBench { objects } => bench::fanout::run(objects),
-
-        #[cfg(feature = "bench")]
-        Commands::HistoryWalker { commits } => bench::history::run(commits),
-
-        #[cfg(feature = "bench")]
-        Commands::SerializeBench { rounds } => bench::serialize::run(rounds),
 
         Commands::Config {
             list,

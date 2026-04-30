@@ -357,34 +357,6 @@ pub enum Commands {
     /// Remove the git meta database and all meta refs
     #[command(display_order = 44)]
     Teardown,
-
-    /// Benchmark read performance across all stored keys
-    #[cfg(feature = "bench")]
-    Bench,
-
-    /// Benchmark fanout schemes on a synthetic repo
-    #[cfg(feature = "bench")]
-    FanoutBench {
-        /// Number of base objects to populate the tree with (default: 1_000_000)
-        #[arg(long, default_value = "1000000")]
-        objects: usize,
-    },
-
-    /// Benchmark history generation and full-history walk
-    #[cfg(feature = "bench")]
-    HistoryWalker {
-        /// Number of meta commits to generate (default: 500)
-        #[arg(long, default_value = "500")]
-        commits: usize,
-    },
-
-    /// Benchmark serialize performance
-    #[cfg(feature = "bench")]
-    SerializeBench {
-        /// Number of insert+serialize rounds (default: 10)
-        #[arg(long, default_value = "10")]
-        rounds: usize,
-    },
 }
 
 #[derive(Args)]
@@ -446,6 +418,10 @@ pub struct GhImportArgs {
     /// Skip release tag mapping
     #[arg(long = "no-tags")]
     pub no_tags: bool,
+
+    /// Reprocess PRs even when they were previously imported
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Subcommand)]

@@ -67,9 +67,8 @@ pub struct Store {
 impl Store {
     /// Open a store at `path` without an associated git repository.
     ///
-    /// Used by the CLI's benchmark harness; library consumers should use
-    /// [`Session`](crate::Session), which constructs a store via
-    /// [`Store::open_with_repo`].
+    /// Library consumers should use [`Session`](crate::Session), which constructs
+    /// a store via [`Store::open_with_repo`].
     #[cfg(feature = "internal")]
     pub fn open(path: &Path) -> Result<Self> {
         let conn = Connection::open(path)?;
