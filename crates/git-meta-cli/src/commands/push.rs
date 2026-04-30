@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use git_meta_lib::push::PushProgress;
 
 use crate::context::CommandContext;
 
