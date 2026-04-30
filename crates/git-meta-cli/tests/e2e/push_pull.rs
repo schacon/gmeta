@@ -1,8 +1,10 @@
+use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 use predicates::prelude::*;
 
 use crate::harness::{
     self, commit_target, open_repo, ref_to_commit_oid, setup_bare_with_meta, setup_repo,
+    target_fanout,
 };
 
 #[test]
