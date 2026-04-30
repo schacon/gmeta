@@ -1,16 +1,13 @@
 use anyhow::{Context, Result};
-use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
 use serde_json::{json, Map, Value};
 
+use crate::commands::hydrate::hydrate_promised_entries;
 use crate::context::CommandContext;
 use git_meta_lib::db::Store;
-use git_meta_lib::tree_paths;
 use git_meta_lib::types::{Target, TargetType, ValueType};
 
 const NODE_VALUE_KEY: &str = "__value";
-const SET_VALUE_DIR: &str = "__set";
-const TOMBSTONE_ROOT: &str = "__tombstones";
 
 pub fn run(
     target_str: &str,

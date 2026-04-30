@@ -1,6 +1,7 @@
 pub mod blame;
 pub mod config;
 pub mod get;
+mod hydrate;
 pub mod import;
 pub mod inspect;
 pub mod list;

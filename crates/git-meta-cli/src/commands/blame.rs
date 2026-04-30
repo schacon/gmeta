@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Write;
 use std::process::Command;
 
@@ -6,6 +6,7 @@ use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use terminal_size::{terminal_size, Width};
 
+use crate::commands::hydrate::hydrate_promised_entries;
 use crate::context::CommandContext;
 use crate::pager::Pager;
 use crate::style::Style;
@@ -32,6 +33,7 @@ pub fn run(path: &str, rev: Option<&str>, porcelain: bool, json: bool) -> Result
     let ctx = CommandContext::open(None)?;
     let output = run_git_blame(path, rev)?;
     let lines = parse_porcelain(&output)?;
+    hydrate_blame_metadata(&ctx.session, &lines)?;
     let groups = group_blame(ctx.session.store(), &lines)?;
 
     if porcelain {
@@ -41,13 +43,22 @@ pub fn run(path: &str, rev: Option<&str>, porcelain: bool, json: bool) -> Result
     } else {
         let mut out = Pager::start(Some(ctx.session.repo()));
         print_text(&mut out, &groups)?;
-        if groups.iter().all(|group| group.branch_id.is_none()) {
-            eprintln!("No PR metadata found; run `git meta import gh` to annotate commits.");
-        }
     }
 
     Ok(())
 }
+
+const COMMIT_BRANCH_KEY: &str = "branch-id";
+const BRANCH_METADATA_KEYS: &[&str] = &[
+    "title",
+    "review:number",
+    "review:url",
+    "commits:author",
+    "commits:author-date",
+    "review:reviewed",
+    "review:approved",
+    "released-in",
+];
 
 fn run_git_blame(path: &str, rev: Option<&str>) -> Result<String> {
     let mut command = Command::new("git");

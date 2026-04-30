@@ -1,5 +1,9 @@
+use git_meta_lib::types::{Target, TargetType};
 use gix::prelude::ObjectIdExt;
+use gix::refs::transaction::PreviousValue;
 use predicates::prelude::*;
+use rusqlite::params;
+use tempfile::TempDir;
 
 use crate::harness::{
     self, open_repo, ref_to_commit_oid, setup_bare_with_history, setup_bare_with_history_retained,
@@ -64,6 +68,53 @@ fn promisor_hydration_from_tip_tree() {
         .assert()
         .success()
         .stdout(predicate::str::contains("hello"));
+}
+
+#[test]
+fn blame_hydrates_promised_commit_and_branch_metadata() {
+    let (dir, _sha) = setup_repo();
+    std::fs::write(dir.path().join("file.txt"), "first\n").unwrap();
+    git(dir.path(), &["add", "file.txt"]);
+    git(dir.path(), &["commit", "-m", "add file"]);
+    let blamed_commit = git(dir.path(), &["rev-parse", "HEAD"]);
+
+    let bare_dir = setup_bare_with_promised_blame_metadata(blamed_commit.trim());
+    let bare_path = bare_dir.path().to_str().unwrap();
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success();
+    mark_blame_metadata_promised(dir.path(), blamed_commit.trim());
+
+    harness::git_meta(dir.path())
+        .args(["blame", "--json", "file.txt"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\"branch_id\": \"feature#1\""))
+        .stdout(predicate::str::contains("\"number\": \"1\""))
+        .stdout(predicate::str::contains(
+            "\"title\": \"Hydrated blame metadata\"",
+        ));
+}
+
+#[test]
+fn pull_indexes_omitted_change_commit_tree() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_omitted_history();
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Indexed 2 keys from history"));
+
+    harness::git_meta(dir.path())
+        .args(["inspect", "--promisor", "project"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("old_key"))
+        .stdout(predicate::str::contains("omitted_key"));
 }
 
 #[test]
