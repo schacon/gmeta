@@ -12,6 +12,8 @@ use git_meta_lib::db::Store;
 use git_meta_lib::types::{Target, TargetType, ValueType, GIT_REF_THRESHOLD};
 use git_meta_lib::MetaValue;
 
+const GH_PR_PAGE_SIZE: usize = 100;
+
 /// Supported import source formats.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportFormat {
@@ -46,11 +48,12 @@ pub fn run(format: ImportFormat, dry_run: bool, since: Option<&str>) -> Result<(
 /// # Parameters
 ///
 /// - `dry_run`: print planned metadata writes without mutating the store.
-/// - `limit`: maximum number of merged pull requests to fetch.
+/// - `limit`: optional maximum number of merged pull requests to fetch.
 /// - `since`: optional lower bound for merged PRs, formatted as `YYYY-MM-DD`.
 /// - `repo`: optional GitHub repository in `OWNER/NAME` form.
 /// - `include_comments`: whether to import PR comments and review bodies.
-/// - `no_tags`: reserved for release tag mapping; currently skips that phase.
+/// - `no_tags`: skip release tag mapping.
+/// - `force`: reprocess PRs even when they were previously imported.
 ///
 /// # Errors
 ///
@@ -63,6 +66,7 @@ pub fn run_gh(
     repo: Option<&str>,
     include_comments: bool,
     no_tags: bool,
+    force: bool,
 ) -> Result<()> {
     let since_epoch = parse_since_epoch(since)?;
     ensure_gh_auth()?;
@@ -72,8 +76,8 @@ pub fn run_gh(
         Some(repo) => repo.to_string(),
         None => resolve_gh_repo()?,
     };
-    let prs = fetch_merged_prs(&repo_name, limit.unwrap_or(100), include_comments)?;
-    let imported = imported_pr_numbers(ctx.session.store())?;
+    let prs = fetch_merged_prs(&repo_name, limit, include_comments)?;
+    let mut imported = imported_pr_numbers(ctx.session.store())?;
 
     let mut summary = GhImportSummary::default();
     for pr in prs {
@@ -84,11 +88,8 @@ pub fn run_gh(
                 continue;
             }
         }
-        if imported.contains(&pr.number.to_string()) {
+        if !force && imported.contains(&pr.number.to_string()) {
             summary.skipped += 1;
-            if since_epoch.is_none() && limit.is_none() {
-                break;
-            }
             continue;
         }
 

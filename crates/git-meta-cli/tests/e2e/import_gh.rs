@@ -48,6 +48,12 @@ exit 1
         std::env::var("PATH").unwrap_or_default()
     );
 
+    git(dir.path(), &["tag", "v1.0.0", &sha]);
+    harness::git_meta(dir.path())
+        .args(["set", &format!("commit:{sha}"), "change-id", "Iabcdef"])
+        .assert()
+        .success();
+
     harness::git_meta(dir.path())
         .env("PATH", &path)
         .args(["import", "gh", "--repo", "owner/repo", "--limit", "1"])
