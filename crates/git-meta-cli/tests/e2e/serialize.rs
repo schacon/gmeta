@@ -44,6 +44,26 @@ fn serialize_creates_ref() {
 }
 
 #[test]
+fn serialize_reports_progress() {
+    let (dir, sha) = setup_repo();
+    let target = commit_target(&sha);
+
+    harness::git_meta(dir.path())
+        .args(["set", &target, "agent:model", "claude-4.6"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args(["serialize", "--force-full"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("reading SQLite metadata (full)"))
+        .stderr(predicate::str::contains("routed"))
+        .stderr(predicate::str::contains("building refs/meta/local/main"))
+        .stderr(predicate::str::contains("wrote refs/meta/local/main"));
+}
+
+#[test]
 fn serialize_path_target_uses_raw_segments_and_separator() {
     let (dir, _sha) = setup_repo();
 

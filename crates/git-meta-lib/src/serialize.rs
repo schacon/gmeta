@@ -18,10 +18,10 @@ use crate::db::types::{
 };
 use crate::db::Store;
 use crate::error::{Error, Result};
-use crate::list_value::{make_entry_name, parse_entries};
+use crate::list_value::{encode_entries, make_entry_name, parse_entries};
 use crate::prune::{self, PruneRules};
 use crate::session::Session;
-use crate::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
+use crate::tree::filter::{classify_key, parse_filter_rules, FilterRule, MAIN_DEST};
 use crate::tree::format::{build_dir, build_tree_from_paths, insert_path, TreeDir};
 use crate::tree::model::Tombstone;
 use crate::tree_paths;
@@ -43,6 +43,76 @@ pub struct SerializeOutput {
     pub refs_written: Vec<String>,
     /// Number of entries dropped by auto-prune (0 if no prune triggered).
     pub pruned: u64,
+}
+
+/// Serialization mode used for progress reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SerializeMode {
+    /// Incremental serialization based on metadata modified since the last materialization marker.
+    Incremental,
+    /// Full serialization from every hydrated SQLite row.
+    Full,
+}
+
+/// Progress event emitted while serializing metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SerializeProgress {
+    /// SQLite metadata is being read.
+    Reading {
+        /// Whether the run is incremental or full.
+        mode: SerializeMode,
+    },
+    /// SQLite metadata has been read.
+    Read {
+        /// Number of hydrated metadata entries read.
+        metadata: usize,
+        /// Number of metadata tombstones read.
+        tombstones: usize,
+        /// Number of set-member tombstones read.
+        set_tombstones: usize,
+        /// Number of list-entry tombstones read.
+        list_tombstones: usize,
+        /// Number of change records that will be described in the serialize commit.
+        changes: usize,
+    },
+    /// Old metadata was skipped by `meta:prune:since`.
+    Pruned {
+        /// Number of metadata entries skipped before tree construction.
+        entries: u64,
+    },
+    /// Metadata has been routed to destination refs.
+    Routed {
+        /// Number of destination refs that may be written.
+        destinations: usize,
+        /// Number of metadata/tombstone records routed across all destinations.
+        records: usize,
+    },
+    /// A destination ref tree is being built.
+    BuildingRef {
+        /// Ref name being built.
+        ref_name: String,
+        /// Number of metadata/tombstone records included in this destination.
+        records: usize,
+    },
+    /// A destination ref was unchanged after rebuilding its tree.
+    RefUnchanged {
+        /// Ref name that did not need an update.
+        ref_name: String,
+    },
+    /// A destination ref was written.
+    RefWritten {
+        /// Ref name that was updated.
+        ref_name: String,
+    },
+    /// Auto-prune wrote a follow-up pruned commit.
+    AutoPruned {
+        /// Ref name that was auto-pruned.
+        ref_name: String,
+        /// Number of keys dropped from the serialized tree.
+        keys_dropped: u64,
+        /// Number of keys retained in the serialized tree.
+        keys_retained: u64,
+    },
 }
 
 /// Serialize local metadata to Git tree(s) and commit(s).
