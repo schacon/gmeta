@@ -8,6 +8,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, bail, Context, Result};
+use serde::Deserialize;
 
 use crate::commands::remote;
 use crate::context::CommandContext;
