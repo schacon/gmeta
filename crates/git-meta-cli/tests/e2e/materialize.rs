@@ -73,6 +73,40 @@ fn fast_forward_applies_remote_removal() {
 }
 
 #[test]
+fn force_full_reindexes_promisor_keys_from_history() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_omitted_history();
+
+    let bare_repo = open_repo(bare_dir.path());
+    let remote_oid = ref_to_commit_oid(&bare_repo, "refs/meta/main");
+    drop(bare_repo);
+
+    let repo = open_repo(dir.path());
+    copy_meta_objects_from(&bare_dir, &repo);
+    repo.reference(
+        "refs/meta/origin",
+        remote_oid,
+        PreviousValue::Any,
+        "test remote",
+    )
+    .unwrap();
+    drop(repo);
+
+    harness::git_meta(dir.path())
+        .args(["materialize", "--force-full"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("indexed 2 keys from full history"));
+
+    harness::git_meta(dir.path())
+        .args(["inspect", "--promisor", "project"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("old_key"))
+        .stdout(predicate::str::contains("omitted_key"));
+}
+
+#[test]
 fn fast_forward_applies_remote_list_entry_removal() {
     let (dir, _sha) = setup_repo();
     let target = "branch:sc-branch-1-deadbeef";

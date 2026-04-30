@@ -95,7 +95,7 @@ impl Store {
             "SELECT target_type, COUNT(*) FROM metadata WHERE is_promised = 1 GROUP BY target_type ORDER BY target_type",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
         })?;
         let mut results = Vec::new();
         for row in rows {

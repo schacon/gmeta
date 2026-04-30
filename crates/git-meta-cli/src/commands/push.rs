@@ -183,7 +183,9 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
         }
 
         eprintln!("Pushing to {resolved_remote}...");
-        let output = ctx.session.push_once(remote)?;
+        let output = ctx
+            .session
+            .push_once_with_progress(remote, print_push_progress)?;
 
         if output.success {
             if output.up_to_date {
@@ -205,7 +207,8 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
             "Push rejected (remote has new data), fetching and merging (attempt {attempt}/{MAX_RETRIES})..."
         );
 
-        ctx.session.resolve_push_conflict(remote)?;
+        ctx.session
+            .resolve_push_conflict_with_progress(remote, print_push_progress)?;
 
         if verbose {
             eprintln!("[verbose] conflict resolved, retrying push");
@@ -213,4 +216,46 @@ pub fn run(remote: Option<&str>, verbose: bool) -> Result<()> {
     }
 
     bail!("push failed after {MAX_RETRIES} attempts");
+}
+
+fn print_push_progress(event: PushProgress) {
+    match event {
+        PushProgress::CheckingLocalState => {
+            eprintln!("  checking local and remote metadata refs...");
+        }
+        PushProgress::Serializing => {
+            eprintln!("  serializing local metadata...");
+        }
+        PushProgress::SerializationSkipped => {
+            eprintln!("  local metadata is already serialized.");
+        }
+        PushProgress::RebasingLocal => {
+            eprintln!("  rebasing local metadata onto remote tip...");
+        }
+        PushProgress::Pushing {
+            remote_name,
+            local_ref,
+            remote_ref,
+        } => {
+            eprintln!("  pushing {local_ref} to {remote_name}:{remote_ref}...");
+        }
+        PushProgress::FetchingRemote {
+            remote_name,
+            remote_ref,
+        } => {
+            eprintln!("  fetching {remote_name}:{remote_ref}...");
+        }
+        PushProgress::HydratingRemoteTip => {
+            eprintln!("  hydrating remote metadata blobs...");
+        }
+        PushProgress::MaterializingRemote => {
+            eprintln!("  materializing remote metadata...");
+        }
+        PushProgress::SerializingMerged => {
+            eprintln!("  serializing merged metadata...");
+        }
+        PushProgress::RebasingMerged => {
+            eprintln!("  rebasing merged metadata onto remote tip...");
+        }
+    }
 }

@@ -26,11 +26,11 @@ impl Store {
             .map(|n| n as usize)
             .collect();
 
-        let git_ref_count: u64 = self.conn.query_row(
+        let git_ref_count = self.conn.query_row(
             "SELECT COUNT(*) FROM metadata WHERE is_git_ref = 1",
             [],
-            |row| row.get(0),
-        )?;
+            |row| row.get::<_, i64>(0),
+        )? as u64;
 
         // Buckets: <64B, 64B-1KB, 1KB-4KB, 4KB-16KB, 16KB-64KB, 64KB+
         let boundaries: &[(usize, &str)] = &[
@@ -64,16 +64,16 @@ impl Store {
     /// Get total count of values stored in SQLite vs as git blob refs.
     /// Returns (sqlite_count, git_ref_count).
     pub fn stats_storage_counts(&self) -> Result<(u64, u64)> {
-        let sqlite_count: u64 = self.conn.query_row(
+        let sqlite_count = self.conn.query_row(
             "SELECT COUNT(*) FROM metadata WHERE is_git_ref = 0",
             [],
-            |row| row.get(0),
-        )?;
-        let git_ref_count: u64 = self.conn.query_row(
+            |row| row.get::<_, i64>(0),
+        )? as u64;
+        let git_ref_count = self.conn.query_row(
             "SELECT COUNT(*) FROM metadata WHERE is_git_ref = 1",
             [],
-            |row| row.get(0),
-        )?;
+            |row| row.get::<_, i64>(0),
+        )? as u64;
         Ok((sqlite_count, git_ref_count))
     }
 
@@ -88,11 +88,8 @@ impl Store {
         )?;
 
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, u64>(2)?,
-            ))
+            let count = row.get::<_, i64>(2)? as u64;
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, count))
         })?;
 
         let mut results = Vec::new();

@@ -31,8 +31,12 @@ enum PlannedDbChange {
     },
 }
 
-pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
+pub fn run(remote: Option<&str>, dry_run: bool, force_full: bool, verbose: bool) -> Result<()> {
     let ctx = CommandContext::open(None)?;
+
+    if dry_run && force_full {
+        bail!("--force-full cannot be combined with --dry-run");
+    }
 
     if dry_run {
         return run_dry_run(&ctx, remote, verbose);
@@ -69,7 +73,40 @@ pub fn run(remote: Option<&str>, dry_run: bool, verbose: bool) -> Result<()> {
         }
     }
 
+    if force_full {
+        let indexed = reindex_full_history(&ctx, remote, verbose)?;
+        if indexed > 0 {
+            println!("indexed {indexed} keys from full history");
+        } else {
+            println!("full history already indexed");
+        }
+    }
+
     Ok(())
+}
+
+fn reindex_full_history(
+    ctx: &CommandContext,
+    remote: Option<&str>,
+    verbose: bool,
+) -> Result<usize> {
+    let repo = ctx.session.repo();
+    let ns = ctx.session.namespace();
+    let remote_refs = find_remote_refs(repo, ns, remote)?;
+    let mut indexed = 0;
+
+    for (ref_name, oid) in remote_refs {
+        if verbose {
+            eprintln!(
+                "[verbose] reindexing full history for {ref_name} from {}",
+                &oid.to_string()[..8]
+            );
+        }
+        indexed +=
+            git_meta_lib::sync::insert_promisor_entries(repo, ctx.session.store(), oid, None)?;
+    }
+
+    Ok(indexed)
 }
 
 fn run_dry_run(ctx: &CommandContext, remote: Option<&str>, verbose: bool) -> Result<()> {

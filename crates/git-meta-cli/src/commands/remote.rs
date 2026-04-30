@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use dialoguer::Confirm;
 use gix::refs::transaction::PreviousValue;
 
-use crate::commands::{materialize, serialize};
+use crate::commands::materialize;
 use crate::context::CommandContext;
 use crate::style::Style;
 
@@ -396,11 +396,11 @@ pub fn run_add(url: &str, name: &str, namespace_override: Option<&str>, init: bo
 
             // Materialize remote metadata into local SQLite
             eprint!("{} local metadata...", s_err.step("Serializing"));
-            serialize::run(false, false)?;
+            let _ = ctx.session.serialize()?;
             eprintln!(" {}", s_err.ok("done."));
 
             eprint!("{} remote metadata...", s_err.step("Materializing"));
-            materialize::run(None, false, false)?;
+            materialize::run(None, false, false, false)?;
             eprintln!(" {}", s_err.ok("done."));
 
             // Index historical keys as promisor entries

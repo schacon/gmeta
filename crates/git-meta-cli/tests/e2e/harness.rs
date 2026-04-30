@@ -313,6 +313,118 @@ pub fn setup_bare_with_history() -> TempDir {
     bare_dir
 }
 
+/// Build a bare repo with a non-root serialize commit that omits changes.
+///
+/// The omitted-change commit keeps its keys discoverable only through its tree
+/// paths, which exercises promisor indexing for large serialize commits.
+pub fn setup_bare_with_omitted_history() -> TempDir {
+    let bare_dir = TempDir::new().expect("should be able to create temp dir");
+    let _init = gix::init_bare(bare_dir.path()).expect("should be able to init bare repo");
+    let bare = gix::open_opts(bare_dir.path(), test_open_opts()).expect("should reopen bare repo");
+    let sig = gix::actor::Signature {
+        name: "Test User".into(),
+        email: "test@example.com".into(),
+        time: gix::date::Time::new(946684800, 0),
+    };
+
+    let old_blob = bare
+        .write_blob(b"\"old_value\"")
+        .expect("should create old blob")
+        .detach();
+    let mut editor1 = bare.empty_tree().edit().expect("should create tree editor");
+    editor1
+        .upsert(
+            "project/old_key/__value",
+            gix::objs::tree::EntryKind::Blob,
+            old_blob,
+        )
+        .expect("should insert old_key");
+    let tree1 = editor1.write().expect("should write tree").detach();
+    let commit1 = gix::objs::Commit {
+        message: "git-meta: serialize (1 changes)\n\nA\tproject\told_key".into(),
+        tree: tree1,
+        author: sig.clone(),
+        committer: sig.clone(),
+        encoding: None,
+        parents: Default::default(),
+        extra_headers: Default::default(),
+    };
+    let commit1_oid = bare
+        .write_object(&commit1)
+        .expect("should create commit 1")
+        .detach();
+
+    let omitted_blob = bare
+        .write_blob(b"\"omitted_value\"")
+        .expect("should create omitted blob")
+        .detach();
+    let mut editor2 = bare.empty_tree().edit().expect("should create tree editor");
+    editor2
+        .upsert(
+            "project/old_key/__value",
+            gix::objs::tree::EntryKind::Blob,
+            old_blob,
+        )
+        .expect("should insert old_key");
+    editor2
+        .upsert(
+            "project/omitted_key/__value",
+            gix::objs::tree::EntryKind::Blob,
+            omitted_blob,
+        )
+        .expect("should insert omitted_key");
+    let tree2 = editor2.write().expect("should write tree").detach();
+    let commit2 = gix::objs::Commit {
+        message: "git-meta: serialize (1001 changes)\n\nchanges-omitted: true\ncount: 1001".into(),
+        tree: tree2,
+        author: sig.clone(),
+        committer: sig.clone(),
+        encoding: None,
+        parents: vec![commit1_oid].into(),
+        extra_headers: Default::default(),
+    };
+    let commit2_oid = bare
+        .write_object(&commit2)
+        .expect("should create commit 2")
+        .detach();
+
+    let tip_blob = bare
+        .write_blob(b"\"hello\"")
+        .expect("should create tip blob")
+        .detach();
+    let mut editor3 = bare.empty_tree().edit().expect("should create tree editor");
+    editor3
+        .upsert(
+            "project/testing/__value",
+            gix::objs::tree::EntryKind::Blob,
+            tip_blob,
+        )
+        .expect("should insert testing");
+    let tree3 = editor3.write().expect("should write tree").detach();
+    let commit3 = gix::objs::Commit {
+        message: "git-meta: serialize (1 changes)\n\nA\tproject\ttesting".into(),
+        tree: tree3,
+        author: sig.clone(),
+        committer: sig,
+        encoding: None,
+        parents: vec![commit2_oid].into(),
+        extra_headers: Default::default(),
+    };
+    let commit3_oid = bare
+        .write_object(&commit3)
+        .expect("should create commit 3")
+        .detach();
+    bare.reference(
+        "refs/meta/main",
+        commit3_oid,
+        PreviousValue::Any,
+        "commit 3",
+    )
+    .expect("should create ref");
+
+    bare_dir
+}
+
 /// Build a bare repo where a key exists in both history and tip tree.
 ///
 /// Like [`setup_bare_with_history`] but the tip commit retains `old_key` in
@@ -462,7 +574,7 @@ pub fn open_repo(path: &Path) -> gix::Repository {
 ///
 /// Ensures committer/author info is available for reference operations
 /// even when no global git config is present (e.g. in CI).
-fn test_open_opts() -> gix::open::Options {
+pub(crate) fn test_open_opts() -> gix::open::Options {
     gix::open::Options::isolated()
         .config_overrides(["user.name=Test User", "user.email=test@example.com"])
 }

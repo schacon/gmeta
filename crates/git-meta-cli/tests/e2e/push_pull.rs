@@ -30,7 +30,14 @@ fn push_simple() {
         .args(["push"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Pushed metadata to meta"));
+        .stdout(predicate::str::contains("Pushed metadata to meta"))
+        .stderr(predicate::str::contains(
+            "checking local and remote metadata refs",
+        ))
+        .stderr(predicate::str::contains("serializing local metadata"))
+        .stderr(predicate::str::contains(
+            "pushing refs/meta/local/main to meta:refs/meta/main",
+        ));
 
     let bare = open_repo(bare_dir.path());
     let tip_oid = ref_to_commit_oid(&bare, "refs/meta/main");
@@ -101,6 +108,60 @@ fn push_up_to_date() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Everything up-to-date"));
+}
+
+#[test]
+fn push_preserves_pre_serialized_force_full_tree() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_meta("meta");
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["pull"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args([
+            "set",
+            "--timestamp",
+            "1000",
+            "branch:legacy",
+            "historical:key",
+            "beta",
+        ])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:since", "14d"])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["serialize", "--force-full"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args(["push"])
+        .assert()
+        .success();
+
+    let bare = open_repo(bare_dir.path());
+    let tip_oid = ref_to_commit_oid(&bare, "refs/meta/main");
+    let commit = tip_oid.attach(&bare).object().unwrap().into_commit();
+    let tree = commit.tree().unwrap();
+    let fanout = target_fanout("legacy");
+    let expected_path = format!("branch/{fanout}/legacy/historical/key/__value");
+    let mut paths = Vec::new();
+    collect_tree_paths(&bare, tree.id, "", &mut paths);
+    assert!(
+        paths.iter().any(|path| path == &expected_path),
+        "push should preserve the force-full serialized historical key"
+    );
 }
 
 #[test]
@@ -208,6 +269,29 @@ fn push_conflict_produces_no_merge_commits() {
             &oid.to_string()[..8],
             parent_count
         );
+    }
+}
+
+fn collect_tree_paths(
+    repo: &gix::Repository,
+    tree_id: gix::ObjectId,
+    prefix: &str,
+    paths: &mut Vec<String>,
+) {
+    let tree = tree_id.attach(repo).object().unwrap().into_tree();
+    for entry_result in tree.iter() {
+        let entry = entry_result.unwrap();
+        let name = entry.filename().to_str().unwrap();
+        let path = if prefix.is_empty() {
+            name.to_string()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.mode().is_tree() {
+            collect_tree_paths(repo, entry.object_id(), &path, paths);
+        } else {
+            paths.push(path);
+        }
     }
 }
 

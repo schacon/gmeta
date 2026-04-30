@@ -430,8 +430,38 @@ pub fn parse_path_parts<'a>(parts: &'a [&'a str]) -> Result<(TargetType, String,
         )));
     }
 
+    if target_type != TargetType::Commit {
+        let fanout = parts[1];
+        let target_end_limit = parts
+            .iter()
+            .enumerate()
+            .skip(3)
+            .find_map(|(idx, part)| {
+                matches!(
+                    *part,
+                    STRING_VALUE_BLOB | LIST_VALUE_DIR | SET_VALUE_DIR | TOMBSTONE_ROOT
+                )
+                .then_some(idx)
+            })
+            .unwrap_or(parts.len());
+
+        for target_end in 3..=target_end_limit {
+            let target_value = parts[2..target_end].join("/");
+            if value_shard_prefix(&target_value) == fanout {
+                return Ok((target_type, target_value, &parts[target_end..]));
+            }
+        }
+    }
+
     let target_value = parts[2].to_string();
     Ok((target_type, target_value, &parts[3..]))
+}
+
+fn value_shard_prefix(value: &str) -> String {
+    let mut hasher = Sha1::new();
+    hasher.update(value.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+    hash[..2].to_string()
 }
 
 /// Build a Git tree from merged metadata values and tombstones.
@@ -537,5 +567,25 @@ mod tests {
         assert_eq!(target_type, TargetType::Path);
         assert_eq!(target_value, "src/__generated/file.rs");
         assert_eq!(key_parts, &["owner", "__value"]);
+    }
+
+    #[test]
+    fn test_parse_path_parts_for_branch_with_slash() {
+        let branch = "alex/trails-multi-pr-a57e52c3";
+        let fanout = value_shard_prefix(branch);
+        let parts = [
+            "branch",
+            fanout.as_str(),
+            "alex",
+            "trails-multi-pr-a57e52c3",
+            "review",
+            "status",
+            "__value",
+        ];
+
+        let (target_type, target_value, key_parts) = parse_path_parts(&parts).unwrap();
+        assert_eq!(target_type, TargetType::Branch);
+        assert_eq!(target_value, branch);
+        assert_eq!(key_parts, &["review", "status", "__value"]);
     }
 }

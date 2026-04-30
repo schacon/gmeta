@@ -68,6 +68,34 @@ pub struct SerializeOutput {
 ///
 /// Returns an error if database reads, Git object writes, or ref updates fail.
 pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOutput> {
+    run_with_progress(session, now, force_full, |_| {})
+}
+
+/// Serialize local metadata and report progress through a callback.
+///
+/// # Parameters
+///
+/// - `session`: the gmeta session providing the repository, store, and config.
+/// - `now`: the current timestamp in milliseconds since the Unix epoch,
+///   used for the commit signature and the `last_materialized` marker.
+/// - `force_full`: when true, ignore incremental dirty-target detection and
+///   rebuild serialized trees from the complete SQLite state.
+/// - `progress`: callback invoked at major serialization steps.
+///
+/// # Returns
+///
+/// A [`SerializeOutput`] with counts and written refs. If there is nothing
+/// to serialize, `changes` will be `0` and `refs_written` will be empty.
+///
+/// # Errors
+///
+/// Returns an error if database reads, Git object writes, or ref updates fail.
+pub fn run_with_progress(
+    session: &Session,
+    now: i64,
+    force_full: bool,
+    mut progress: impl FnMut(SerializeProgress),
+) -> Result<SerializeOutput> {
     let repo = &session.repo;
     let local_ref_name = session.local_ref();
     let last_materialized = session.store.get_last_materialized()?;
@@ -84,6 +112,9 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
         dirty_target_bases,
         changes,
     ) = if let (false, Some(since)) = (force_full, last_materialized) {
+        progress(SerializeProgress::Reading {
+            mode: SerializeMode::Incremental,
+        });
         let modified = session.store.get_modified_since(since)?;
         let metadata = session.store.get_all_metadata()?;
         let changes: Vec<(char, String, String)> = if modified.is_empty() {
@@ -127,6 +158,13 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
         let tombstones = session.store.get_all_tombstones()?;
         let set_tombstones = session.store.get_all_set_tombstones()?;
         let list_tombstones = session.store.get_all_list_tombstones()?;
+        progress(SerializeProgress::Read {
+            metadata: metadata.len(),
+            tombstones: tombstones.len(),
+            set_tombstones: set_tombstones.len(),
+            list_tombstones: list_tombstones.len(),
+            changes: changes.len(),
+        });
 
         (
             metadata,
@@ -141,16 +179,29 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
             changes,
         )
     } else {
+        progress(SerializeProgress::Reading {
+            mode: SerializeMode::Full,
+        });
         let metadata = session.store.get_all_metadata()?;
 
         let changes: Vec<(char, String, String)> =
             metadata.iter().map(metadata_add_change).collect();
+        let tombstones = session.store.get_all_tombstones()?;
+        let set_tombstones = session.store.get_all_set_tombstones()?;
+        let list_tombstones = session.store.get_all_list_tombstones()?;
+        progress(SerializeProgress::Read {
+            metadata: metadata.len(),
+            tombstones: tombstones.len(),
+            set_tombstones: set_tombstones.len(),
+            list_tombstones: list_tombstones.len(),
+            changes: changes.len(),
+        });
 
         (
             metadata,
-            session.store.get_all_tombstones()?,
-            session.store.get_all_set_tombstones()?,
-            session.store.get_all_list_tombstones()?,
+            tombstones,
+            set_tombstones,
+            list_tombstones,
             None,
             changes,
         )
@@ -164,31 +215,10 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
         });
     }
 
-    // Apply prune-since cutoff to filter old entries before building the tree
-    let prune_since = session
-        .store
-        .get(&Target::project(), "meta:prune:since")?
-        .and_then(|e| serde_json::from_str::<String>(&e.value).ok());
-    let prune_rules = prune::read_prune_rules(&session.store)?;
-    let prune_cutoff_ms = prune_since
-        .as_deref()
-        .map(|s| prune::parse_since_to_cutoff_ms(s, now))
-        .transpose()?;
-    let mut pruned_count = 0u64;
-    let metadata_entries = if let Some(cutoff) = prune_cutoff_ms {
-        metadata_entries
-            .into_iter()
-            .filter(|e| {
-                if e.target_type != TargetType::Project && e.last_timestamp < cutoff {
-                    pruned_count += 1;
-                    false
-                } else {
-                    true
-                }
-            })
-            .collect()
+    let prune_rules = if force_full {
+        None
     } else {
-        metadata_entries
+        prune::read_prune_rules(&session.store)?
     };
 
     // Route entries through filter rules to destinations
@@ -263,6 +293,10 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
             .values()
             .map(std::vec::Vec::len)
             .sum::<usize>();
+    progress(SerializeProgress::Routed {
+        destinations: all_dests.len(),
+        records: total_changes,
+    });
 
     let name = session.name();
     let email = session.email();
@@ -290,6 +324,11 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
         if meta.is_empty() && tombs.is_empty() && set_tombs.is_empty() && list_tombs.is_empty() {
             continue;
         }
+        let dest_records = meta.len() + tombs.len() + set_tombs.len() + list_tombs.len();
+        progress(SerializeProgress::BuildingRef {
+            ref_name: ref_name.clone(),
+            records: dest_records,
+        });
 
         // Use incremental mode only for the main destination
         let (existing, dirty) = if dest == MAIN_DEST {
@@ -316,6 +355,9 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
                 .map(gix::Id::detach)
         });
         if parent_tree_oid == Some(tree_oid) {
+            progress(SerializeProgress::RefUnchanged {
+                ref_name: ref_name.clone(),
+            });
             continue;
         }
 
@@ -344,13 +386,24 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
         .map_err(|e| Error::Other(format!("{e}")))?;
 
         refs_written.push(ref_name.clone());
+        progress(SerializeProgress::RefWritten {
+            ref_name: ref_name.clone(),
+        });
 
         // Auto-prune only for main destination
         if dest == MAIN_DEST {
             if let Some(ref prune_rules_val) = prune_rules {
                 if prune::should_prune(repo, tree_oid, prune_rules_val)? {
-                    let prune_tree_oid =
-                        prune_tree(repo, tree_oid, prune_rules_val, &session.store, now)?;
+                    let prune_tree_oid = auto_prune_tree(
+                        repo,
+                        &metadata_entries,
+                        &tombstone_entries,
+                        &set_tombstone_entries,
+                        &list_tombstone_entries,
+                        &filter_rules,
+                        prune_rules_val,
+                        now,
+                    )?;
 
                     if prune_tree_oid != tree_oid {
                         let prune_parent_oid = repo
@@ -364,6 +417,11 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
                             count_prune_stats(repo, tree_oid, prune_tree_oid)?;
 
                         auto_pruned = keys_dropped;
+                        progress(SerializeProgress::AutoPruned {
+                            ref_name: ref_name.clone(),
+                            keys_dropped,
+                            keys_retained,
+                        });
 
                         let min_size_str = prune_rules_val
                             .min_size
@@ -411,7 +469,7 @@ pub fn run(session: &Session, now: i64, force_full: bool) -> Result<SerializeOut
             total_changes
         },
         refs_written,
-        pruned: pruned_count + auto_pruned,
+        pruned: auto_pruned,
     })
 }
 
@@ -869,6 +927,77 @@ pub fn prune_tree(
         .write()
         .map_err(|e| Error::Other(format!("{e}")))?
         .detach())
+}
+
+fn auto_prune_tree(
+    repo: &gix::Repository,
+    metadata_entries: &[SerializableEntry],
+    tombstone_entries: &[TombstoneRecord],
+    set_tombstone_entries: &[SetTombstoneRecord],
+    list_tombstone_entries: &[ListTombstoneRecord],
+    filter_rules: &[FilterRule],
+    rules: &PruneRules,
+    now_ms: i64,
+) -> Result<gix::ObjectId> {
+    let cutoff_ms = prune::parse_since_to_cutoff_ms(&rules.since, now_ms)?;
+    let is_main_dest = |key: &str| -> bool {
+        classify_key(key, filter_rules).is_some_and(|dests| dests.iter().any(|d| d == MAIN_DEST))
+    };
+
+    let metadata = metadata_entries
+        .iter()
+        .filter(|entry| is_main_dest(&entry.key))
+        .filter_map(|entry| prune_metadata_entry(entry, cutoff_ms).transpose())
+        .collect::<Result<Vec<_>>>()?;
+    let tombstones = tombstone_entries
+        .iter()
+        .filter(|entry| is_main_dest(&entry.key))
+        .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
+        .cloned()
+        .collect::<Vec<_>>();
+    let set_tombstones = set_tombstone_entries
+        .iter()
+        .filter(|entry| is_main_dest(&entry.key))
+        .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
+        .cloned()
+        .collect::<Vec<_>>();
+    let list_tombstones = list_tombstone_entries
+        .iter()
+        .filter(|entry| is_main_dest(&entry.key))
+        .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    build_tree(
+        repo,
+        &metadata,
+        &tombstones,
+        &set_tombstones,
+        &list_tombstones,
+        None,
+        None,
+    )
+}
+
+fn prune_metadata_entry(
+    entry: &SerializableEntry,
+    cutoff_ms: i64,
+) -> Result<Option<SerializableEntry>> {
+    if entry.target_type != TargetType::Project && entry.last_timestamp < cutoff_ms {
+        return Ok(None);
+    }
+
+    if entry.target_type != TargetType::Project && entry.value_type == ValueType::List {
+        let retained = parse_entries(&entry.value)?
+            .into_iter()
+            .filter(|item| item.timestamp >= cutoff_ms)
+            .collect::<Vec<_>>();
+        let mut pruned = entry.clone();
+        pruned.value = encode_entries(&retained)?;
+        return Ok(Some(pruned));
+    }
+
+    Ok(Some(entry.clone()))
 }
 
 fn prune_target_type_tree(

@@ -224,6 +224,18 @@ impl Session {
         crate::serialize::run(self, self.now(), false)
     }
 
+    /// Serialize local metadata and report progress through a callback.
+    ///
+    /// # Parameters
+    ///
+    /// - `progress`: callback invoked at major serialization steps.
+    pub fn serialize_with_progress(
+        &self,
+        progress: impl FnMut(crate::serialize::SerializeProgress),
+    ) -> crate::error::Result<crate::serialize::SerializeOutput> {
+        crate::serialize::run_with_progress(self, self.now(), false, progress)
+    }
+
     /// Serialize local metadata by rebuilding from the complete SQLite state.
     ///
     /// This bypasses incremental dirty-target detection while still avoiding a
@@ -232,6 +244,18 @@ impl Session {
     /// the materialization timestamp when serialization succeeds.
     pub fn serialize_full(&self) -> crate::error::Result<crate::serialize::SerializeOutput> {
         crate::serialize::run(self, self.now(), true)
+    }
+
+    /// Serialize all local metadata and report progress through a callback.
+    ///
+    /// # Parameters
+    ///
+    /// - `progress`: callback invoked at major serialization steps.
+    pub fn serialize_full_with_progress(
+        &self,
+        progress: impl FnMut(crate::serialize::SerializeProgress),
+    ) -> crate::error::Result<crate::serialize::SerializeOutput> {
+        crate::serialize::run_with_progress(self, self.now(), true, progress)
     }
 
     /// Materialize remote metadata into the local store.
@@ -278,6 +302,26 @@ impl Session {
         crate::push::push_once(self, remote, self.now())
     }
 
+    /// Serialize and attempt a single push to the remote, reporting progress.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name. If `None`, the first configured
+    ///   metadata remote is used.
+    /// - `progress`: callback invoked before long-running push phases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization, ref inspection, rebasing, or pushing
+    /// fails.
+    pub fn push_once_with_progress(
+        &self,
+        remote: Option<&str>,
+        progress: impl FnMut(crate::push::PushProgress),
+    ) -> crate::error::Result<crate::push::PushOutput> {
+        crate::push::push_once_with_progress(self, remote, self.now(), progress)
+    }
+
     /// After a failed push, fetch remote changes, materialize, re-serialize,
     /// and rebase local ref for clean fast-forward.
     ///
@@ -289,5 +333,26 @@ impl Session {
     ///   metadata remote is used.
     pub fn resolve_push_conflict(&self, remote: Option<&str>) -> crate::error::Result<()> {
         crate::push::resolve_push_conflict(self, remote, self.now())
+    }
+
+    /// Resolve a failed push and report progress.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: optional remote name. If `None`, the first configured
+    ///   metadata remote is used.
+    /// - `progress`: callback invoked before long-running conflict resolution
+    ///   phases.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if fetch, hydration, materialization, serialization, or
+    /// rebase fails.
+    pub fn resolve_push_conflict_with_progress(
+        &self,
+        remote: Option<&str>,
+        progress: impl FnMut(crate::push::PushProgress),
+    ) -> crate::error::Result<()> {
+        crate::push::resolve_push_conflict_with_progress(self, remote, self.now(), progress)
     }
 }

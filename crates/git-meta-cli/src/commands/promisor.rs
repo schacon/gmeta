@@ -99,8 +99,16 @@ pub fn run() -> Result<()> {
                     first_line,
                 );
             }
-            None if decoded.parents().count() == 0 => {
-                // Root commit without a change list -- walk its tree
+            None if decoded.parents().count() == 0
+                || git_meta_lib::sync::commit_changes_omitted(&message) =>
+            {
+                // Root commits and omitted-change commits do not have an
+                // inline per-key list, so discover keys from tree paths.
+                let reason = if decoded.parents().count() == 0 {
+                    "root"
+                } else {
+                    "changes omitted"
+                };
                 let tree_id = decoded.tree();
                 let keys = git_meta_lib::sync::extract_keys_from_tree(repo, tree_id)?;
                 commits_parsed += 1;
@@ -128,7 +136,7 @@ pub fn run() -> Result<()> {
                 }
 
                 eprintln!(
-                    "  {} (root, {} tree keys: +{} inserted, ~{} existing) {}",
+                    "  {} ({reason}, {} tree keys: +{} inserted, ~{} existing) {}",
                     &oid.to_string()[..12],
                     keys.len(),
                     commit_inserted,

@@ -37,12 +37,12 @@ pub fn parse_commit_changes(message: &str) -> Option<Vec<CommitChange>> {
         return None;
     }
 
-    let body_start = message.find("\n\n")?;
-    let body = &message[body_start + 2..];
-
-    if body.contains("changes-omitted: true") {
+    if commit_changes_omitted(message) {
         return None;
     }
+
+    let body_start = message.find("\n\n")?;
+    let body = &message[body_start + 2..];
 
     let mut changes = Vec::new();
     for line in body.lines() {
@@ -75,6 +75,25 @@ pub fn parse_commit_changes(message: &str) -> Option<Vec<CommitChange>> {
     }
 
     Some(changes)
+}
+
+/// Return whether a serialize commit omitted its inline change list.
+///
+/// Large serialize commits include `changes-omitted: true` instead of one
+/// line per changed key. Callers can still discover keys by walking the
+/// commit's tree, because the tree layout records target/key paths without
+/// requiring blob content.
+#[must_use]
+pub fn commit_changes_omitted(message: &str) -> bool {
+    if !is_serialize_commit_message(message) {
+        return false;
+    }
+
+    let Some(body_start) = message.find("\n\n") else {
+        return false;
+    };
+    let body = &message[body_start + 2..];
+    body.contains("changes-omitted: true")
 }
 
 fn is_serialize_commit_message(message: &str) -> bool {
@@ -151,26 +170,39 @@ pub fn insert_promisor_entries(
             }
             None => {
                 let decoded = commit.decode().map_err(|e| Error::Other(format!("{e}")))?;
-                if decoded.parents().count() == 0 {
-                    // Root commit without a change list — walk its tree to discover keys
+                if decoded.parents().count() == 0 || commit_changes_omitted(&message) {
+                    // Root commits and omitted-change commits need tree walking
+                    // because they do not carry an inline per-key change list.
                     let tree_id = commit
                         .tree_id()
                         .map_err(|e| Error::Other(format!("{e}")))?
                         .detach();
-                    let keys = extract_keys_from_tree(repo, tree_id)?;
-                    for (target_type_str, target_value, key) in &keys {
-                        let target_type = target_type_str.parse::<TargetType>()?;
-                        let target = if target_type == TargetType::Project {
-                            Target::project()
-                        } else {
-                            Target::from_parts(target_type, Some(target_value.clone()))
-                        };
-                        if store.insert_promised(&target, key, &ValueType::String)? {
-                            count += 1;
-                        }
-                    }
+                    count += insert_promised_tree_keys(repo, store, tree_id)?;
                 }
             }
+        }
+    }
+
+    Ok(count)
+}
+
+fn insert_promised_tree_keys(
+    repo: &gix::Repository,
+    store: &Store,
+    tree_id: gix::ObjectId,
+) -> Result<usize> {
+    let keys = extract_keys_from_tree(repo, tree_id)?;
+    let mut count = 0;
+
+    for (target_type_str, target_value, key) in &keys {
+        let target_type = target_type_str.parse::<TargetType>()?;
+        let target = if target_type == TargetType::Project {
+            Target::project()
+        } else {
+            Target::from_parts(target_type, Some(target_value.clone()))
+        };
+        if store.insert_promised(&target, key, &ValueType::String)? {
+            count += 1;
         }
     }
 
@@ -256,52 +288,13 @@ fn parse_tree_path(path: &str) -> Option<(String, String, String)> {
         return None;
     };
 
-    let target_type = parts[0];
-
-    match target_type {
-        "project" => {
-            let marker_pos = parts.iter().position(|&p| p == value_type_marker)?;
-            if marker_pos < 2 {
-                return None;
-            }
-            let key = parts[1..marker_pos].join(":");
-            Some(("project".to_string(), String::new(), key))
-        }
-        "commit" => {
-            if parts.len() < 5 {
-                return None;
-            }
-            let target_value = parts[2].to_string();
-            let marker_pos = parts.iter().position(|&p| p == value_type_marker)?;
-            if marker_pos < 4 {
-                return None;
-            }
-            let key = parts[3..marker_pos].join(":");
-            Some(("commit".to_string(), target_value, key))
-        }
-        "path" => {
-            let target_pos = parts.iter().position(|&p| p == PATH_TARGET_SEPARATOR)?;
-            let marker_pos = parts.iter().position(|&p| p == value_type_marker)?;
-            if marker_pos <= target_pos + 1 {
-                return None;
-            }
-            let target_value = parts[1..target_pos].join("/");
-            let key = parts[target_pos + 1..marker_pos].join(":");
-            Some(("path".to_string(), target_value, key))
-        }
-        _ => {
-            if parts.len() < 5 {
-                return None;
-            }
-            let target_value = parts[2].to_string();
-            let marker_pos = parts.iter().position(|&p| p == value_type_marker)?;
-            if marker_pos < 4 {
-                return None;
-            }
-            let key = parts[3..marker_pos].join(":");
-            Some((target_type.to_string(), target_value, key))
-        }
+    let (target_type, target_value, key_parts) = parse_path_parts(&parts).ok()?;
+    let marker_pos = key_parts.iter().position(|&p| p == value_type_marker)?;
+    if marker_pos == 0 {
+        return None;
     }
+    let key = key_parts[..marker_pos].join(":");
+    Some((target_type.as_str().to_string(), target_value, key))
 }
 
 #[cfg(test)]
@@ -386,6 +379,20 @@ mod tests {
         assert_eq!(
             result,
             ("branch".into(), "feature-x".into(), "review:status".into())
+        );
+    }
+
+    #[test]
+    fn test_parse_tree_path_branch_with_slash() {
+        let path = "branch/a6/alex/trails-multi-pr-a57e52c3/review/status/__value";
+        let result = parse_tree_path(path).unwrap();
+        assert_eq!(
+            result,
+            (
+                "branch".into(),
+                "alex/trails-multi-pr-a57e52c3".into(),
+                "review:status".into()
+            )
         );
     }
 

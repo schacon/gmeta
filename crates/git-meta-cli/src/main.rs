@@ -123,8 +123,9 @@ fn main() -> Result<()> {
         Commands::Materialize {
             remote,
             dry_run,
+            force_full,
             verbose,
-        } => commands::materialize::run(remote.as_deref(), dry_run, verbose),
+        } => commands::materialize::run(remote.as_deref(), dry_run, force_full, verbose),
 
         Commands::Import(args) => match args.action {
             Some(ImportAction::Gh(gh_args)) => commands::import::run_gh(

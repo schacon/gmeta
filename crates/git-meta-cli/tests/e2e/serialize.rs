@@ -207,6 +207,136 @@ fn serialize_force_full_rebuilds_from_metadata_table() {
 }
 
 #[test]
+fn serialize_force_full_ignores_prune_since() {
+    let (dir, _sha) = setup_repo();
+
+    harness::git_meta(dir.path())
+        .args([
+            "set",
+            "--timestamp",
+            "1000",
+            "branch:legacy",
+            "historical:key",
+            "beta",
+        ])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:since", "14d"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args(["serialize", "--force-full"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("auto-pruned").not());
+
+    let repo = open_repo(dir.path());
+    let commit_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    let commit_obj = commit_oid.attach(&repo).object().unwrap().into_commit();
+    let tree = commit_obj.tree().unwrap();
+
+    let mut results = Vec::new();
+    walk_tree(&repo, tree.id, "", &mut results);
+    let fanout = target_fanout("legacy");
+    let expected_path = format!("branch/{fanout}/legacy/historical/key/__value");
+    assert!(
+        results
+            .iter()
+            .any(|(path, content)| path == &expected_path && content == "beta"),
+        "expected force-full serialization to include pruned historical:key, got: {results:?}"
+    );
+}
+
+#[test]
+fn serialize_writes_full_tree_before_pruning() {
+    let (dir, _sha) = setup_repo();
+
+    harness::git_meta(dir.path())
+        .args([
+            "set",
+            "--timestamp",
+            "1000",
+            "branch:legacy",
+            "historical:key",
+            "beta",
+        ])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:since", "14d"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args(["serialize"])
+        .assert()
+        .success();
+
+    let repo = open_repo(dir.path());
+    let commit_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    let commit_obj = commit_oid.attach(&repo).object().unwrap().into_commit();
+    let tree = commit_obj.tree().unwrap();
+
+    let mut results = Vec::new();
+    walk_tree(&repo, tree.id, "", &mut results);
+    let fanout = target_fanout("legacy");
+    let expected_path = format!("branch/{fanout}/legacy/historical/key/__value");
+    assert!(
+        results
+            .iter()
+            .any(|(path, content)| path == &expected_path && content == "beta"),
+        "serialize should write historical keys before any prune commit, got: {results:?}"
+    );
+}
+
+#[test]
+fn serialize_auto_prune_drops_old_string_metadata() {
+    let (dir, _sha) = setup_repo();
+
+    harness::git_meta(dir.path())
+        .args([
+            "set",
+            "--timestamp",
+            "1000",
+            "branch:legacy",
+            "historical:key",
+            "beta",
+        ])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:since", "14d"])
+        .assert()
+        .success();
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:max-keys", "1"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args(["serialize"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("auto-pruned"));
+
+    let repo = open_repo(dir.path());
+    let commit_oid = ref_to_commit_oid(&repo, "refs/meta/local/main");
+    let commit_obj = commit_oid.attach(&repo).object().unwrap().into_commit();
+    let tree = commit_obj.tree().unwrap();
+
+    let mut results = Vec::new();
+    walk_tree(&repo, tree.id, "", &mut results);
+    let fanout = target_fanout("legacy");
+    let pruned_path = format!("branch/{fanout}/legacy/historical/key/__value");
+    assert!(
+        !results.iter().any(|(path, _)| path == &pruned_path),
+        "expected auto-prune to remove old historical:key, got: {results:?}"
+    );
+}
+
+#[test]
 fn serialize_list_uses_stored_timestamp() {
     let (dir, _sha) = setup_repo();
 

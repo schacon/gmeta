@@ -332,6 +332,29 @@ fn blame_groups_lines_by_branch_metadata() {
         .stdout(predicate::str::contains("2026-04-01..2026-04-03"));
 }
 
+#[test]
+fn blame_without_branch_metadata_shows_commit_details() {
+    let (dir, _sha) = harness::setup_repo();
+    std::fs::write(dir.path().join("file.txt"), "one\n").unwrap();
+    git(dir.path(), &["add", "file.txt"]);
+    git(dir.path(), &["commit", "-m", "feat: no pr"]);
+    let commit = git_stdout(dir.path(), &["rev-parse", "--short=8", "HEAD"]);
+
+    harness::git_meta(dir.path())
+        .env_remove("NO_COLOR")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "80")
+        .args(["blame", "file.txt"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("feat: no pr"))
+        .stdout(predicate::str::contains(format!("commit: {commit}")))
+        .stdout(predicate::str::contains("author: Test User"))
+        .stdout(predicate::str::contains("date:"))
+        .stdout(predicate::str::contains("http").not())
+        .stderr(predicate::str::contains("No PR metadata found").not());
+}
+
 fn git(repo: &std::path::Path, args: &[&str]) {
     let output = std::process::Command::new("git")
         .args(["-C", &repo.to_string_lossy()])

@@ -15,8 +15,8 @@ impl Store {
             "SELECT COUNT(*) FROM metadata
              WHERE target_type != 'project' AND last_timestamp < ?1",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Count list_values rows that would be pruned (older than cutoff, non-project parent).
@@ -28,8 +28,8 @@ impl Store {
                    SELECT rowid FROM metadata WHERE target_type != 'project'
                )",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Count tombstone rows that would be pruned (non-project, older than cutoff).
@@ -39,8 +39,8 @@ impl Store {
              WHERE tombstone_type = 'metadata'
                AND target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Count set tombstone rows that would be pruned (non-project, older than cutoff).
@@ -50,8 +50,8 @@ impl Store {
              WHERE tombstone_type = 'set_member'
                AND target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Count log entries that would be pruned (non-project, older than cutoff).
@@ -60,8 +60,8 @@ impl Store {
             "SELECT COUNT(*) FROM metadata_log
              WHERE target_type != 'project' AND timestamp < ?1",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Count metadata rows that will survive pruning.
@@ -70,8 +70,8 @@ impl Store {
             "SELECT COUNT(*) FROM metadata
              WHERE target_type = 'project' OR last_timestamp >= ?1",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Count list_values rows that will survive pruning.
@@ -83,8 +83,8 @@ impl Store {
                     SELECT rowid FROM metadata WHERE target_type = 'project'
                 )",
             params![cutoff_ms],
-            |row| row.get(0),
-        )?)
+            |row| row.get::<_, i64>(0),
+        )? as u64)
     }
 
     /// Prune metadata and associated child rows older than cutoff.

@@ -72,6 +72,7 @@ struct BlameLine {
     original_line: u32,
     final_line: u32,
     author: Option<String>,
+    author_time: Option<String>,
     summary: Option<String>,
     previous: Option<String>,
     text: String,
@@ -111,6 +112,7 @@ fn parse_porcelain(output: &str) -> Result<Vec<BlameLine>> {
                 original_line: current.original_line,
                 final_line: current.final_line,
                 author: metadata.get("author").cloned(),
+                author_time: metadata.get("author-time").cloned(),
                 summary: metadata.get("summary").cloned(),
                 previous: metadata.get("previous").cloned(),
                 text: text.to_string(),
@@ -164,6 +166,7 @@ struct BlameGroup {
     branch_id: Option<String>,
     branch: Option<BranchMetadata>,
     author: Option<String>,
+    author_time: Option<String>,
     summary: Option<String>,
     previous: Option<String>,
     lines: Vec<GroupLine>,
@@ -226,19 +229,7 @@ fn json_groups(groups: &[BlameGroup]) -> Vec<JsonBlameGroup> {
 }
 
 fn group_blame(db: &git_meta_lib::db::Store, lines: &[BlameLine]) -> Result<Vec<BlameGroup>> {
-    let mut commit_branch_ids = BTreeMap::new();
-    for commit in lines
-        .iter()
-        .map(|line| line.commit.as_str())
-        .collect::<HashSet<_>>()
-    {
-        let target = Target::from_parts(TargetType::Commit, Some(commit.to_string()));
-        let branch_id = match db.get_value(&target, "branch-id")? {
-            Some(MetaValue::String(value)) => Some(value),
-            _ => None,
-        };
-        commit_branch_ids.insert(commit.to_string(), branch_id);
-    }
+    let commit_branch_ids = load_commit_branch_ids(db, lines)?;
 
     let mut branch_metadata = BTreeMap::new();
     for branch_id in commit_branch_ids.values().filter_map(Option::as_ref) {
@@ -284,6 +275,7 @@ fn group_blame(db: &git_meta_lib::db::Store, lines: &[BlameLine]) -> Result<Vec<
             branch_id,
             branch,
             author: line.author.clone(),
+            author_time: line.author_time.clone(),
             summary: line.summary.clone(),
             previous: line.previous.clone(),
             lines: vec![GroupLine {
@@ -295,6 +287,79 @@ fn group_blame(db: &git_meta_lib::db::Store, lines: &[BlameLine]) -> Result<Vec<
     }
 
     Ok(groups)
+}
+
+fn hydrate_blame_metadata(session: &git_meta_lib::Session, lines: &[BlameLine]) -> Result<()> {
+    let commits = lines
+        .iter()
+        .map(|line| line.commit.clone())
+        .collect::<BTreeSet<_>>();
+    let promised_commit_keys = promised_entries(
+        session.store(),
+        &TargetType::Commit,
+        &commits,
+        &[COMMIT_BRANCH_KEY],
+    )?;
+    if !promised_commit_keys.is_empty() {
+        hydrate_promised_entries(session, &TargetType::Commit, &promised_commit_keys)?;
+    }
+
+    let branch_ids = load_commit_branch_ids(session.store(), lines)?
+        .values()
+        .filter_map(std::clone::Clone::clone)
+        .collect::<BTreeSet<_>>();
+    let promised_branch_keys = promised_entries(
+        session.store(),
+        &TargetType::Branch,
+        &branch_ids,
+        BRANCH_METADATA_KEYS,
+    )?;
+    if !promised_branch_keys.is_empty() {
+        hydrate_promised_entries(session, &TargetType::Branch, &promised_branch_keys)?;
+    }
+
+    Ok(())
+}
+
+fn promised_entries(
+    db: &git_meta_lib::db::Store,
+    target_type: &TargetType,
+    target_values: &BTreeSet<String>,
+    keys: &[&str],
+) -> Result<Vec<(String, String)>> {
+    let keys = keys.iter().copied().collect::<HashSet<_>>();
+    let entries = db
+        .get_promised_keys()?
+        .into_iter()
+        .filter_map(|(target_type_str, target_value, key)| {
+            let parsed_type = target_type_str.parse::<TargetType>().ok()?;
+            (parsed_type == *target_type
+                && target_values.contains(&target_value)
+                && keys.contains(key.as_str()))
+            .then_some((target_value, key))
+        })
+        .collect::<Vec<_>>();
+    Ok(entries)
+}
+
+fn load_commit_branch_ids(
+    db: &git_meta_lib::db::Store,
+    lines: &[BlameLine],
+) -> Result<BTreeMap<String, Option<String>>> {
+    let mut commit_branch_ids = BTreeMap::new();
+    for commit in lines
+        .iter()
+        .map(|line| line.commit.as_str())
+        .collect::<HashSet<_>>()
+    {
+        let target = Target::from_parts(TargetType::Commit, Some(commit.to_string()));
+        let branch_id = match db.get_value(&target, COMMIT_BRANCH_KEY)? {
+            Some(MetaValue::String(value)) if !value.is_empty() => Some(value),
+            _ => None,
+        };
+        commit_branch_ids.insert(commit.to_string(), branch_id);
+    }
+    Ok(commit_branch_ids)
 }
 
 fn load_branch_metadata(db: &git_meta_lib::db::Store, branch_id: &str) -> Result<BranchMetadata> {
@@ -335,27 +400,18 @@ fn print_text(out: &mut impl Write, groups: &[BlameGroup]) -> Result<()> {
             .as_ref()
             .and_then(|branch| branch.review_number.as_deref())
             .map(|number| format!("#{number}"));
-        let description = group
-            .branch
-            .as_ref()
-            .and_then(|branch| branch.title.as_deref())
-            .or(group.branch_id.as_deref())
-            .unwrap_or_else(|| &group.commit[..8.min(group.commit.len())]);
+        let description = group_description(group);
         let url = group
             .branch
             .as_ref()
             .and_then(|branch| branch.review_url.as_deref());
-        let details = group
-            .branch
-            .as_ref()
-            .map(branch_detail_lines)
-            .unwrap_or_default();
+        let details = detail_lines(group);
         print_section_header(
             out,
             &style,
             &range,
             pr_number.as_deref(),
-            description,
+            &description,
             url,
             &details,
             width,
@@ -375,6 +431,24 @@ fn print_text(out: &mut impl Write, groups: &[BlameGroup]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn group_description(group: &BlameGroup) -> String {
+    group
+        .branch
+        .as_ref()
+        .and_then(|branch| branch.title.clone())
+        .or_else(|| group.branch_id.clone())
+        .or_else(|| group.summary.clone())
+        .unwrap_or_else(|| group.commit[..8.min(group.commit.len())].to_string())
+}
+
+fn detail_lines(group: &BlameGroup) -> Vec<DetailLine> {
+    if let Some(branch) = &group.branch {
+        branch_detail_lines(branch)
+    } else {
+        commit_detail_lines(group)
+    }
 }
 
 fn print_section_header(
@@ -447,6 +521,26 @@ fn branch_detail_lines(branch: &BranchMetadata) -> Vec<DetailLine> {
     lines
 }
 
+fn commit_detail_lines(group: &BlameGroup) -> Vec<DetailLine> {
+    let mut lines = vec![DetailLine {
+        label: "commit",
+        value: group.commit[..8.min(group.commit.len())].to_string(),
+    }];
+    if let Some(author) = &group.author {
+        lines.push(DetailLine {
+            label: "author",
+            value: author.clone(),
+        });
+    }
+    if let Some(date) = group.author_time.as_deref().and_then(format_author_time) {
+        lines.push(DetailLine {
+            label: "date",
+            value: date,
+        });
+    }
+    lines
+}
+
 fn styled_detail_line(style: &Style, detail: &DetailLine, box_width: usize) -> String {
     let visible = format!("{}: {}", detail.label, detail.value);
     let visible = truncate_to_width(&visible, box_width);
@@ -497,6 +591,10 @@ fn author_date_range(author_dates: &[String]) -> Option<String> {
     } else {
         Some(format!("{min}..{max}"))
     }
+}
+
+fn format_author_time(value: &str) -> Option<String> {
+    value.parse::<i64>().ok().map(format_author_date)
 }
 
 fn format_author_date(seconds: i64) -> String {
@@ -612,6 +710,7 @@ mod tests {
         let input = "\
 84a1d9b840d428fc523f6ffc1f8adfb43ab5918d 1 1 1
 author Alice
+author-time 1775001600
 summary feat: add thing
 filename file.txt
 \tfirst
@@ -622,6 +721,7 @@ filename file.txt
         let lines = parse_porcelain(input).unwrap();
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].author.as_deref(), Some("Alice"));
+        assert_eq!(lines[1].author_time.as_deref(), Some("1775001600"));
         assert_eq!(lines[1].author.as_deref(), Some("Alice"));
         assert_eq!(lines[1].summary.as_deref(), Some("feat: add thing"));
     }

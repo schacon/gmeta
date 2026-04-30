@@ -222,6 +222,10 @@ pub enum Commands {
         #[arg(long = "dry-run")]
         dry_run: bool,
 
+        /// Reindex promisor keys from the full remote metadata history
+        #[arg(long = "force-full")]
+        force_full: bool,
+
         /// Show detailed information about merge decisions and tree parsing
         #[arg(short = 'v', long)]
         verbose: bool,
