@@ -3,7 +3,7 @@ use predicates::prelude::*;
 
 use crate::harness::{
     self, open_repo, ref_to_commit_oid, setup_bare_with_history, setup_bare_with_history_retained,
-    setup_bare_with_meta, setup_repo,
+    setup_bare_with_meta, setup_bare_with_omitted_history, setup_repo,
 };
 
 #[test]

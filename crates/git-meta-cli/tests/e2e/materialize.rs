@@ -6,7 +6,7 @@ use tempfile::TempDir;
 
 use crate::harness::{
     self, commit_target, copy_meta_objects, copy_meta_objects_from, open_repo, ref_to_commit_oid,
-    setup_repo, target_fanout,
+    setup_bare_with_omitted_history, setup_repo, target_fanout,
 };
 
 #[test]

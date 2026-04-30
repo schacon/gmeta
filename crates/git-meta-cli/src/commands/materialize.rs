@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::context::CommandContext;
-use anyhow::Result;
+use anyhow::{bail, Result};
 use git_meta_lib::db::Store;
 use git_meta_lib::list_value::{encode_entries, parse_timestamp_from_entry_name};
 use git_meta_lib::materialize::{find_remote_refs, MaterializeStrategy};
