@@ -72,22 +72,34 @@ mod tests {
 
     #[test]
     fn parses_canonical_operations() {
-        assert_eq!(
-            "list_rm".parse::<Operation>().unwrap(),
-            Operation::ListRemove
-        );
-        assert_eq!("set_add".parse::<Operation>().unwrap(), Operation::SetAdd);
-        assert_eq!("set_rm".parse::<Operation>().unwrap(), Operation::SetRemove);
+        assert!(matches!(
+            "list_rm".parse::<Operation>(),
+            Ok(Operation::ListRemove)
+        ));
+        assert!(matches!(
+            "set_add".parse::<Operation>(),
+            Ok(Operation::SetAdd)
+        ));
+        assert!(matches!(
+            "set_rm".parse::<Operation>(),
+            Ok(Operation::SetRemove)
+        ));
     }
 
     #[test]
     fn parses_legacy_cli_style_operations() {
-        assert_eq!(
-            "list:rm".parse::<Operation>().unwrap(),
-            Operation::ListRemove
-        );
-        assert_eq!("set:add".parse::<Operation>().unwrap(), Operation::SetAdd);
-        assert_eq!("set:rm".parse::<Operation>().unwrap(), Operation::SetRemove);
+        assert!(matches!(
+            "list:rm".parse::<Operation>(),
+            Ok(Operation::ListRemove)
+        ));
+        assert!(matches!(
+            "set:add".parse::<Operation>(),
+            Ok(Operation::SetAdd)
+        ));
+        assert!(matches!(
+            "set:rm".parse::<Operation>(),
+            Ok(Operation::SetRemove)
+        ));
     }
 }
 

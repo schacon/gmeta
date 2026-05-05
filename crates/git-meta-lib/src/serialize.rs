@@ -466,13 +466,15 @@ pub fn run_with_progress(
                 if prune::should_prune(repo, tree_oid, prune_rules_val)? {
                     let prune_tree_oid = auto_prune_tree(
                         repo,
-                        &metadata_entries,
-                        &tombstone_entries,
-                        &set_tombstone_entries,
-                        &list_tombstone_entries,
-                        &filter_rules,
-                        prune_rules_val,
-                        now,
+                        AutoPruneInputs {
+                            metadata_entries: &metadata_entries,
+                            tombstone_entries: &tombstone_entries,
+                            set_tombstone_entries: &set_tombstone_entries,
+                            list_tombstone_entries: &list_tombstone_entries,
+                            filter_rules: &filter_rules,
+                            rules: prune_rules_val,
+                            now_ms: now,
+                        },
                     )?;
 
                     if prune_tree_oid != tree_oid {
@@ -999,39 +1001,45 @@ pub fn prune_tree(
         .detach())
 }
 
-fn auto_prune_tree(
-    repo: &gix::Repository,
-    metadata_entries: &[SerializableEntry],
-    tombstone_entries: &[TombstoneRecord],
-    set_tombstone_entries: &[SetTombstoneRecord],
-    list_tombstone_entries: &[ListTombstoneRecord],
-    filter_rules: &[FilterRule],
-    rules: &PruneRules,
+struct AutoPruneInputs<'a> {
+    metadata_entries: &'a [SerializableEntry],
+    tombstone_entries: &'a [TombstoneRecord],
+    set_tombstone_entries: &'a [SetTombstoneRecord],
+    list_tombstone_entries: &'a [ListTombstoneRecord],
+    filter_rules: &'a [FilterRule],
+    rules: &'a PruneRules,
     now_ms: i64,
-) -> Result<gix::ObjectId> {
-    let cutoff_ms = prune::parse_since_to_cutoff_ms(&rules.since, now_ms)?;
+}
+
+fn auto_prune_tree(repo: &gix::Repository, inputs: AutoPruneInputs<'_>) -> Result<gix::ObjectId> {
+    let cutoff_ms = prune::parse_since_to_cutoff_ms(&inputs.rules.since, inputs.now_ms)?;
     let is_main_dest = |key: &str| -> bool {
-        classify_key(key, filter_rules).is_some_and(|dests| dests.iter().any(|d| d == MAIN_DEST))
+        classify_key(key, inputs.filter_rules)
+            .is_some_and(|dests| dests.iter().any(|d| d == MAIN_DEST))
     };
 
-    let metadata = metadata_entries
+    let metadata = inputs
+        .metadata_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
         .filter_map(|entry| prune_metadata_entry(entry, cutoff_ms).transpose())
         .collect::<Result<Vec<_>>>()?;
-    let tombstones = tombstone_entries
+    let tombstones = inputs
+        .tombstone_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
         .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
         .cloned()
         .collect::<Vec<_>>();
-    let set_tombstones = set_tombstone_entries
+    let set_tombstones = inputs
+        .set_tombstone_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
         .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
         .cloned()
         .collect::<Vec<_>>();
-    let list_tombstones = list_tombstone_entries
+    let list_tombstones = inputs
+        .list_tombstone_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
         .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
