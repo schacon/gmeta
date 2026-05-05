@@ -45,4 +45,4 @@ This is a reference implementation of the gmeta spec ([docs](https://git-meta.co
 ## Committing and Version Control
 
 - If available, always prefer the `but` (GitButler) cli over `git`. Always load the respective skill.
-- Before committing, always run `cargo fmt` and `cargo clippy --fix --allow-dirty` and ensure no warnings remain.
+- When you are done making changes, always run `cargo fmt` and `cargo clippy --fix --allow-dirty` and ensure no warnings remain.
