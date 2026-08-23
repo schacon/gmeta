@@ -10,8 +10,8 @@ repository = "https://github.com/git-meta/git-meta"
 
 [workspace.dependencies]
 anyhow = "1"
-gix = { version = "0.86.0", default-features = false, features = [
-    "sha1", "revision", "merge", "tree-editor", "blob-diff",
+gix = { version = "0.87.0", default-features = false, features = [
+    "sha1", "revision", "merge", "blob-diff",
 ] }
 rusqlite = { version = ">=0.33,<0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
