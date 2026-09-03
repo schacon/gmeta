@@ -480,3 +480,118 @@ fn serialize_detects_historical_writes_after_prior_serialize() {
     assert_eq!(output3.changes, 0, "unchanged tree should be a no-op");
     assert!(output3.refs_written.is_empty());
 }
+
+/// The scoped read that incremental serialize uses must produce exactly the
+/// tree a full serialize would. This is the safety net for reading only the
+/// changed targets' rows instead of the whole metadata table.
+#[test]
+fn incremental_serialize_matches_a_full_rebuild() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+
+    // Seed several targets of different types, each with a mix of value types.
+    let targets = [
+        Target::commit(&sha).unwrap(),
+        Target::commit("00112233445566778899aabbccddeeff00112233").unwrap(),
+        Target::path("crates/lib/src/main.rs"),
+        Target::branch("feature/scoped-reads"),
+    ];
+    for (index, target) in targets.iter().enumerate() {
+        let handle = session.target(target);
+        handle.set("agent:model", format!("model-{index}")).unwrap();
+        handle.set("review:status", "pending").unwrap();
+        handle.list_push("agent:transcript", "first line").unwrap();
+        handle.set_add("review:owners", "alice").unwrap();
+    }
+    let _ = session.serialize().unwrap();
+
+    // Touch a subset, the way a real session would between publishes.
+    let handle = session.target(&targets[1]);
+    handle.set("review:status", "approved").unwrap();
+    handle.list_push("agent:transcript", "second line").unwrap();
+    session.target(&targets[2]).remove("agent:model").unwrap();
+    let _ = session.serialize().unwrap();
+
+    let incremental_tree = local_tree(&dir);
+
+    // A forced full serialize reads every row and rebuilds from scratch.
+    let session = reopen_session(dir.path(), 0);
+    let _ = session.serialize_full().unwrap();
+    let full_tree = local_tree(&dir);
+
+    assert_eq!(
+        incremental_tree, full_tree,
+        "incremental serialize diverged from a full rebuild"
+    );
+}
+
+/// A commit that only removes keys leaves no metadata rows for its target, so
+/// serialize must still rebuild that subtree rather than treating the empty
+/// read as "nothing to do".
+#[test]
+fn incremental_serialize_applies_a_removal_only_change() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+
+    let kept = Target::commit(&sha).unwrap();
+    let emptied = Target::commit("00112233445566778899aabbccddeeff00112233").unwrap();
+
+    session.target(&kept).set("agent:model", "keep-me").unwrap();
+    session
+        .target(&emptied)
+        .set("agent:model", "remove-me")
+        .unwrap();
+    let _ = session.serialize().unwrap();
+
+    assert!(session.target(&emptied).remove("agent:model").unwrap());
+    let _ = session.serialize().unwrap();
+
+    let tree = local_tree(&dir);
+    let emptied_sha = "00112233445566778899aabbccddeeff00112233";
+    let removed_path = format!("commit/00/{emptied_sha}/agent/model/__value");
+    let kept_path = format!("commit/{}/{sha}/agent/model/__value", &sha[..2]);
+
+    assert!(
+        blob_at(dir.path(), tree, &removed_path).is_none(),
+        "removed key is still in the serialized tree"
+    );
+    assert!(
+        blob_at(dir.path(), tree, &kept_path).is_some(),
+        "unrelated key was dropped"
+    );
+}
+
+/// Resolve a slash-separated path inside a tree, if every segment exists.
+fn blob_at(dir: &std::path::Path, tree: gix::ObjectId, path: &str) -> Option<gix::ObjectId> {
+    let repo = gix::open(dir).unwrap();
+    let mut current = tree;
+    let segments: Vec<&str> = path.split('/').collect();
+    for (index, segment) in segments.iter().enumerate() {
+        let tree = repo.find_tree(current).ok()?;
+        let entry = tree.find_entry(*segment)?;
+        if index == segments.len() - 1 {
+            return Some(entry.object_id());
+        }
+        if !entry.mode().is_tree() {
+            return None;
+        }
+        current = entry.object_id();
+    }
+    None
+}
+
+/// Read the tree of `refs/meta/local/main`.
+fn local_tree(dir: &tempfile::TempDir) -> gix::ObjectId {
+    let repo = gix::open(dir.path()).unwrap();
+    let commit = repo
+        .find_reference("refs/meta/local/main")
+        .unwrap()
+        .into_fully_peeled_id()
+        .unwrap()
+        .object()
+        .unwrap()
+        .into_commit();
+    commit.tree_id().unwrap().detach()
+}

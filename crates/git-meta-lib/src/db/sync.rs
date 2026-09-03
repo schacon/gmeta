@@ -12,17 +12,95 @@ use super::types::Operation;
 use super::{encode_list_entries_by_metadata_id, encode_set_values_by_metadata_id, Store};
 
 impl Store {
+    /// Columns every serializable-entry query selects, in the order
+    /// [`Store::collect_serializable`] expects them.
+    const SERIALIZABLE_SELECT: &'static str =
+        "SELECT rowid, target_type, target_value, key, value, value_type, last_timestamp, is_git_ref
+         FROM metadata
+         WHERE is_promised = 0 AND source_ref IS NULL";
+
     /// Get all metadata entries (for serialization).
     pub fn get_all_metadata(&self) -> Result<Vec<super::types::SerializableEntry>> {
-        use super::types::SerializableEntry;
-        let mut stmt = self.conn.prepare(
-            "SELECT rowid, target_type, target_value, key, value, value_type, last_timestamp, is_git_ref
-             FROM metadata
-             WHERE is_promised = 0 AND source_ref IS NULL
-             ORDER BY target_type, target_value, key",
-        )?;
+        let sql = format!(
+            "{} ORDER BY target_type, target_value, key",
+            Self::SERIALIZABLE_SELECT
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut results = Vec::new();
+        self.collect_serializable(&mut stmt, [], &mut results)?;
+        Ok(results)
+    }
 
-        let rows = stmt.query_map([], |row| {
+    /// Get metadata entries for a specific set of targets.
+    ///
+    /// Incremental serialization only rebuilds the subtrees of targets that
+    /// changed, so it only needs those targets' rows. Reading the whole table
+    /// instead makes the cost of publishing one change scale with the total
+    /// amount of metadata a repository holds.
+    ///
+    /// Each target is a `(type, value)` pair; project-scoped rows use an empty
+    /// value. Results are ordered by target and key, as [`get_all_metadata`]
+    /// orders them.
+    ///
+    /// [`get_all_metadata`]: Store::get_all_metadata
+    pub fn get_metadata_for_targets(
+        &self,
+        targets: &[(TargetType, String)],
+    ) -> Result<Vec<super::types::SerializableEntry>> {
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Keep each statement's parameter count well inside SQLite's limit.
+        const TARGETS_PER_QUERY: usize = 100;
+
+        let mut results = Vec::new();
+        for chunk in targets.chunks(TARGETS_PER_QUERY) {
+            let placeholders = std::iter::repeat_n("(?,?)", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "{} AND (target_type, target_value) IN (VALUES {placeholders})",
+                Self::SERIALIZABLE_SELECT
+            );
+            let mut stmt = self.conn.prepare(&sql)?;
+
+            let mut bound: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(chunk.len() * 2);
+            let type_names: Vec<&str> = chunk
+                .iter()
+                .map(|(target_type, _)| target_type.as_str())
+                .collect();
+            for (index, (_, target_value)) in chunk.iter().enumerate() {
+                bound.push(&type_names[index]);
+                bound.push(target_value);
+            }
+
+            self.collect_serializable(&mut stmt, bound.as_slice(), &mut results)?;
+        }
+
+        results.sort_by(|a, b| {
+            (a.target_type.as_str(), &a.target_value, &a.key).cmp(&(
+                b.target_type.as_str(),
+                &b.target_value,
+                &b.key,
+            ))
+        });
+        Ok(results)
+    }
+
+    /// Run a serializable-entry query and append its rows to `results`.
+    ///
+    /// List and set values are stored in side tables, so each row of those
+    /// types is expanded here into the encoded form serialization expects.
+    fn collect_serializable(
+        &self,
+        stmt: &mut rusqlite::Statement<'_>,
+        params: impl rusqlite::Params,
+        results: &mut Vec<super::types::SerializableEntry>,
+    ) -> Result<()> {
+        use super::types::SerializableEntry;
+
+        let rows = stmt.query_map(params, |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -35,7 +113,6 @@ impl Store {
             ))
         })?;
 
-        let mut results = Vec::new();
         for row in rows {
             let (
                 metadata_id,
@@ -433,5 +510,120 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(exists)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use crate::db::Store;
+    use crate::types::{MetaValue, Target, TargetType};
+
+    fn store_with_entries() -> Store {
+        let store = Store::open_in_memory().expect("open store");
+        let targets = [
+            Target::commit("00112233445566778899aabbccddeeff00112233").expect("commit target"),
+            Target::commit("ffeeddccbbaa99887766554433221100ffeeddcc").expect("commit target"),
+            Target::path("crates/lib/src/main.rs"),
+            Target::branch("feature/x"),
+        ];
+        for (index, target) in targets.iter().enumerate() {
+            store
+                .set_value(
+                    target,
+                    "agent:model",
+                    &MetaValue::String(format!("model-{index}")),
+                    "test@example.com",
+                    1_000 + index as i64,
+                )
+                .expect("set string");
+            store
+                .set_value(
+                    target,
+                    "review:owners",
+                    &MetaValue::Set(["alice".to_string()].into_iter().collect()),
+                    "test@example.com",
+                    1_000 + index as i64,
+                )
+                .expect("set set");
+        }
+        store
+    }
+
+    #[test]
+    fn scoped_read_matches_the_full_read_for_those_targets() {
+        let store = store_with_entries();
+        let wanted = [
+            (
+                TargetType::Commit,
+                "00112233445566778899aabbccddeeff00112233".to_string(),
+            ),
+            (TargetType::Branch, "feature/x".to_string()),
+        ];
+
+        let scoped = store
+            .get_metadata_for_targets(&wanted)
+            .expect("scoped read");
+        let expected: Vec<_> = store
+            .get_all_metadata()
+            .expect("full read")
+            .into_iter()
+            .filter(|entry| {
+                wanted
+                    .iter()
+                    .any(|(t, v)| *t == entry.target_type && *v == entry.target_value)
+            })
+            .collect();
+
+        assert_eq!(scoped.len(), expected.len());
+        for (got, want) in scoped.iter().zip(expected.iter()) {
+            assert_eq!(got.target_type, want.target_type);
+            assert_eq!(got.target_value, want.target_value);
+            assert_eq!(got.key, want.key);
+            assert_eq!(
+                got.value, want.value,
+                "set and list values must be expanded"
+            );
+            assert_eq!(got.value_type, want.value_type);
+            assert_eq!(got.last_timestamp, want.last_timestamp);
+        }
+        assert!(
+            scoped.len() < store.get_all_metadata().expect("full read").len(),
+            "the scoped read should be a strict subset"
+        );
+    }
+
+    #[test]
+    fn scoped_read_of_no_targets_is_empty() {
+        let store = store_with_entries();
+        assert!(store
+            .get_metadata_for_targets(&[])
+            .expect("scoped read")
+            .is_empty());
+    }
+
+    #[test]
+    fn scoped_read_spans_more_targets_than_one_query_holds() {
+        let store = Store::open_in_memory().expect("open store");
+        let mut wanted = Vec::new();
+        for index in 0..250 {
+            let value = format!("branch-{index}");
+            let target = Target::branch(&value);
+            store
+                .set_value(
+                    &target,
+                    "agent:model",
+                    &MetaValue::String("m".into()),
+                    "test@example.com",
+                    1_000,
+                )
+                .expect("set");
+            wanted.push((TargetType::Branch, value));
+        }
+
+        let scoped = store
+            .get_metadata_for_targets(&wanted)
+            .expect("scoped read");
+        assert_eq!(scoped.len(), 250, "chunked queries lost rows");
     }
 }

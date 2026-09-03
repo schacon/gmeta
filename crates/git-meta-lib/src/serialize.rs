@@ -173,6 +173,13 @@ pub fn run_with_progress(
     // Determine existing tree for incremental mode
     let existing_tree_oid = ref_tree_oid(repo, &local_ref_name)?;
 
+    // Read filter rules up front: with no rules every key routes to the main
+    // destination, which is the only destination built incrementally. When
+    // rules do exist, side destinations are rebuilt in full and therefore need
+    // every entry, so the scoped read below would starve them.
+    let filter_rules = parse_filter_rules(&session.store)?;
+    let single_destination = filter_rules.is_empty();
+
     // Determine incremental vs full mode and collect entries + changes
     let (
         metadata_entries,
@@ -186,7 +193,21 @@ pub fn run_with_progress(
             mode: SerializeMode::Incremental,
         });
         let modified = session.store.get_modified_since(since)?;
-        let metadata = session.store.get_all_metadata()?;
+        // Only the changed targets' rows are needed to rebuild their subtrees;
+        // every other subtree is reused from the existing tree by OID.
+        let can_scope_read =
+            single_destination && existing_tree_oid.is_some() && !modified.is_empty();
+        let metadata = if can_scope_read {
+            let mut targets: Vec<(TargetType, String)> = modified
+                .iter()
+                .map(|entry| (entry.target_type.clone(), entry.target_value.clone()))
+                .collect();
+            targets.sort();
+            targets.dedup();
+            session.store.get_metadata_for_targets(&targets)?
+        } else {
+            session.store.get_all_metadata()?
+        };
         let changes: Vec<(char, String, String)> = if modified.is_empty() {
             metadata.iter().map(metadata_add_change).collect()
         } else {
@@ -277,7 +298,13 @@ pub fn run_with_progress(
         )
     };
 
-    if metadata_entries.is_empty() && tombstone_entries.is_empty() {
+    // A scoped read returns only the changed targets' rows, so "no entries" no
+    // longer implies "nothing to do": a commit that removed every key on a
+    // target still has a dirty subtree to drop from the tree.
+    let has_dirty_work = dirty_target_bases
+        .as_ref()
+        .is_some_and(|dirty| !dirty.is_empty());
+    if metadata_entries.is_empty() && tombstone_entries.is_empty() && !has_dirty_work {
         return Ok(SerializeOutput {
             changes: 0,
             refs_written: Vec::new(),
@@ -292,7 +319,6 @@ pub fn run_with_progress(
     };
 
     // Route entries through filter rules to destinations
-    let filter_rules = parse_filter_rules(&session.store)?;
     let mut dest_changes: BTreeMap<String, Vec<(char, String, String)>> = BTreeMap::new();
     for change in &changes {
         if let Some(dests) = classify_key(&change.2, &filter_rules) {
