@@ -247,11 +247,54 @@ fn fetch_oid_batches<T: Display>(
 
     // GitHub rejects very large smart-HTTP request bodies. Keep each
     // `fetch --stdin` want-list bounded while preserving sequential fetches.
+    let mut batches = 0;
     for batch in oid_batches(oids) {
         fetch_oid_batch(workdir, remote_name, batch, operation)?;
+        batches += 1;
+    }
+
+    if batches > 1 {
+        consolidate_packs(workdir)?;
     }
 
     Ok(())
+}
+
+/// Merge the packs a batched fetch just produced into fewer, larger ones.
+///
+/// Every `git fetch` writes its own pack, so hydrating a large tip leaves one
+/// pack per batch. That is not merely untidy: `gix` sizes its object-database
+/// slot map when a repository is opened, and once the packs outnumber the slots
+/// every subsequent open fails with "The slotmap turned out to be too small".
+/// A consumer of a large metadata history would be unable to read what it had
+/// just downloaded.
+///
+/// Geometric repacking keeps this proportional to what was added rather than
+/// rewriting the whole object store on every fetch. Older Git versions do not
+/// support it, and a repository that cannot be repacked is not a reason to fail
+/// the fetch that already succeeded, so failures here are ignored.
+fn consolidate_packs(workdir: &Path) -> Result<()> {
+    let status = Command::new("git")
+        .args(["repack", "--geometric=2", "-d", "-q"])
+        .current_dir(workdir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(status) if status.success() => Ok(()),
+        // `--geometric` predates neither promisor packs nor every supported
+        // Git; fall back to a full repack, and give up quietly if that fails.
+        _ => {
+            let _ = Command::new("git")
+                .args(["repack", "-a", "-d", "-q"])
+                .current_dir(workdir)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            Ok(())
+        }
+    }
 }
 
 fn oid_batches<T>(oids: &[T]) -> impl Iterator<Item = &[T]> {
@@ -474,6 +517,68 @@ mod tests {
         assert!(!is_list_entry_name("123-toolong"));
         assert!(!is_list_entry_name("123-abc")); // 3 chars, not 5
         assert!(!is_list_entry_name("-23c0f")); // empty timestamp
+    }
+
+    /// Each batched fetch lands its own pack. Once those outnumber the slots
+    /// gix sizes its object database with, opening the repository fails
+    /// outright — so a multi-batch fetch has to leave the packs consolidated.
+    #[test]
+    fn consolidate_packs_merges_the_packs_a_batched_fetch_leaves_behind() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(path)
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+
+        run(&["init", "--quiet"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+
+        // Build several single-object packs, the shape a batched fetch leaves.
+        for index in 0..4 {
+            std::fs::write(path.join("f"), format!("content {index}")).expect("write");
+            let oid = run(&["hash-object", "-w", "f"]);
+            let mut child = std::process::Command::new("git")
+                .current_dir(path)
+                .args(["pack-objects", "--quiet", ".git/objects/pack/pack"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .expect("pack-objects");
+            {
+                use std::io::Write;
+                let stdin = child.stdin.as_mut().expect("stdin");
+                writeln!(stdin, "{oid}").expect("write oid");
+            }
+            assert!(child.wait().expect("wait").success());
+        }
+
+        let count_packs = || {
+            std::fs::read_dir(path.join(".git/objects/pack"))
+                .expect("pack dir")
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+                .count()
+        };
+        assert!(count_packs() >= 4, "test setup did not create packs");
+
+        consolidate_packs(path).expect("consolidate");
+
+        assert!(
+            count_packs() < 4,
+            "packs were not consolidated, still {}",
+            count_packs()
+        );
     }
 
     #[test]
