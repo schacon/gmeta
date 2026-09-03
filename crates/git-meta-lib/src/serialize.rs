@@ -580,10 +580,6 @@ pub fn run_with_progress(
 
     session.store.set_last_materialized(now)?;
 
-    if !refs_written.is_empty() {
-        crate::git_utils::maintain_object_store(repo);
-    }
-
     Ok(SerializeOutput {
         changes: if refs_written.is_empty() {
             0

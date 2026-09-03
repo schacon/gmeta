@@ -212,6 +212,19 @@ impl Session {
         crate::git_utils::resolve_meta_remote(&self.repo, remote)
     }
 
+    /// Let Git pack the objects serialization has written.
+    ///
+    /// Metadata is written straight through `gix`, and a metadata-only
+    /// repository runs nothing else, so without this the object store only ever
+    /// grows loose. Call it once work is finished and the process is about to
+    /// exit; see [`git_utils::maintain_object_store`] for why it must not run
+    /// while this session stays in use.
+    ///
+    /// [`git_utils::maintain_object_store`]: crate::git_utils::maintain_object_store
+    pub fn maintain_object_store(&self) {
+        crate::git_utils::maintain_object_store(&self.repo);
+    }
+
     /// Index metadata keys from commit history for blobless clone support.
     ///
     /// Walks commits from `tip_oid` backward (optionally stopping at `old_tip`)

@@ -514,7 +514,18 @@ pub(crate) fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Resul
 ///
 /// `--auto` leaves the decision to Git's own `gc.auto` heuristic, which is
 /// cheap when there is nothing to do. Maintenance failing is never a reason to
-/// fail the serialization that already succeeded, so errors are ignored.
+/// fail the work that already succeeded, so errors are ignored.
+///
+/// # This must not be called while a [`gix::Repository`] stays in use
+///
+/// `gc.autoDetach` defaults to true, so this returns immediately and Git keeps
+/// packing in the background, deleting the loose objects it has packed. A
+/// `Repository` handle opened before that finishes finds objects vanishing
+/// underneath it and fails with "object ... could not be found".
+///
+/// Call it where the process is about to exit, as the CLI does, or from a
+/// long-running program only at a point where every handle can be reopened
+/// afterwards.
 pub fn maintain_object_store(repo: &gix::Repository) {
     let Ok(workdir) = repo_dir(repo) else {
         return;

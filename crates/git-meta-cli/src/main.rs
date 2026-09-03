@@ -35,8 +35,32 @@ fn main() -> Result<()> {
     }
 
     let cli = Cli::parse();
+    let writes_objects = matches!(
+        cli.command,
+        Commands::Serialize { .. }
+            | Commands::Push { .. }
+            | Commands::Pull { .. }
+            | Commands::Materialize { .. }
+            | Commands::Sync { .. }
+            | Commands::Prune { .. }
+    );
 
-    match cli.command {
+    let result = run_command(cli.command);
+
+    // Pack what was just written, now that the work is done and this process is
+    // about to exit. Doing it while a session is still open would let Git
+    // delete objects from underneath that session's repository handle.
+    if writes_objects {
+        if let Ok(session) = git_meta_lib::Session::discover() {
+            session.maintain_object_store();
+        }
+    }
+
+    result
+}
+
+fn run_command(command: Commands) -> Result<()> {
+    match command {
         Commands::Set {
             file,
             json,

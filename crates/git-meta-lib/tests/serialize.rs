@@ -596,33 +596,53 @@ fn local_tree(dir: &tempfile::TempDir) -> gix::ObjectId {
     commit.tree_id().unwrap().detach()
 }
 
-/// Serialization writes objects through gix, which has no equivalent of Git's
-/// automatic maintenance, and nothing else runs in a metadata-only repository.
-/// Without a maintenance hook the object store only ever grows loose; a long
-/// history reaches millions of loose objects.
+/// Maintenance must not run while the session that wrote the objects is still
+/// in use. `gc.autoDetach` defaults to true, so `git gc --auto` returns
+/// immediately and keeps packing in the background, deleting the loose objects
+/// it packs — and a `Repository` handle opened before that finishes then fails
+/// with "object ... could not be found".
+///
+/// This asserts the safe order: serialize repeatedly with a live session and
+/// nothing disappears, then maintain once the work is done.
 #[test]
-fn serializing_many_commits_does_not_leave_every_object_loose() {
+fn serializing_repeatedly_does_not_lose_objects_to_maintenance() {
     let (dir, repo) = setup_repo();
     let sha = head_sha(&repo);
     let session = open_session(repo);
 
-    // gc.auto's default threshold is in the thousands of loose objects, so
-    // lower it rather than writing enough commits to trip the default.
-    run_git(dir.path(), &["config", "gc.auto", "64"]);
-    run_git(dir.path(), &["config", "gc.autoDetach", "false"]);
+    // Make Git eager to pack, and leave autoDetach at its default so a
+    // background gc would race if serialize triggered one.
+    run_git(dir.path(), &["config", "gc.auto", "16"]);
 
     let target = Target::commit(&sha).unwrap();
-    for round in 0..120 {
+    for round in 0..150 {
         session
             .target(&target)
             .set(&format!("agent:step-{round}"), format!("value-{round}"))
             .unwrap();
         let _ = session.serialize().unwrap();
+        // Read back through the same session, which is what a background gc
+        // would break.
+        assert_eq!(
+            session
+                .target(&target)
+                .get_value(&format!("agent:step-{round}"))
+                .unwrap(),
+            Some(MetaValue::String(format!("value-{round}")))
+        );
     }
 
+    let before = loose_object_count(dir.path());
+    assert!(before > 0, "expected loose objects before maintenance");
+
+    // Maintenance is safe here: the work is finished. Wait for the detached gc
+    // so the assertion below is not racing it.
+    run_git(dir.path(), &["config", "gc.autoDetach", "false"]);
+    session.maintain_object_store();
+
     assert!(
-        loose_object_count(dir.path()) < 400,
-        "expected maintenance to pack objects, found {} loose",
+        loose_object_count(dir.path()) < before,
+        "maintenance packed nothing: {before} loose before, {} after",
         loose_object_count(dir.path())
     );
 }
