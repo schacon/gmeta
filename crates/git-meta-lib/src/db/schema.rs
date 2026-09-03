@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Run all pending migrations on the database.
 pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
@@ -15,6 +15,10 @@ pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
     }
     if version < 2 {
         conn.execute_batch(MIGRATION_2)?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
+    if version < 3 {
+        conn.execute_batch(MIGRATION_3)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -91,4 +95,16 @@ CREATE INDEX IF NOT EXISTS idx_set_values_metadata ON set_values(metadata_id);
 const MIGRATION_2: &str = "
 ALTER TABLE metadata ADD COLUMN source_ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_metadata_source_ref ON metadata(source_ref);
+";
+
+/// Migration 3: Index `metadata_log` by timestamp.
+///
+/// Incremental serialization asks for everything written since the last
+/// materialization marker. Without this index that predicate cannot seek, so
+/// every serialize scans a table that gains a row per key write and is never
+/// pruned in normal operation — making publish cost grow with the total number
+/// of writes a repository has ever seen.
+const MIGRATION_3: &str = "
+CREATE INDEX IF NOT EXISTS idx_metadata_log_timestamp
+    ON metadata_log(timestamp, target_type, target_value, key);
 ";

@@ -48,53 +48,42 @@ impl Store {
                 is_git_ref,
             ) = row?;
             let target_type = target_type_str.parse::<TargetType>()?;
-            let vt = value_type_str.parse::<ValueType>()?;
-            match vt {
-                ValueType::List => {
-                    let encoded = encode_list_entries_by_metadata_id(
+            let value_type = value_type_str.parse::<ValueType>()?;
+            let (value, is_git_ref) = match value_type {
+                ValueType::List => (
+                    encode_list_entries_by_metadata_id(
                         &self.conn,
                         self.repo.as_ref(),
                         metadata_id,
-                    )?;
-                    results.push(SerializableEntry {
-                        target_type,
-                        target_value,
-                        key,
-                        value: encoded,
-                        value_type: vt,
-                        last_timestamp,
-                        is_git_ref: false,
-                    });
-                }
-                ValueType::Set => {
-                    let encoded = encode_set_values_by_metadata_id(&self.conn, metadata_id)?;
-                    results.push(SerializableEntry {
-                        target_type,
-                        target_value,
-                        key,
-                        value: encoded,
-                        value_type: vt,
-                        last_timestamp,
-                        is_git_ref: false,
-                    });
-                }
-                ValueType::String => {
-                    results.push(SerializableEntry {
-                        target_type,
-                        target_value,
-                        key,
-                        value,
-                        value_type: vt,
-                        last_timestamp,
-                        is_git_ref,
-                    });
-                }
-            }
+                    )?,
+                    false,
+                ),
+                ValueType::Set => (
+                    encode_set_values_by_metadata_id(&self.conn, metadata_id)?,
+                    false,
+                ),
+                ValueType::String => (value, is_git_ref),
+            };
+            results.push(SerializableEntry {
+                target_type,
+                target_value,
+                key,
+                value,
+                value_type,
+                last_timestamp,
+                is_git_ref,
+            });
         }
-        Ok(results)
+        Ok(())
     }
 
     /// Get entries modified since a given timestamp (for incremental serialization).
+    ///
+    /// The results are sorted by target and key, but deliberately not by SQL:
+    /// an `ORDER BY` on the log's lookup index is cheaper for the planner than
+    /// a timestamp seek plus a sort, so adding one makes SQLite scan the whole
+    /// of `metadata_log` instead of seeking into it. Sorting the (small)
+    /// modified set here keeps the seek and the ordering both.
     pub fn get_modified_since(&self, since: i64) -> Result<Vec<super::types::ModifiedEntry>> {
         use super::types::ModifiedEntry;
         let mut stmt = self.conn.prepare(
@@ -103,8 +92,7 @@ impl Store {
              FROM metadata_log ml
              LEFT JOIN metadata m ON ml.target_type = m.target_type
                  AND ml.target_value = m.target_value AND ml.key = m.key
-             WHERE ml.timestamp > ?1
-             ORDER BY ml.target_type, ml.target_value, ml.key",
+             WHERE ml.timestamp > ?1",
         )?;
 
         let rows = stmt.query_map(params![since], |row| {
@@ -137,6 +125,13 @@ impl Store {
                 value_type,
             });
         }
+        results.sort_by(|a, b| {
+            (a.target_type.as_str(), &a.target_value, &a.key).cmp(&(
+                b.target_type.as_str(),
+                &b.target_value,
+                &b.key,
+            ))
+        });
         Ok(results)
     }
 
