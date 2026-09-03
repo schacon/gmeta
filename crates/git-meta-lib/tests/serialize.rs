@@ -595,3 +595,61 @@ fn local_tree(dir: &tempfile::TempDir) -> gix::ObjectId {
         .into_commit();
     commit.tree_id().unwrap().detach()
 }
+
+/// Serialization writes objects through gix, which has no equivalent of Git's
+/// automatic maintenance, and nothing else runs in a metadata-only repository.
+/// Without a maintenance hook the object store only ever grows loose; a long
+/// history reaches millions of loose objects.
+#[test]
+fn serializing_many_commits_does_not_leave_every_object_loose() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+
+    // gc.auto's default threshold is in the thousands of loose objects, so
+    // lower it rather than writing enough commits to trip the default.
+    run_git(dir.path(), &["config", "gc.auto", "64"]);
+    run_git(dir.path(), &["config", "gc.autoDetach", "false"]);
+
+    let target = Target::commit(&sha).unwrap();
+    for round in 0..120 {
+        session
+            .target(&target)
+            .set(&format!("agent:step-{round}"), format!("value-{round}"))
+            .unwrap();
+        let _ = session.serialize().unwrap();
+    }
+
+    assert!(
+        loose_object_count(dir.path()) < 400,
+        "expected maintenance to pack objects, found {} loose",
+        loose_object_count(dir.path())
+    );
+}
+
+/// Count loose objects in a repository's object store.
+fn loose_object_count(dir: &std::path::Path) -> usize {
+    let objects = dir.join(".git").join("objects");
+    let Ok(entries) = std::fs::read_dir(&objects) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.len() == 2 && name.chars().all(|c| c.is_ascii_hexdigit())
+        })
+        .filter_map(|entry| std::fs::read_dir(entry.path()).ok())
+        .map(|inner| inner.flatten().count())
+        .sum()
+}
+
+fn run_git(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?} failed");
+}

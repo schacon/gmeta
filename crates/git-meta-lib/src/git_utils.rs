@@ -503,6 +503,30 @@ pub(crate) fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Resul
     }
 }
 
+/// Give Git the chance to pack loose objects, as it does after `git commit`.
+///
+/// Serialization writes its trees and commits straight through `gix`, which has
+/// no equivalent of Git's automatic maintenance. Nothing else runs in a
+/// metadata-only repository either, so without this the object store only ever
+/// grows loose: a long history reaches millions of loose objects, at which
+/// point ordinary reads slow down measurably and the working directory is far
+/// larger than the packed history it represents.
+///
+/// `--auto` leaves the decision to Git's own `gc.auto` heuristic, which is
+/// cheap when there is nothing to do. Maintenance failing is never a reason to
+/// fail the serialization that already succeeded, so errors are ignored.
+pub fn maintain_object_store(repo: &gix::Repository) {
+    let Ok(workdir) = repo_dir(repo) else {
+        return;
+    };
+    let _ = Command::new("git")
+        .args(["gc", "--auto", "--quiet"])
+        .current_dir(workdir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
