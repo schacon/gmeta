@@ -503,39 +503,122 @@ pub(crate) fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Resul
     }
 }
 
-/// Give Git the chance to pack loose objects, as it does after `git commit`.
+/// Loose-object count above which maintenance is worth doing, when the
+/// repository does not set `gc.auto`. The same default Git uses.
+const DEFAULT_GC_AUTO: i64 = 6_700;
+
+/// Pack what serialization has written and drop what it has superseded.
 ///
-/// Serialization writes its trees and commits straight through `gix`, which has
-/// no equivalent of Git's automatic maintenance. Nothing else runs in a
-/// metadata-only repository either, so without this the object store only ever
-/// grows loose: a long history reaches millions of loose objects, at which
-/// point ordinary reads slow down measurably and the working directory is far
-/// larger than the packed history it represents.
+/// Metadata is written straight through `gix`, and a metadata-only repository
+/// runs nothing else, so without this the object store only ever grows loose:
+/// a 25,000-commit history reached 1.4 million loose objects in 14 GB, for a
+/// history that packs to 801 MB, and a plain `git ls-tree -r` on it took over
+/// five minutes.
 ///
-/// `--auto` leaves the decision to Git's own `gc.auto` heuristic, which is
-/// cheap when there is nothing to do. Maintenance failing is never a reason to
-/// fail the work that already succeeded, so errors are ignored.
+/// Repacking does nearly all of that work. Metadata commits form a linear
+/// chain, so every historical tree and blob stays reachable — superseded tree
+/// nodes are not garbage, they are the record the deep-history read path walks
+/// back through. On a 300-commit history only 208 of 36,245 objects were
+/// unreachable, and repacking took the rest from 36,037 loose to one.
+///
+/// Pruning is still worth doing, for a smaller reason. Building a tree writes
+/// intermediate trees that the finished commit never references, at roughly
+/// 0.7 objects per commit. Left alone they are what eventually trips `git gc`,
+/// which refuses to delete unreachable objects younger than two weeks, keeps
+/// them loose, and then declines to run at all:
+///
+/// > There are too many unreachable loose objects; run 'git prune' to remove
+/// > them. Automatic cleanup will not be performed until the file is removed.
+///
+/// That is why this does the work directly rather than deferring to
+/// `gc --auto`. Pruning first keeps the repack from packing objects about to
+/// be discarded, and geometric repacking keeps the work proportional to what
+/// was added rather than rewriting the whole store every time.
 ///
 /// # This must not be called while a [`gix::Repository`] stays in use
 ///
-/// `gc.autoDetach` defaults to true, so this returns immediately and Git keeps
-/// packing in the background, deleting the loose objects it has packed. A
-/// `Repository` handle opened before that finishes finds objects vanishing
-/// underneath it and fails with "object ... could not be found".
+/// Objects are deleted here. A `Repository` handle opened beforehand will find
+/// them gone and fail with "object ... could not be found". Call it where the
+/// process is about to exit, as the CLI does, or reopen every handle after.
 ///
-/// Call it where the process is about to exit, as the CLI does, or from a
-/// long-running program only at a point where every handle can be reopened
-/// afterwards.
+/// Maintenance failing is never a reason to fail work that already succeeded,
+/// so errors are ignored.
 pub fn maintain_object_store(repo: &gix::Repository) {
     let Ok(workdir) = repo_dir(repo) else {
         return;
     };
-    let _ = Command::new("git")
-        .args(["gc", "--auto", "--quiet"])
-        .current_dir(workdir)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+    if !has_many_loose_objects(repo, workdir) {
+        return;
+    }
+
+    let run = |args: &[&str]| {
+        let _ = Command::new("git")
+            .args(args)
+            .current_dir(workdir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    };
+
+    run(&["prune", "--expire=now"]);
+    run(&["repack", "-d", "--geometric=2", "--quiet"]);
+}
+
+/// Whether the object store holds enough loose objects to be worth packing.
+///
+/// The threshold comes from the repository's `gc.auto`, so a project that has
+/// tuned Git's own maintenance gets the same answer here, and `gc.auto = 0`
+/// disables maintenance exactly as it does for Git.
+///
+/// Counting stops as soon as the threshold is passed, which bounds the work
+/// either way: a store below the threshold has few objects to count, and one
+/// far above it is answered after the first few thousand. Git samples a single
+/// fan-out directory instead, which is cheaper still but reads as zero when
+/// that one directory happens to be empty.
+fn has_many_loose_objects(repo: &gix::Repository, workdir: &Path) -> bool {
+    let threshold = repo
+        .config_snapshot()
+        .integer("gc.auto")
+        .unwrap_or(DEFAULT_GC_AUTO);
+    let Ok(threshold) = usize::try_from(threshold) else {
+        return false;
+    };
+    if threshold == 0 {
+        return false;
+    }
+
+    let objects = {
+        let in_worktree = workdir.join(".git").join("objects");
+        if in_worktree.exists() {
+            in_worktree
+        } else {
+            // Bare repositories keep `objects` at the top level.
+            workdir.join("objects")
+        }
+    };
+    let Ok(fanout) = std::fs::read_dir(objects) else {
+        return false;
+    };
+
+    let mut counted = 0usize;
+    for directory in fanout.flatten() {
+        let name = directory.file_name();
+        let name = name.to_string_lossy();
+        if name.len() != 2 || !name.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(directory.path()) else {
+            continue;
+        };
+        for _ in entries.flatten() {
+            counted += 1;
+            if counted > threshold {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]

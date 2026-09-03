@@ -610,12 +610,11 @@ fn serializing_repeatedly_does_not_lose_objects_to_maintenance() {
     let sha = head_sha(&repo);
     let session = open_session(repo);
 
-    // Make Git eager to pack, and leave autoDetach at its default so a
-    // background gc would race if serialize triggered one.
-    run_git(dir.path(), &["config", "gc.auto", "16"]);
-
+    // Enough rounds to pass the default loose-object threshold, so the test
+    // does not depend on gc.auto being configured. gc.autoDetach is left at
+    // its default, so a background gc would race if serialize triggered one.
     let target = Target::commit(&sha).unwrap();
-    for round in 0..150 {
+    for round in 0..900 {
         session
             .target(&target)
             .set(&format!("agent:step-{round}"), format!("value-{round}"))
@@ -635,9 +634,7 @@ fn serializing_repeatedly_does_not_lose_objects_to_maintenance() {
     let before = loose_object_count(dir.path());
     assert!(before > 0, "expected loose objects before maintenance");
 
-    // Maintenance is safe here: the work is finished. Wait for the detached gc
-    // so the assertion below is not racing it.
-    run_git(dir.path(), &["config", "gc.autoDetach", "false"]);
+    // Maintenance is safe here: the work is finished.
     session.maintain_object_store();
 
     assert!(
@@ -663,13 +660,4 @@ fn loose_object_count(dir: &std::path::Path) -> usize {
         .filter_map(|entry| std::fs::read_dir(entry.path()).ok())
         .map(|inner| inner.flatten().count())
         .sum()
-}
-
-fn run_git(dir: &std::path::Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "git {args:?} failed");
 }
