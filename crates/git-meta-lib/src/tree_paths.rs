@@ -61,7 +61,7 @@ pub(crate) fn encode_path_target_value(value: &str) -> String {
 ///
 /// # Errors
 /// Returns an error if the key is invalid.
-fn build_key_tree_path(target: &Target, key: &str) -> Result<String> {
+pub(crate) fn build_key_tree_path(target: &Target, key: &str) -> Result<String> {
     validate_key(key)?;
     let base = tree_base_path(target);
     let segments = key_to_path_segments(key).join("/");

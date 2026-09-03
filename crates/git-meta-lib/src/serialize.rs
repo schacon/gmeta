@@ -7,7 +7,7 @@
 //! The public entry point is [`run()`], which takes a [`Session`](crate::Session)
 //! and returns a [`SerializeOutput`] describing what was written.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
@@ -25,7 +25,9 @@ use crate::tree::filter::{classify_key, parse_filter_rules, FilterRule, MAIN_DES
 use crate::tree::format::{build_dir, build_tree_from_paths, insert_path, TreeDir};
 use crate::tree::model::Tombstone;
 use crate::tree_paths;
-use crate::types::{Target, TargetType, ValueType};
+use crate::types::{
+    Target, TargetType, ValueType, LIST_VALUE_DIR, SET_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_ROOT,
+};
 
 /// Maximum number of individual change lines included in a commit message.
 const MAX_COMMIT_CHANGES: usize = 1000;
@@ -985,6 +987,7 @@ pub fn prune_tree(
 ) -> Result<gix::ObjectId> {
     let cutoff_ms = prune::parse_since_to_cutoff_ms(&rules.since, now_ms)?;
     let min_size = rules.min_size.unwrap_or(0);
+    let stale_keys = stale_key_paths(db, cutoff_ms)?;
 
     let tree = tree_oid
         .attach(repo)
@@ -1021,7 +1024,8 @@ pub fn prune_tree(
                 }
             }
 
-            let pruned_oid = prune_target_type_tree(repo, subtree_oid, cutoff_ms, min_size, db)?;
+            let pruned_oid =
+                prune_target_type_tree(repo, subtree_oid, &name, cutoff_ms, &stale_keys)?;
             let pruned_tree = pruned_oid
                 .attach(repo)
                 .object()
@@ -1126,9 +1130,9 @@ fn prune_metadata_entry(
 fn prune_target_type_tree(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
+    path: &str,
     cutoff_ms: i64,
-    min_size: u64,
-    db: &Store,
+    stale_keys: &HashSet<String>,
 ) -> Result<gix::ObjectId> {
     let tree = tree_oid
         .attach(repo)
@@ -1146,7 +1150,13 @@ fn prune_target_type_tree(
 
         if entry.mode().is_tree() {
             let subtree_oid = entry.object_id();
-            let pruned_oid = prune_subtree_recursive(repo, subtree_oid, cutoff_ms, min_size, db)?;
+            let pruned_oid = prune_subtree_recursive(
+                repo,
+                subtree_oid,
+                &format!("{path}/{name}"),
+                cutoff_ms,
+                stale_keys,
+            )?;
             let pruned_tree = pruned_oid
                 .attach(repo)
                 .object()
@@ -1170,12 +1180,19 @@ fn prune_target_type_tree(
         .detach())
 }
 
+/// Prune one key subtree, dropping values whose key has aged out.
+///
+/// `path` is the subtree's own path from the root of the serialized tree, which
+/// is what `stale_keys` is keyed by. A key that has aged out loses its string
+/// value and its set members, but the subtree itself is still walked: keys are
+/// namespaced, so `agent:model` and `agent:model:version` share a subtree and
+/// can age out independently.
 fn prune_subtree_recursive(
     repo: &gix::Repository,
     tree_oid: gix::ObjectId,
+    path: &str,
     cutoff_ms: i64,
-    _min_size: u64,
-    _db: &Store,
+    stale_keys: &HashSet<String>,
 ) -> Result<gix::ObjectId> {
     let tree = tree_oid
         .attach(repo)
@@ -1187,55 +1204,52 @@ fn prune_subtree_recursive(
         .edit()
         .map_err(|e| Error::Other(format!("{e}")))?;
 
+    let key_has_aged_out = stale_keys.contains(path);
+
     for entry_result in tree.iter() {
         let entry = entry_result.map_err(|e| Error::Other(format!("{e}")))?;
         let name = entry.filename().to_str_lossy().to_string();
 
-        if entry.mode().is_tree() {
-            if name == "__list" {
-                let list_tree_oid = entry.object_id();
-                let pruned_oid = prune_list_tree(repo, list_tree_oid, cutoff_ms)?;
-                let pruned_tree = pruned_oid
-                    .attach(repo)
-                    .object()
-                    .map_err(|e| Error::Other(format!("{e}")))?
-                    .into_tree();
-                if pruned_tree.iter().count() > 0 {
-                    editor
-                        .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                        .map_err(|e| Error::Other(format!("{e}")))?;
-                }
-            } else if name == "__tombstones" {
-                let tomb_tree_oid = entry.object_id();
-                let pruned_oid = prune_tombstone_tree(repo, tomb_tree_oid, cutoff_ms)?;
-                let pruned_tree = pruned_oid
-                    .attach(repo)
-                    .object()
-                    .map_err(|e| Error::Other(format!("{e}")))?
-                    .into_tree();
-                if pruned_tree.iter().count() > 0 {
-                    editor
-                        .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                        .map_err(|e| Error::Other(format!("{e}")))?;
-                }
-            } else {
-                let subtree_oid = entry.object_id();
-                let pruned_oid =
-                    prune_subtree_recursive(repo, subtree_oid, cutoff_ms, _min_size, _db)?;
-                let pruned_tree = pruned_oid
-                    .attach(repo)
-                    .object()
-                    .map_err(|e| Error::Other(format!("{e}")))?
-                    .into_tree();
-                if pruned_tree.iter().count() > 0 {
-                    editor
-                        .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                        .map_err(|e| Error::Other(format!("{e}")))?;
-                }
+        if !entry.mode().is_tree() {
+            // The string value of an aged-out key.
+            if key_has_aged_out && name == STRING_VALUE_BLOB {
+                continue;
             }
-        } else {
             editor
                 .upsert(&name, entry.mode().kind(), entry.object_id())
+                .map_err(|e| Error::Other(format!("{e}")))?;
+            continue;
+        }
+
+        // Set members carry no timestamp of their own, so the whole collection
+        // ages out with its key.
+        if key_has_aged_out && name == SET_VALUE_DIR {
+            continue;
+        }
+
+        let subtree_oid = entry.object_id();
+        let pruned_oid = if name == LIST_VALUE_DIR {
+            prune_list_tree(repo, subtree_oid, cutoff_ms)?
+        } else if name == TOMBSTONE_ROOT {
+            prune_tombstone_tree(repo, subtree_oid, cutoff_ms)?
+        } else {
+            prune_subtree_recursive(
+                repo,
+                subtree_oid,
+                &format!("{path}/{name}"),
+                cutoff_ms,
+                stale_keys,
+            )?
+        };
+
+        let pruned_tree = pruned_oid
+            .attach(repo)
+            .object()
+            .map_err(|e| Error::Other(format!("{e}")))?
+            .into_tree();
+        if pruned_tree.iter().count() > 0 {
+            editor
+                .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
                 .map_err(|e| Error::Other(format!("{e}")))?;
         }
     }
@@ -1244,6 +1258,22 @@ fn prune_subtree_recursive(
         .write()
         .map_err(|e| Error::Other(format!("{e}")))?
         .detach())
+}
+
+/// Tree paths of every key whose most recent write predates the cutoff.
+///
+/// Project-scoped metadata is exempt: it is configuration, not history, and
+/// must not age out.
+fn stale_key_paths(db: &Store, cutoff_ms: i64) -> Result<HashSet<String>> {
+    let mut stale = HashSet::new();
+    for entry in db.get_all_metadata()? {
+        if entry.target_type == TargetType::Project || entry.last_timestamp >= cutoff_ms {
+            continue;
+        }
+        let target = Target::from_parts(entry.target_type, Some(entry.target_value));
+        stale.insert(tree_paths::build_key_tree_path(&target, &entry.key)?);
+    }
+    Ok(stale)
 }
 
 fn prune_list_tree(
