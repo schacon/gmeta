@@ -661,3 +661,107 @@ fn loose_object_count(dir: &std::path::Path) -> usize {
         .map(|inner| inner.flatten().count())
         .sum()
 }
+
+const AUTO_PRUNE_DAY_MS: i64 = 24 * 60 * 60 * 1000;
+const AUTO_PRUNE_T0: i64 = 1_700_000_000_000;
+/// Auto-prune rebuilds the whole tree from the entries serialize read. An
+/// incremental serialize that only reads the changed targets' rows would
+/// therefore publish a tree containing only those targets.
+///
+/// Both targets here are written well inside the retention window, so neither
+/// should be dropped on age; only the second serialize is incremental.
+#[test]
+fn auto_prune_after_an_incremental_serialize_keeps_untouched_targets() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+
+    // A target old enough to age out, so the prune has real work to do.
+    let stale_sha = "aabbccddeeff00112233445566778899aabbccdd";
+    let stale = Target::commit(stale_sha).unwrap();
+    let session = reopen_session(dir.path(), AUTO_PRUNE_T0 - 100 * AUTO_PRUNE_DAY_MS);
+    session.target(&stale).set("agent:model", "old").unwrap();
+    drop(session);
+
+    let session = reopen_session(dir.path(), AUTO_PRUNE_T0);
+    let project = Target::project();
+    // Retention far wider than the ages involved; max-keys forces the trigger.
+    session
+        .target(&project)
+        .set("meta:prune:since", "30d")
+        .unwrap();
+    session
+        .target(&project)
+        .set("meta:prune:max-keys", "1")
+        .unwrap();
+
+    let untouched_sha = "00112233445566778899aabbccddeeff00112233";
+    let touched = Target::commit(&sha).unwrap();
+    let untouched = Target::commit(untouched_sha).unwrap();
+    session.target(&touched).set("agent:model", "a").unwrap();
+    session.target(&untouched).set("agent:model", "b").unwrap();
+    let first = session.serialize().unwrap();
+    drop(session);
+
+    // One day later: touch only one target, so serialize goes incremental.
+    let session = reopen_session(dir.path(), AUTO_PRUNE_T0 + AUTO_PRUNE_DAY_MS);
+    session.target(&touched).set("agent:model", "a2").unwrap();
+    let second = session.serialize().unwrap();
+    eprintln!(
+        "first: changes={} pruned={} | second: changes={} pruned={}",
+        first.changes, first.pruned, second.changes, second.pruned
+    );
+    // The first serialize proves auto-prune is wired up and dropped the stale
+    // target. The second runs it again on an incremental read, where the
+    // rebuilt tree must still contain every target that has not aged out — if
+    // it does, it matches the existing tree and no further prune commit is
+    // needed, which is why `second.pruned` is zero rather than a failure.
+    assert_eq!(first.pruned, 1, "auto-prune did not drop the stale target");
+    drop(session);
+
+    let repo = gix::open(dir.path()).unwrap();
+    let tree = repo
+        .find_reference("refs/meta/local/main")
+        .unwrap()
+        .into_fully_peeled_id()
+        .unwrap()
+        .object()
+        .unwrap()
+        .into_commit()
+        .tree_id()
+        .unwrap()
+        .detach();
+
+    let find = |path: &str| -> bool {
+        let segments: Vec<&str> = path.split('/').collect();
+        let mut current = tree;
+        for (index, segment) in segments.iter().enumerate() {
+            let Ok(found) = repo.find_tree(current) else {
+                return false;
+            };
+            let Some(entry) = found.find_entry(*segment) else {
+                return false;
+            };
+            if index == segments.len() - 1 {
+                return true;
+            }
+            current = entry.object_id();
+        }
+        false
+    };
+
+    assert!(
+        find(&format!("commit/{}/{sha}/agent/model/__value", &sha[..2])),
+        "the touched target is missing"
+    );
+    assert!(
+        find(&format!("commit/00/{untouched_sha}/agent/model/__value")),
+        "auto-prune dropped a target that was never touched and never aged out"
+    );
+    assert!(
+        !find(&format!(
+            "commit/{}/{stale_sha}/agent/model/__value",
+            &stale_sha[..2]
+        )),
+        "auto-prune kept a target well outside the retention window"
+    );
+}

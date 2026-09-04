@@ -181,6 +181,9 @@ pub fn run_with_progress(
     // every entry, so the scoped read below would starve them.
     let filter_rules = parse_filter_rules(&session.store)?;
     let single_destination = filter_rules.is_empty();
+    // Auto-prune republishes the whole tree from the entries read below, so it
+    // needs to know when those entries are only the changed targets'.
+    let mut scoped_metadata_read = false;
 
     // Determine incremental vs full mode and collect entries + changes
     let (
@@ -199,6 +202,7 @@ pub fn run_with_progress(
         // every other subtree is reused from the existing tree by OID.
         let can_scope_read =
             single_destination && existing_tree_oid.is_some() && !modified.is_empty();
+        scoped_metadata_read = can_scope_read;
         let metadata = if can_scope_read {
             let mut targets: Vec<(TargetType, String)> = modified
                 .iter()
@@ -510,10 +514,19 @@ pub fn run_with_progress(
         if dest == MAIN_DEST {
             if let Some(ref prune_rules_val) = prune_rules {
                 if prune::should_prune(repo, tree_oid, prune_rules_val)? {
+                    // Auto-prune rebuilds the tree from scratch, so it needs
+                    // every entry — not just the targets this serialize
+                    // touched. Re-read when the incremental path scoped them,
+                    // which costs a full read only on the runs that prune.
+                    let all_metadata = if scoped_metadata_read {
+                        Some(session.store.get_all_metadata()?)
+                    } else {
+                        None
+                    };
                     let prune_tree_oid = auto_prune_tree(
                         repo,
                         AutoPruneInputs {
-                            metadata_entries: &metadata_entries,
+                            metadata_entries: all_metadata.as_deref().unwrap_or(&metadata_entries),
                             tombstone_entries: &tombstone_entries,
                             set_tombstone_entries: &set_tombstone_entries,
                             list_tombstone_entries: &list_tombstone_entries,
