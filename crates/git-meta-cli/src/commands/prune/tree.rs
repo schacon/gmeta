@@ -15,23 +15,31 @@ use git_meta_lib::serialize::{build_filtered_tree, count_prune_stats};
 use git_meta_lib::tree::filter::{classify_key, parse_filter_rules, MAIN_DEST};
 use git_meta_lib::types::{Target, TargetType};
 
-pub(crate) fn run(dry_run: bool) -> Result<()> {
+pub(crate) fn run(dry_run: bool, since: Option<&str>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.session.repo();
 
-    // Read prune rules -- need at least meta:prune:since
-    let since = if let Some(entry) = ctx
-        .session
-        .store()
-        .get(&Target::project(), "meta:prune:since")?
-    {
-        serde_json::from_str::<String>(&entry.value)?
+    // Manual pruning is the date-based one: the window comes from --since, or
+    // from a project default if one is configured. Auto-prune no longer uses a
+    // window at all — it works to key and size limits.
+    let since = if let Some(since) = since {
+        since.to_string()
     } else {
-        eprintln!("No prune rules configured (meta:prune:since is required).");
-        eprintln!();
-        eprintln!("Set a retention window first:");
-        eprintln!("  git meta config meta:prune:since 6m");
-        return Ok(());
+        {
+            let Some(entry) = ctx
+                .session
+                .store()
+                .get(&Target::project(), "meta:prune:since")?
+            else {
+                eprintln!("No retention window given.");
+                eprintln!();
+                eprintln!("Pass one, or set a project default:");
+                eprintln!("  git meta prune --since 6m");
+                eprintln!("  git meta config meta:prune:since 6m");
+                return Ok(());
+            };
+            serde_json::from_str::<String>(&entry.value)?
+        }
     };
 
     let now_ms = time::OffsetDateTime::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;

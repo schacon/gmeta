@@ -7,7 +7,7 @@
 //! The public entry point is [`run()`], which takes a [`Session`](crate::Session)
 //! and returns a [`SerializeOutput`] describing what was written.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 
 use gix::bstr::ByteSlice;
 use gix::prelude::ObjectIdExt;
@@ -16,18 +16,15 @@ use gix::refs::transaction::PreviousValue;
 use crate::db::types::{
     ListTombstoneRecord, Operation, SerializableEntry, SetTombstoneRecord, TombstoneRecord,
 };
-use crate::db::Store;
 use crate::error::{Error, Result};
-use crate::list_value::{encode_entries, make_entry_name, parse_entries};
+use crate::list_value::{make_entry_name, parse_entries};
 use crate::prune::{self, PruneRules};
 use crate::session::Session;
 use crate::tree::filter::{classify_key, parse_filter_rules, FilterRule, MAIN_DEST};
 use crate::tree::format::{build_dir, build_tree_from_paths, insert_path, TreeDir};
 use crate::tree::model::Tombstone;
 use crate::tree_paths;
-use crate::types::{
-    Target, TargetType, ValueType, LIST_VALUE_DIR, SET_VALUE_DIR, STRING_VALUE_BLOB, TOMBSTONE_ROOT,
-};
+use crate::types::{Target, TargetType, ValueType};
 
 /// Maximum number of individual change lines included in a commit message.
 const MAX_COMMIT_CHANGES: usize = 1000;
@@ -513,7 +510,7 @@ pub fn run_with_progress(
         // Auto-prune only for main destination
         if dest == MAIN_DEST {
             if let Some(ref prune_rules_val) = prune_rules {
-                if prune::should_prune(repo, tree_oid, prune_rules_val)? {
+                if prune::should_prune(repo, &session.store, tree_oid, prune_rules_val, now)? {
                     // Auto-prune rebuilds the tree from scratch, so it needs
                     // every entry — not just the targets this serialize
                     // touched. Re-read when the incremental path scoped them,
@@ -525,14 +522,13 @@ pub fn run_with_progress(
                     };
                     let prune_tree_oid = auto_prune_tree(
                         repo,
-                        AutoPruneInputs {
+                        &AutoPruneInputs {
                             metadata_entries: all_metadata.as_deref().unwrap_or(&metadata_entries),
                             tombstone_entries: &tombstone_entries,
                             set_tombstone_entries: &set_tombstone_entries,
                             list_tombstone_entries: &list_tombstone_entries,
                             filter_rules: &filter_rules,
                             rules: prune_rules_val,
-                            now_ms: now,
                         },
                     )?;
 
@@ -554,14 +550,20 @@ pub fn run_with_progress(
                             keys_retained,
                         });
 
-                        let min_size_str = prune_rules_val
-                            .min_size
-                            .map(|s| format!("\nmin-size: {s}"))
-                            .unwrap_or_default();
+                        let floors = [
+                            prune_rules_val
+                                .min_keys
+                                .map(|floor| format!("\nmin-keys: {floor}")),
+                            prune_rules_val
+                                .min_size
+                                .map(|floor| format!("\nmin-size: {floor}")),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect::<String>();
 
                         let message = format!(
-                            "git-meta: prune --since={}\n\npruned: true\nsince: {}{}\nkeys-dropped: {}\nkeys-retained: {}",
-                            prune_rules_val.since, prune_rules_val.since, min_size_str, keys_dropped, keys_retained
+                            "git-meta: auto-prune\n\npruned: true\nreason: exceeded configured maximum{floors}\nkeys-dropped: {keys_dropped}\nkeys-retained: {keys_retained}"
                         );
 
                         let prune_commit = gix::objs::Commit {
@@ -976,93 +978,7 @@ fn merge_dir_into_tree(
         .detach())
 }
 
-/// Prune a serialized tree by dropping entries older than the cutoff.
-///
-/// Returns the OID of the new (possibly smaller) tree. If the tree would
-/// be unchanged, the same OID is returned.
-///
-/// # Parameters
-///
-/// - `repo`: the Git repository
-/// - `tree_oid`: the root tree to prune
-/// - `rules`: the prune rules to apply
-/// - `db`: the metadata store (for potential future use by prune helpers)
-///
-/// # Errors
-///
-/// Returns an error if Git object reads/writes fail or cutoff parsing fails.
-pub fn prune_tree(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
-    rules: &PruneRules,
-    db: &Store,
-    now_ms: i64,
-) -> Result<gix::ObjectId> {
-    let cutoff_ms = prune::parse_since_to_cutoff_ms(&rules.since, now_ms)?;
-    let min_size = rules.min_size.unwrap_or(0);
-    let stale_keys = stale_key_paths(db, cutoff_ms)?;
-
-    let tree = tree_oid
-        .attach(repo)
-        .object()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .into_tree();
-    let mut editor = repo
-        .empty_tree()
-        .edit()
-        .map_err(|e| Error::Other(format!("{e}")))?;
-
-    for entry_result in tree.iter() {
-        let entry = entry_result.map_err(|e| Error::Other(format!("{e}")))?;
-        let name = entry.filename().to_str_lossy().to_string();
-
-        if name == "project" {
-            editor
-                .upsert(&name, entry.mode().kind(), entry.object_id())
-                .map_err(|e| Error::Other(format!("{e}")))?;
-            continue;
-        }
-
-        if entry.mode().is_tree() {
-            let subtree_oid = entry.object_id();
-
-            // Check min-size
-            if min_size > 0 {
-                let size = prune::compute_tree_size_for(repo, subtree_oid)?;
-                if size < min_size {
-                    editor
-                        .upsert(&name, entry.mode().kind(), subtree_oid)
-                        .map_err(|e| Error::Other(format!("{e}")))?;
-                    continue;
-                }
-            }
-
-            let pruned_oid =
-                prune_target_type_tree(repo, subtree_oid, &name, cutoff_ms, &stale_keys)?;
-            let pruned_tree = pruned_oid
-                .attach(repo)
-                .object()
-                .map_err(|e| Error::Other(format!("{e}")))?
-                .into_tree();
-            if pruned_tree.iter().count() > 0 {
-                editor
-                    .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                    .map_err(|e| Error::Other(format!("{e}")))?;
-            }
-        } else {
-            editor
-                .upsert(&name, entry.mode().kind(), entry.object_id())
-                .map_err(|e| Error::Other(format!("{e}")))?;
-        }
-    }
-
-    Ok(editor
-        .write()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .detach())
-}
-
-#[derive(Copy, Clone)]
+/// Everything auto-prune needs from the serialize that triggered it.
 struct AutoPruneInputs<'a> {
     metadata_entries: &'a [SerializableEntry],
     tombstone_entries: &'a [TombstoneRecord],
@@ -1070,41 +986,49 @@ struct AutoPruneInputs<'a> {
     list_tombstone_entries: &'a [ListTombstoneRecord],
     filter_rules: &'a [FilterRule],
     rules: &'a PruneRules,
-    now_ms: i64,
 }
 
-fn auto_prune_tree(repo: &gix::Repository, inputs: AutoPruneInputs<'_>) -> Result<gix::ObjectId> {
-    let cutoff_ms = prune::parse_since_to_cutoff_ms(&inputs.rules.since, inputs.now_ms)?;
+/// Rebuild the tree keeping only the most recently modified keys, down to the
+/// configured floors.
+fn auto_prune_tree(repo: &gix::Repository, inputs: &AutoPruneInputs<'_>) -> Result<gix::ObjectId> {
     let is_main_dest = |key: &str| -> bool {
         classify_key(key, inputs.filter_rules)
             .is_some_and(|dests| dests.iter().any(|d| d == MAIN_DEST))
     };
 
-    let metadata = inputs
+    let candidates: Vec<&SerializableEntry> = inputs
         .metadata_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
-        .filter_map(|entry| prune_metadata_entry(entry, cutoff_ms).transpose())
-        .collect::<Result<Vec<_>>>()?;
+        .collect();
+
+    let (metadata, oldest_retained) = select_most_recent(&candidates, inputs.rules);
+
+    // Tombstones record removals, and a removal only means something next to
+    // the keys it sits among. Keep the ones at least as recent as the oldest
+    // key that survived; older ones describe a part of the tree that is gone.
+    let keep_tombstone = |target_type: &TargetType, timestamp: i64| {
+        *target_type == TargetType::Project || timestamp >= oldest_retained
+    };
     let tombstones = inputs
         .tombstone_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
-        .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
+        .filter(|entry| keep_tombstone(&entry.target_type, entry.timestamp))
         .cloned()
         .collect::<Vec<_>>();
     let set_tombstones = inputs
         .set_tombstone_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
-        .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
+        .filter(|entry| keep_tombstone(&entry.target_type, entry.timestamp))
         .cloned()
         .collect::<Vec<_>>();
     let list_tombstones = inputs
         .list_tombstone_entries
         .iter()
         .filter(|entry| is_main_dest(&entry.key))
-        .filter(|entry| entry.target_type == TargetType::Project || entry.timestamp >= cutoff_ms)
+        .filter(|entry| keep_tombstone(&entry.target_type, entry.timestamp))
         .cloned()
         .collect::<Vec<_>>();
 
@@ -1119,275 +1043,61 @@ fn auto_prune_tree(repo: &gix::Repository, inputs: AutoPruneInputs<'_>) -> Resul
     )
 }
 
-fn prune_metadata_entry(
-    entry: &SerializableEntry,
-    cutoff_ms: i64,
-) -> Result<Option<SerializableEntry>> {
-    if entry.target_type != TargetType::Project && entry.last_timestamp < cutoff_ms {
-        return Ok(None);
-    }
-
-    if entry.target_type != TargetType::Project && entry.value_type == ValueType::List {
-        let retained = parse_entries(&entry.value)?
-            .into_iter()
-            .filter(|item| item.timestamp >= cutoff_ms)
-            .collect::<Vec<_>>();
-        let mut pruned = entry.clone();
-        pruned.value = encode_entries(&retained)?;
-        return Ok(Some(pruned));
-    }
-
-    Ok(Some(entry.clone()))
-}
-
-fn prune_target_type_tree(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
-    path: &str,
-    cutoff_ms: i64,
-    stale_keys: &HashSet<String>,
-) -> Result<gix::ObjectId> {
-    let tree = tree_oid
-        .attach(repo)
-        .object()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .into_tree();
-    let mut editor = repo
-        .empty_tree()
-        .edit()
-        .map_err(|e| Error::Other(format!("{e}")))?;
-
-    for entry_result in tree.iter() {
-        let entry = entry_result.map_err(|e| Error::Other(format!("{e}")))?;
-        let name = entry.filename().to_str_lossy().to_string();
-
-        if entry.mode().is_tree() {
-            let subtree_oid = entry.object_id();
-            let pruned_oid = prune_subtree_recursive(
-                repo,
-                subtree_oid,
-                &format!("{path}/{name}"),
-                cutoff_ms,
-                stale_keys,
-            )?;
-            let pruned_tree = pruned_oid
-                .attach(repo)
-                .object()
-                .map_err(|e| Error::Other(format!("{e}")))?
-                .into_tree();
-            if pruned_tree.iter().count() > 0 {
-                editor
-                    .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                    .map_err(|e| Error::Other(format!("{e}")))?;
-            }
-        } else {
-            editor
-                .upsert(&name, entry.mode().kind(), entry.object_id())
-                .map_err(|e| Error::Other(format!("{e}")))?;
-        }
-    }
-
-    Ok(editor
-        .write()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .detach())
-}
-
-/// Prune one key subtree, dropping values whose key has aged out.
+/// Choose the entries to keep: the most recently modified, down to the floors.
 ///
-/// `path` is the subtree's own path from the root of the serialized tree, which
-/// is what `stale_keys` is keyed by. A key that has aged out loses its string
-/// value and its set members, but the subtree itself is still walked: keys are
-/// namespaced, so `agent:model` and `agent:model:version` share a subtree and
-/// can age out independently.
-fn prune_subtree_recursive(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
-    path: &str,
-    cutoff_ms: i64,
-    stale_keys: &HashSet<String>,
-) -> Result<gix::ObjectId> {
-    let tree = tree_oid
-        .attach(repo)
-        .object()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .into_tree();
-    let mut editor = repo
-        .empty_tree()
-        .edit()
-        .map_err(|e| Error::Other(format!("{e}")))?;
-
-    let key_has_aged_out = stale_keys.contains(path);
-
-    for entry_result in tree.iter() {
-        let entry = entry_result.map_err(|e| Error::Other(format!("{e}")))?;
-        let name = entry.filename().to_str_lossy().to_string();
-
-        if !entry.mode().is_tree() {
-            // The string value of an aged-out key.
-            if key_has_aged_out && name == STRING_VALUE_BLOB {
-                continue;
-            }
-            editor
-                .upsert(&name, entry.mode().kind(), entry.object_id())
-                .map_err(|e| Error::Other(format!("{e}")))?;
-            continue;
-        }
-
-        // Set members carry no timestamp of their own, so the whole collection
-        // ages out with its key.
-        if key_has_aged_out && name == SET_VALUE_DIR {
-            continue;
-        }
-
-        let subtree_oid = entry.object_id();
-        let pruned_oid = if name == LIST_VALUE_DIR {
-            prune_list_tree(repo, subtree_oid, cutoff_ms)?
-        } else if name == TOMBSTONE_ROOT {
-            prune_tombstone_tree(repo, subtree_oid, cutoff_ms)?
-        } else {
-            prune_subtree_recursive(
-                repo,
-                subtree_oid,
-                &format!("{path}/{name}"),
-                cutoff_ms,
-                stale_keys,
-            )?
-        };
-
-        let pruned_tree = pruned_oid
-            .attach(repo)
-            .object()
-            .map_err(|e| Error::Other(format!("{e}")))?
-            .into_tree();
-        if pruned_tree.iter().count() > 0 {
-            editor
-                .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                .map_err(|e| Error::Other(format!("{e}")))?;
-        }
-    }
-
-    Ok(editor
-        .write()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .detach())
-}
-
-/// Tree paths of every key whose most recent write predates the cutoff.
+/// Returns the retained entries and the timestamp of the oldest one, which is
+/// the effective cutoff the tombstone filters use.
 ///
-/// Project-scoped metadata is exempt: it is configuration, not history, and
-/// must not age out.
-fn stale_key_paths(db: &Store, cutoff_ms: i64) -> Result<HashSet<String>> {
-    let mut stale = HashSet::new();
-    for entry in db.get_all_metadata()? {
-        if entry.target_type == TargetType::Project || entry.last_timestamp >= cutoff_ms {
-            continue;
-        }
-        let target = Target::from_parts(entry.target_type, Some(entry.target_value));
-        stale.insert(tree_paths::build_key_tree_path(&target, &entry.key)?);
-    }
-    Ok(stale)
-}
+/// Project metadata is configuration rather than history — it holds the prune
+/// rules themselves — so it is always kept and never counted against a floor.
+fn select_most_recent(
+    candidates: &[&SerializableEntry],
+    rules: &PruneRules,
+) -> (Vec<SerializableEntry>, i64) {
+    let mut retained: Vec<SerializableEntry> = Vec::new();
+    let mut ordered: Vec<&&SerializableEntry> = Vec::with_capacity(candidates.len());
 
-fn prune_list_tree(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
-    cutoff_ms: i64,
-) -> Result<gix::ObjectId> {
-    let tree = tree_oid
-        .attach(repo)
-        .object()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .into_tree();
-    let mut editor = repo
-        .empty_tree()
-        .edit()
-        .map_err(|e| Error::Other(format!("{e}")))?;
-
-    for entry_result in tree.iter() {
-        let entry = entry_result.map_err(|e| Error::Other(format!("{e}")))?;
-        let name = entry.filename().to_str_lossy().to_string();
-        // Entry names are formatted as "{timestamp_ms}-{hash5}"
-        if let Some((ts_str, _)) = name.split_once('-') {
-            if let Ok(ts) = ts_str.parse::<i64>() {
-                if ts < cutoff_ms {
-                    continue; // Drop old entry
-                }
-            }
-        }
-        editor
-            .upsert(&name, entry.mode().kind(), entry.object_id())
-            .map_err(|e| Error::Other(format!("{e}")))?;
-    }
-
-    Ok(editor
-        .write()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .detach())
-}
-
-fn prune_tombstone_tree(
-    repo: &gix::Repository,
-    tree_oid: gix::ObjectId,
-    cutoff_ms: i64,
-) -> Result<gix::ObjectId> {
-    let tree = tree_oid
-        .attach(repo)
-        .object()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .into_tree();
-    let mut editor = repo
-        .empty_tree()
-        .edit()
-        .map_err(|e| Error::Other(format!("{e}")))?;
-
-    for entry_result in tree.iter() {
-        let entry = entry_result.map_err(|e| Error::Other(format!("{e}")))?;
-        let name = entry.filename().to_str_lossy().to_string();
-
-        if entry.mode().is_tree() {
-            let subtree_oid = entry.object_id();
-            let pruned_oid = prune_tombstone_tree(repo, subtree_oid, cutoff_ms)?;
-            let pruned_tree = pruned_oid
-                .attach(repo)
-                .object()
-                .map_err(|e| Error::Other(format!("{e}")))?
-                .into_tree();
-            if pruned_tree.iter().count() > 0 {
-                editor
-                    .upsert(&name, gix::objs::tree::EntryKind::Tree, pruned_oid)
-                    .map_err(|e| Error::Other(format!("{e}")))?;
-            }
-        } else if entry.mode().is_blob() && name == "__deleted" {
-            let blob = entry
-                .object_id()
-                .attach(repo)
-                .object()
-                .map_err(|e| Error::Other(format!("{e}")))?
-                .into_blob();
-            if let Ok(content) = std::str::from_utf8(&blob.data) {
-                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
-                    if let Some(ts) = parsed.get("timestamp").and_then(serde_json::Value::as_i64) {
-                        if ts < cutoff_ms {
-                            continue; // Drop old tombstone
-                        }
-                    }
-                }
-            }
-            editor
-                .upsert(&name, entry.mode().kind(), entry.object_id())
-                .map_err(|e| Error::Other(format!("{e}")))?;
+    for entry in candidates {
+        if entry.target_type == TargetType::Project {
+            retained.push((*entry).clone());
         } else {
-            editor
-                .upsert(&name, entry.mode().kind(), entry.object_id())
-                .map_err(|e| Error::Other(format!("{e}")))?;
+            ordered.push(entry);
         }
     }
 
-    Ok(editor
-        .write()
-        .map_err(|e| Error::Other(format!("{e}")))?
-        .detach())
+    // Most recent first, with a stable tie-break so identical input always
+    // produces an identical tree.
+    ordered.sort_by(|a, b| {
+        b.last_timestamp.cmp(&a.last_timestamp).then_with(|| {
+            (a.target_type.as_str(), &a.target_value, &a.key).cmp(&(
+                b.target_type.as_str(),
+                &b.target_value,
+                &b.key,
+            ))
+        })
+    });
+
+    let mut bytes = 0u64;
+    let mut oldest_retained = i64::MAX;
+
+    for (index, entry) in ordered.into_iter().enumerate() {
+        let keys = index as u64;
+        let entry_bytes = entry.value.len() as u64;
+        if rules.min_keys.is_some_and(|floor| keys + 1 > floor) {
+            break;
+        }
+        if rules
+            .min_size
+            .is_some_and(|floor| bytes + entry_bytes > floor)
+        {
+            break;
+        }
+        bytes += entry_bytes;
+        oldest_retained = oldest_retained.min(entry.last_timestamp);
+        retained.push((*entry).clone());
+    }
+
+    (retained, oldest_retained)
 }
 
 /// Count keys in original and pruned trees to produce stats.

@@ -1,10 +1,10 @@
 use anyhow::Result;
 
 use crate::context::CommandContext;
-use git_meta_lib::prune::{parse_since_to_cutoff_ms, read_prune_rules};
+use git_meta_lib::prune::parse_since_to_cutoff_ms;
 use git_meta_lib::types::Target;
 
-pub(crate) fn run(dry_run: bool, skip_date: bool) -> Result<()> {
+pub(crate) fn run(dry_run: bool, skip_date: bool, since: Option<&str>) -> Result<()> {
     let ctx = CommandContext::open(None)?;
 
     let cutoff_ms = if skip_date {
@@ -12,29 +12,26 @@ pub(crate) fn run(dry_run: bool, skip_date: bool) -> Result<()> {
         eprintln!("Pruning all non-project metadata (--skip-date)");
         i64::MAX
     } else {
-        // Read the since value directly — for manual prune we only need the retention window,
-        // not the triggers (max-keys/max-size).
-        let rules = read_prune_rules(ctx.session.store())?;
-        let since = match rules {
-            Some(ref r) => r.since.clone(),
-            None => {
-                // Check if at least meta:prune:since is set (triggers may be absent)
-                if let Some(entry) = ctx
+        // Local pruning is date-based, like the manual tree prune: the window
+        // comes from --since, or a project default. Auto-prune's key and size
+        // limits describe the published tree, not the local store.
+        let since = if let Some(since) = since {
+            since.to_string()
+        } else {
+            {
+                let Some(entry) = ctx
                     .session
                     .store()
                     .get(&Target::project(), "meta:prune:since")?
-                {
-                    let s: String = serde_json::from_str(&entry.value)?;
-                    s
-                } else {
-                    eprintln!("No prune rules configured.");
+                else {
+                    eprintln!("No retention window given.");
                     eprintln!();
-                    eprintln!("Run `git meta config:prune` to set up auto-prune rules, or set them manually:");
+                    eprintln!("Pass one, or set a project default:");
+                    eprintln!("  git meta local-prune --since 6m");
                     eprintln!("  git meta config meta:prune:since 6m");
-                    eprintln!("  git meta config meta:prune:max-keys 10000");
-                    eprintln!("  git meta config meta:prune:max-size 10m");
                     return Ok(());
-                }
+                };
+                serde_json::from_str::<String>(&entry.value)?
             }
         };
 

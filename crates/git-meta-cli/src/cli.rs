@@ -347,6 +347,11 @@ pub(crate) enum Commands {
         /// Show what would be pruned without committing
         #[arg(long = "dry-run")]
         dry_run: bool,
+
+        /// Retention window, e.g. 90d, 6m, 1y, or 2025-01-01.
+        /// Defaults to the project's meta:prune:since if set.
+        #[arg(long)]
+        since: Option<String>,
     },
 
     /// Prune old metadata from the local SQLite database
@@ -359,6 +364,11 @@ pub(crate) enum Commands {
         /// Ignore the date rule and prune all non-project metadata
         #[arg(long = "skip-date")]
         skip_date: bool,
+
+        /// Retention window, e.g. 90d, 6m, 1y, or 2025-01-01.
+        /// Defaults to the project's meta:prune:since if set.
+        #[arg(long)]
+        since: Option<String>,
     },
 
     /// Remove the git meta database and all meta refs

@@ -207,11 +207,13 @@ fn run_command(command: Commands) -> Result<()> {
 
         Commands::ConfigPrune => commands::prune::config::run(),
 
-        Commands::Prune { dry_run } => commands::prune::tree::run(dry_run),
+        Commands::Prune { dry_run, since } => commands::prune::tree::run(dry_run, since.as_deref()),
 
-        Commands::LocalPrune { dry_run, skip_date } => {
-            commands::prune::local::run(dry_run, skip_date)
-        }
+        Commands::LocalPrune {
+            dry_run,
+            skip_date,
+            since,
+        } => commands::prune::local::run(dry_run, skip_date, since.as_deref()),
 
         Commands::Teardown => commands::teardown::run(),
     }

@@ -666,10 +666,8 @@ const AUTO_PRUNE_DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const AUTO_PRUNE_T0: i64 = 1_700_000_000_000;
 /// Auto-prune rebuilds the whole tree from the entries serialize read. An
 /// incremental serialize that only reads the changed targets' rows would
-/// therefore publish a tree containing only those targets.
-///
-/// Both targets here are written well inside the retention window, so neither
-/// should be dropped on age; only the second serialize is incremental.
+/// therefore publish a tree containing only those targets — and, with a floor
+/// of one key, would keep the wrong one for the wrong reason.
 #[test]
 fn auto_prune_after_an_incremental_serialize_keeps_untouched_targets() {
     let (dir, repo) = setup_repo();
@@ -687,11 +685,11 @@ fn auto_prune_after_an_incremental_serialize_keeps_untouched_targets() {
     // Retention far wider than the ages involved; max-keys forces the trigger.
     session
         .target(&project)
-        .set("meta:prune:since", "30d")
+        .set("meta:prune:max-keys", "2")
         .unwrap();
     session
         .target(&project)
-        .set("meta:prune:max-keys", "1")
+        .set("meta:prune:min-keys", "1")
         .unwrap();
 
     let untouched_sha = "00112233445566778899aabbccddeeff00112233";
@@ -710,12 +708,11 @@ fn auto_prune_after_an_incremental_serialize_keeps_untouched_targets() {
         "first: changes={} pruned={} | second: changes={} pruned={}",
         first.changes, first.pruned, second.changes, second.pruned
     );
-    // The first serialize proves auto-prune is wired up and dropped the stale
-    // target. The second runs it again on an incremental read, where the
-    // rebuilt tree must still contain every target that has not aged out — if
-    // it does, it matches the existing tree and no further prune commit is
-    // needed, which is why `second.pruned` is zero rather than a failure.
-    assert_eq!(first.pruned, 1, "auto-prune did not drop the stale target");
+    // The first serialize proves auto-prune is wired up: three keys over a
+    // ceiling of two, cut back to a floor of one. The second runs it again on
+    // an incremental read, where the entries it rebuilds from must still be the
+    // complete set rather than just the target that changed.
+    assert!(first.pruned > 0, "auto-prune did not run");
     drop(session);
 
     let repo = gix::open(dir.path()).unwrap();
@@ -749,19 +746,120 @@ fn auto_prune_after_an_incremental_serialize_keeps_untouched_targets() {
         false
     };
 
+    // The most recently modified key is the one that survives, and it is the
+    // one the incremental serialize touched.
     assert!(
         find(&format!("commit/{}/{sha}/agent/model/__value", &sha[..2])),
-        "the touched target is missing"
+        "auto-prune dropped the most recently modified key"
     );
-    assert!(
-        find(&format!("commit/00/{untouched_sha}/agent/model/__value")),
-        "auto-prune dropped a target that was never touched and never aged out"
-    );
+    // The oldest key is the one that goes.
     assert!(
         !find(&format!(
             "commit/{}/{stale_sha}/agent/model/__value",
             &stale_sha[..2]
         )),
-        "auto-prune kept a target well outside the retention window"
+        "auto-prune kept the oldest key over more recent ones"
     );
+}
+
+/// The point of a floor: a prune has to buy room, or the very next serialize
+/// triggers again and the tree never settles.
+#[test]
+fn auto_prune_cuts_to_the_floor_and_then_leaves_the_tree_alone() {
+    let (dir, repo) = setup_repo();
+    let session = open_session(repo);
+    let project = Target::project();
+    session
+        .target(&project)
+        .set("meta:prune:max-keys", "20")
+        .unwrap();
+    session
+        .target(&project)
+        .set("meta:prune:min-keys", "10")
+        .unwrap();
+
+    let write = |index: usize, at: i64| {
+        let session = reopen_session(dir.path(), at);
+        let sha = format!("{index:040x}");
+        session
+            .target(&Target::commit(&sha).unwrap())
+            .set("agent:model", format!("m{index}"))
+            .unwrap();
+        session.serialize().unwrap()
+    };
+
+    // Fill past the ceiling; the prune that fires must land on the floor.
+    let mut pruned_at = Vec::new();
+    for index in 0..24 {
+        let output = write(index, AUTO_PRUNE_T0 + index as i64 * 1000);
+        if output.pruned > 0 {
+            pruned_at.push(index);
+        }
+    }
+
+    assert!(!pruned_at.is_empty(), "auto-prune never fired");
+    let tip_keys = count_tip_keys(dir.path());
+    assert!(
+        (10..=20).contains(&tip_keys),
+        "tree settled at {tip_keys} keys, outside the 10..=20 band"
+    );
+
+    // Having cut to 10, the next few writes must not each trigger another
+    // prune — that was the old behaviour this design replaces.
+    assert!(
+        pruned_at.len() <= 2,
+        "pruned on {} of 24 serializes: {pruned_at:?}",
+        pruned_at.len()
+    );
+}
+
+/// The tree measurements auto-prune depends on are cached by tree OID, so a
+/// repeated check does not re-walk the tree.
+#[test]
+fn tree_measurements_are_cached_by_oid() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+    let project = Target::project();
+    session
+        .target(&project)
+        .set("meta:prune:max-keys", "100000")
+        .unwrap();
+
+    let target = Target::commit(&sha).unwrap();
+    for round in 0..20 {
+        session
+            .target(&target)
+            .set(&format!("agent:step-{round}"), "v")
+            .unwrap();
+        let _ = session.serialize().unwrap();
+    }
+
+    let cached = count_tree_stats(dir.path());
+    assert!(
+        cached > 0,
+        "no tree measurements were cached, so every check re-walked the tree"
+    );
+}
+
+/// Rows in the tree-measurement cache.
+fn count_tree_stats(dir: &std::path::Path) -> i64 {
+    let connection = rusqlite::Connection::open(dir.join(".git/git-meta.sqlite")).unwrap();
+    connection
+        .query_row("SELECT COUNT(*) FROM tree_stats", [], |row| row.get(0))
+        .unwrap()
+}
+
+/// Count the metadata keys in the published tip.
+fn count_tip_keys(dir: &std::path::Path) -> usize {
+    let output = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(["ls-tree", "-r", "--name-only", "refs/meta/local/main"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.starts_with("project/"))
+        .filter(|line| line.ends_with("/__value"))
+        .count()
 }

@@ -55,30 +55,48 @@
           <p>This document describes how to configure automatic pruning rules that are evaluated during serialization.</p>
 <h2 id="overview">Overview</h2>
 <p>Auto-pruning allows a project to declare rules that trigger a prune commit automatically after serialization. Rules are stored as ordinary project-level metadata under the <code>meta:prune:</code> key namespace. Because project metadata is never itself pruned and travels with the metadata ref, all collaborators share the same pruning policy.</p>
+<p>Auto-pruning is a <strong>high-water / low-water</strong> rule. When the serialized tree grows past a configured maximum, it is cut back to the corresponding minimum by dropping the least recently modified keys, and then left alone until it grows past the maximum again.</p>
+<p>Age is deliberately not part of auto-pruning. A retention window cannot promise to bring a tree under a size limit — if every key is recent, nothing is dropped — so a tree over its limit would attempt a prune on every single serialize and never come down. Date-based pruning is available as the manual <code>git meta prune --since</code>, where the caller chooses the window and can see what it removes.</p>
 <h2 id="configuration-keys">Configuration keys</h2>
-<p>All keys are stored as <code>string</code> values on the <code>project</code> target.</p>
-<h3 id="metaprunesince"><code>meta:prune:since</code></h3>
-<p>Required. The retention window used when pruning is triggered.</p>
-<p>Accepts ISO-8601 dates (<code>2025-01-01</code>) or relative durations (<code>90d</code>, <code>6m</code>, <code>1y</code>).</p>
-<p>This value is passed to the prune operation as the <code>--since</code> parameter.</p>
+<p>All keys are stored as <code>string</code> values on the <code>project</code> target. At least one of <code>meta:prune:max-keys</code> or <code>meta:prune:max-size</code> must be set for auto-pruning to activate.</p>
 <h3 id="metaprunemax-keys"><code>meta:prune:max-keys</code></h3>
-<p>Optional. An integer threshold. When the total number of metadata keys in the serialized tree exceeds this value, a prune is triggered.</p>
+<p>An integer. When the number of metadata keys in the serialized tree exceeds this value, a prune is triggered.</p>
 <p>Example: <code>10000</code></p>
+<h3 id="metaprunemin-keys"><code>meta:prune:min-keys</code></h3>
+<p>An integer. The key count to prune back down to. Must be below <code>max-keys</code>.</p>
+<p>If <code>max-keys</code> is set without <code>min-keys</code>, the minimum defaults to half of the maximum (never less than 1).</p>
+<p>Example: <code>5000</code></p>
 <h3 id="metaprunemax-size"><code>meta:prune:max-size</code></h3>
-<p>Optional. A size threshold. When the total size of all blobs in the serialized tree exceeds this value, a prune is triggered.</p>
+<p>A size threshold. When the total size of all blobs in the serialized tree exceeds this value, a prune is triggered.</p>
 <p>Accepts human-friendly suffixes (<code>512k</code>, <code>10m</code>, <code>1g</code>).</p>
 <p>Example: <code>50m</code></p>
 <h3 id="metaprunemin-size"><code>meta:prune:min-size</code></h3>
-<p>Optional. Passed through to the prune operation as <code>--min-size</code>. Target subtrees smaller than this threshold are kept in full regardless of age.</p>
-<p>Accepts human-friendly suffixes (<code>512k</code>, <code>10m</code>).</p>
-<p>Example: <code>512k</code></p>
-<p>At least one of <code>meta:prune:max-keys</code> or <code>meta:prune:max-size</code> must be set alongside <code>meta:prune:since</code> for auto-pruning to activate. If neither trigger key is present, no auto-pruning occurs even if <code>meta:prune:since</code> is set.</p>
+<p>The total size to prune back down to. Must be below <code>max-size</code>. Defaults to half of <code>max-size</code>.</p>
+<p>Accepts the same suffixes.</p>
+<p>Example: <code>25m</code></p>
+<p>The gap between a maximum and its minimum is what makes auto-pruning affordable: it buys room for further growth, so pruning happens once every so often rather than on every serialize. A minimum close to its maximum will prune often; a distant one prunes rarely but discards more each time.</p>
+<p>Note that the maximum counts every key in the tree, including the project-level configuration keys themselves, while the minimum applies only to the keys that can be dropped. Set <code>max-keys</code> comfortably above the number of <code>meta:</code> config keys a project holds.</p>
+<h2 id="what-is-kept">What is kept</h2>
+<p>When a prune runs, entries are ordered by their last modification time, most recent first, and kept until a floor is reached:</p>
+<ul><li><strong>Project metadata is always retained</strong> and does not count against a floor. It holds the prune rules themselves, so dropping it would discard the policy.</li><li>Remaining keys are retained most-recently-modified first, stopping at <code>min-keys</code> and/or <code>min-size</code>, whichever is reached first.</li><li>Ties are broken by target type, target value, then key, so the same input always produces the same tree.</li><li><strong>Tombstones</strong> are retained when they are at least as recent as the oldest surviving key. Older ones describe removals in a part of the tree that is no longer published.</li></ul>
+<p>A key is kept or dropped whole. A list that survives keeps all of its entries, however old the individual entries are; a list that is dropped is dropped entirely. If a single append-only list grows without bound, the size trigger will eventually drop the key that holds it.</p>
 <h2 id="evaluation-during-serialization">Evaluation during serialization</h2>
 <p>Serialization proceeds as follows when auto-prune rules are configured:</p>
-<ol><li>Normal tree serialization produces a commit as usual.</li><li>Read all <code>meta:prune:*</code> keys from the project metadata in SQLite.</li><li>If rules are incomplete (no <code>since</code>, or neither <code>max-keys</code> nor <code>max-size</code>), stop.</li><li>Evaluate each trigger against the just-written commit&#x27;s tree:</li></ol>
-<ul><li><code>max-keys</code>: count the total number of metadata keys (distinct target+key pairs) in the tree.</li><li><code>max-size</code>: compute the total size of all blob objects reachable from the tree.</li></ul>
-<ol><li>If any trigger exceeds its threshold, run a prune using <code>since</code> and <code>min-size</code> from the rules.</li><li>The prune creates a second commit on top of the serialization commit, with the standard prune commit message format.</li></ol>
+<ol><li>Normal tree serialization produces a commit as usual.</li><li>Read all <code>meta:prune:*</code> keys from the project metadata in SQLite.</li><li>If no maximum is configured, stop.</li><li>Evaluate each configured trigger against the just-written commit&#x27;s tree:</li></ol>
+<ul><li><code>max-keys</code>: count the metadata keys in the tree.</li><li><code>max-size</code>: total the size of all blob objects reachable from the tree.</li></ul>
+<ol><li>If any trigger is exceeded, rebuild the tree from the entries that survive the retention rules above.</li><li>If the rebuilt tree differs from the one just written, it is committed on top, with the <code>git-meta: auto-prune</code> commit message.</li></ol>
 <p>If no trigger fires, serialization produces a single commit as before.</p>
+<h3 id="measurement-caching">Measurement caching</h3>
+<p>Counting keys and totalling blob sizes means walking the serialized tree, and that cost grows exactly as the tree does — while the check runs on every serialize. Implementations should cache these measurements keyed by tree object ID.</p>
+<p>Tree object IDs are content hashes, so a cached measurement can never go stale. An incremental serialize rewrites only the subtrees along the paths it changed and reuses every other subtree by ID, so a cached walk costs what changed rather than what exists.</p>
+<p>The reference implementation stores these in a <code>tree_stats</code> table alongside the metadata, and treats them as a pure cache: discarding rows costs a re-measurement, never correctness.</p>
+<h2 id="manual-pruning">Manual pruning</h2>
+<p><code>git meta prune</code> prunes by date and is never triggered automatically:</p>
+<pre><code>git meta prune --since 90d          # drop keys not modified in the last 90 days
+git meta prune --since 2025-01-01   # drop keys not modified since a date
+git meta prune --dry-run --since 6m # report what would go</code></pre>
+<p>If <code>--since</code> is omitted, the project&#x27;s <code>meta:prune:since</code> value is used as a default when one is set. That key has no effect on auto-pruning.</p>
+<p><code>git meta local-prune --since &lt;window&gt;</code> does the same for the local SQLite store. Pruning the tree does not shrink the database: the rows remain and a later serialize would republish them. Publishing a smaller tree durably means running both.</p>
 <h2 id="the-git-meta-config-command">The <code>git meta config</code> command</h2>
 <p>A convenience command for managing project-level <code>meta:*</code> keys.</p>
 <pre><code>git meta config &lt;key&gt; &lt;value&gt;       # set a config key
@@ -86,31 +104,31 @@ git meta config &lt;key&gt;               # get a config key
 git meta config --list              # list all meta:* config keys
 git meta config --unset &lt;key&gt;       # remove a config key</code></pre>
 <p>Examples:</p>
-<pre><code>git meta config meta:prune:since 90d
-git meta config meta:prune:max-keys 10000
+<pre><code>git meta config meta:prune:max-keys 10000
+git meta config meta:prune:min-keys 5000
 git meta config meta:prune:max-size 50m
-git meta config meta:prune:min-size 512k
+git meta config meta:prune:min-size 25m
 
-git meta config meta:prune:since
-# → 90d
+git meta config meta:prune:max-keys
+# → 10000
 
 git meta config --list
-# → meta:prune:since = 90d
 # → meta:prune:max-keys = 10000
+# → meta:prune:min-keys = 5000
 # → meta:prune:max-size = 50m
-# → meta:prune:min-size = 512k
+# → meta:prune:min-size = 25m
 
 git meta config --unset meta:prune:max-keys</code></pre>
 <p>Under the hood, <code>git meta config</code> operates on the <code>project</code> target with string values:</p>
 <ul><li><code>git meta config &lt;key&gt; &lt;value&gt;</code> is equivalent to <code>git meta set project &lt;key&gt; &lt;value&gt;</code></li><li><code>git meta config &lt;key&gt;</code> is equivalent to <code>git meta get project &lt;key&gt;</code></li><li><code>git meta config --list</code> queries all project keys matching <code>meta:*</code></li><li><code>git meta config --unset &lt;key&gt;</code> is equivalent to <code>git meta rm project &lt;key&gt;</code></li></ul>
 <p>All keys set via <code>git meta config</code> must start with <code>meta:</code>. This keeps the config namespace distinct from user-defined project metadata.</p>
 <h2 id="interaction-with-manual-prune">Interaction with manual prune</h2>
-<p>Running <code>git meta prune</code> manually remains supported. Auto-pruning does not interfere — if a manual prune was recently run and the tree is already below thresholds, auto-pruning will not trigger.</p>
+<p>Running <code>git meta prune --since &lt;window&gt;</code> manually remains supported and is the only way to prune by date. Auto-pruning does not interfere — if a manual prune has brought the tree below the maximums, auto-pruning will not trigger.</p>
 <h2 id="interaction-with-materialization">Interaction with materialization</h2>
 <p>Auto-prune rules materialized from a remote are immediately effective for subsequent local serializations. There is no special merge handling — the rules are ordinary string values and follow standard last-writer-wins conflict resolution.</p>
         </article>
       </main>
-      <aside class="toc-aside" aria-label="On this page"><div class="toc-title">On this page</div><ul class="toc-list"><li class="toc-h2"><a href="#overview">Overview</a></li><li class="toc-h2"><a href="#configuration-keys">Configuration keys</a><ul class="toc-sub"><li class="toc-h3"><a href="#metaprunesince"><code>meta:prune:since</code></a></li><li class="toc-h3"><a href="#metaprunemax-keys"><code>meta:prune:max-keys</code></a></li><li class="toc-h3"><a href="#metaprunemax-size"><code>meta:prune:max-size</code></a></li><li class="toc-h3"><a href="#metaprunemin-size"><code>meta:prune:min-size</code></a></li></ul></li><li class="toc-h2"><a href="#evaluation-during-serialization">Evaluation during serialization</a></li><li class="toc-h2"><a href="#the-git-meta-config-command">The <code>git meta config</code> command</a></li><li class="toc-h2"><a href="#interaction-with-manual-prune">Interaction with manual prune</a></li><li class="toc-h2"><a href="#interaction-with-materialization">Interaction with materialization</a></li></ul></aside>
+      <aside class="toc-aside" aria-label="On this page"><div class="toc-title">On this page</div><ul class="toc-list"><li class="toc-h2"><a href="#overview">Overview</a></li><li class="toc-h2"><a href="#configuration-keys">Configuration keys</a><ul class="toc-sub"><li class="toc-h3"><a href="#metaprunemax-keys"><code>meta:prune:max-keys</code></a></li><li class="toc-h3"><a href="#metaprunemin-keys"><code>meta:prune:min-keys</code></a></li><li class="toc-h3"><a href="#metaprunemax-size"><code>meta:prune:max-size</code></a></li><li class="toc-h3"><a href="#metaprunemin-size"><code>meta:prune:min-size</code></a></li></ul></li><li class="toc-h2"><a href="#what-is-kept">What is kept</a></li><li class="toc-h2"><a href="#evaluation-during-serialization">Evaluation during serialization</a><ul class="toc-sub"><li class="toc-h3"><a href="#measurement-caching">Measurement caching</a></li></ul></li><li class="toc-h2"><a href="#manual-pruning">Manual pruning</a></li><li class="toc-h2"><a href="#the-git-meta-config-command">The <code>git meta config</code> command</a></li><li class="toc-h2"><a href="#interaction-with-manual-prune">Interaction with manual prune</a></li><li class="toc-h2"><a href="#interaction-with-materialization">Interaction with materialization</a></li></ul></aside>
     </div>
     <script>
       (() => {
