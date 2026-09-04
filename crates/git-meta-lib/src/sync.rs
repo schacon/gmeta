@@ -146,6 +146,7 @@ pub fn insert_promisor_entries(
             break;
         }
 
+        let commit_oid = oid.to_string();
         let commit_obj = oid
             .attach(repo)
             .object()
@@ -164,7 +165,15 @@ pub fn insert_promisor_entries(
                 } else {
                     Target::from_parts(target_type, Some(change.target_value.clone()))
                 };
-                if store.insert_promised(&target, &change.key, &ValueType::String)? {
+                // Record where the value lives. Walking newest-first means the
+                // first commit to mention a key is the last one that wrote it,
+                // which is the tree still holding its value after pruning.
+                if store.insert_promised(
+                    &target,
+                    &change.key,
+                    &ValueType::String,
+                    Some(&commit_oid),
+                )? {
                     count += 1;
                 }
             }
@@ -177,7 +186,7 @@ pub fn insert_promisor_entries(
                     .tree_id()
                     .map_err(|e| Error::Other(format!("{e}")))?
                     .detach();
-                count += insert_promised_tree_keys(repo, store, tree_id)?;
+                count += insert_promised_tree_keys(repo, store, tree_id, &commit_oid)?;
             }
         }
     }
@@ -189,6 +198,7 @@ fn insert_promised_tree_keys(
     repo: &gix::Repository,
     store: &Store,
     tree_id: gix::ObjectId,
+    commit_oid: &str,
 ) -> Result<usize> {
     let keys = extract_keys_from_tree(repo, tree_id)?;
     let mut count = 0;
@@ -200,7 +210,7 @@ fn insert_promised_tree_keys(
         } else {
             Target::from_parts(target_type, Some(target_value.clone()))
         };
-        if store.insert_promised(&target, key, &ValueType::String)? {
+        if store.insert_promised(&target, key, &ValueType::String, Some(commit_oid))? {
             count += 1;
         }
     }

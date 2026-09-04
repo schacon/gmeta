@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 5;
+const SCHEMA_VERSION: i32 = 6;
 
 /// Run all pending migrations on the database.
 pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
@@ -27,6 +27,10 @@ pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
     }
     if version < 5 {
         conn.execute_batch(MIGRATION_5)?;
+        conn.pragma_update(None, "user_version", 5)?;
+    }
+    if version < 6 {
+        conn.execute_batch(MIGRATION_6)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -145,4 +149,15 @@ CREATE INDEX IF NOT EXISTS idx_tree_stats_last_used ON tree_stats(last_used);
 const MIGRATION_5: &str = "
 CREATE INDEX IF NOT EXISTS idx_metadata_recency
     ON metadata(last_timestamp DESC, target_type, target_value, key);
+";
+
+/// Migration 6: Remember which commit last wrote a promised key.
+///
+/// Indexing history records every key a repository has ever published, but a
+/// key that has been pruned out of the tip is no longer at its path in the tip
+/// tree — and that is exactly the key a promisor exists to fetch. Recording the
+/// commit the key was last written in turns fetching it into a single tree
+/// lookup, instead of a walk back through history with nothing to aim at.
+const MIGRATION_6: &str = "
+ALTER TABLE metadata ADD COLUMN promised_commit TEXT;
 ";

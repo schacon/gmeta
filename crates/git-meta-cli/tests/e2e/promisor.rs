@@ -20,7 +20,7 @@ fn pull_inserts_promisor_entries() {
         .args(["remote", "add", bare_path])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Indexed 1 keys from history"));
+        .stderr(predicate::str::contains("1 keys indexed"));
 
     harness::git_meta(dir.path())
         .args(["get", "project", "testing"])
@@ -28,11 +28,14 @@ fn pull_inserts_promisor_entries() {
         .success()
         .stdout(predicate::str::contains("hello"));
 
-    // The historical key was pruned from the tip tree; get should not crash.
+    // `old_key` was written in an earlier commit and is no longer in the tip
+    // tree — which is exactly what a promisor is for. Indexing recorded the
+    // commit that last wrote it, so fetching it is a lookup in that tree.
     harness::git_meta(dir.path())
         .args(["get", "project", "old_key"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("old_value"));
 
     harness::git_meta(dir.path())
         .args(["get", "project", "--json"])
@@ -107,7 +110,7 @@ fn pull_indexes_omitted_change_commit_tree() {
         .args(["remote", "add", bare_path])
         .assert()
         .success()
-        .stderr(predicate::str::contains("Indexed 2 keys from history"));
+        .stderr(predicate::str::contains("2 keys indexed"));
 
     harness::git_meta(dir.path())
         .args(["inspect", "--promisor", "project"])
@@ -316,4 +319,52 @@ fn git(repo: &std::path::Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// A promised entry records that a key exists somewhere in history. Failing to
+/// locate its value must not discard that record: the commit holding it may
+/// simply not have been fetched yet, and forgetting the key loses the only
+/// evidence it ever existed.
+#[test]
+fn a_value_that_cannot_be_located_keeps_its_promisor_entry() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_history();
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success();
+
+    // Promise a key that was never published anywhere.
+    let db_path = dir.path().join(".git/git-meta.sqlite");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute(
+        "INSERT INTO metadata
+            (target_type, target_value, key, value, value_type, last_timestamp,
+             is_git_ref, is_promised, promised_commit)
+         VALUES ('project', '', 'never:published', '', 'string', 0, 0, 1, NULL)",
+        params![],
+    )
+    .unwrap();
+    drop(conn);
+
+    harness::git_meta(dir.path())
+        .args(["get", "project", "never:published"])
+        .assert()
+        .success();
+
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    let still_promised: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM metadata
+             WHERE key = 'never:published' AND is_promised = 1",
+            params![],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        still_promised, 1,
+        "the promisor entry was discarded when its value could not be found"
+    );
 }

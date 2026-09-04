@@ -846,7 +846,7 @@ mod tests {
         let target = commit_target("abc123");
         db.set_add(&target, "local:sessions", "s1", "a@b.com", 1000)
             .unwrap();
-        db.insert_promised(&target, "sessions", &ValueType::Set)
+        db.insert_promised(&target, "sessions", &ValueType::Set, None)
             .unwrap();
         let members = vec!["s1".to_string()];
 
@@ -873,7 +873,7 @@ mod tests {
     fn test_publish_local_rejects_promised_set_member_source() {
         let db = Store::open_in_memory().unwrap();
         let target = commit_target("abc123");
-        db.insert_promised(&target, "local:sessions", &ValueType::Set)
+        db.insert_promised(&target, "local:sessions", &ValueType::Set, None)
             .unwrap();
         let members = vec!["s1".to_string()];
 
@@ -895,7 +895,7 @@ mod tests {
     fn test_publish_local_rejects_promised_key_prefix_rows() {
         let db = Store::open_in_memory().unwrap();
         let target = commit_target("abc123");
-        db.insert_promised(&target, "local:summary:title", &ValueType::String)
+        db.insert_promised(&target, "local:summary:title", &ValueType::String, None)
             .unwrap();
 
         let result = db.publish_local(
@@ -917,7 +917,7 @@ mod tests {
             1000,
         )
         .unwrap();
-        db.insert_promised(&target, "summary:title", &ValueType::String)
+        db.insert_promised(&target, "summary:title", &ValueType::String, None)
             .unwrap();
 
         let result = db.publish_local(

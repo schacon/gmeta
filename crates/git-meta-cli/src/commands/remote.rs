@@ -238,6 +238,21 @@ git meta push
     )
 }
 
+/// Render an elapsed duration for progress output.
+///
+/// Setting up against a large metadata ref takes minutes, and which phase the
+/// time went to is the useful part.
+fn elapsed(started: std::time::Instant) -> String {
+    let seconds = started.elapsed().as_secs_f64();
+    if seconds < 1.0 {
+        format!("{:.0} ms", seconds * 1000.0)
+    } else if seconds < 60.0 {
+        format!("{seconds:.1} s")
+    } else {
+        format!("{:.0} m {:02.0} s", seconds / 60.0, seconds % 60.0)
+    }
+}
+
 pub(crate) fn run_add(
     url: &str,
     name: &str,
@@ -389,12 +404,13 @@ pub(crate) fn run_add(
     };
     let fetch_refspec = format!("refs/{ns}/main:{tracking_ref}");
     eprint!("{} metadata (blobless)...", s_err.step("Fetching"));
+    let started = std::time::Instant::now();
     match git_meta_lib::git_utils::run_git(
         repo,
         &["fetch", "--filter=blob:none", name, &fetch_refspec],
     ) {
         Ok(_) => {
-            eprintln!(" {}", s_err.ok("done."));
+            eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 
             // Verify the tracking ref was created
             let remote_ref = if side_ref {
@@ -425,18 +441,27 @@ pub(crate) fn run_add(
 
             // Hydrate tip tree blobs so gix can read the metadata
             eprint!("{} tip blobs...", s_err.step("Hydrating"));
+            let started = std::time::Instant::now();
             let blob_count =
                 git_meta_lib::git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
-            eprintln!(" {}", s_err.ok(&format!("{blob_count} blobs fetched.")));
+            eprintln!(
+                " {}",
+                s_err.ok(&format!(
+                    "{blob_count} blobs fetched in {}.",
+                    elapsed(started)
+                ))
+            );
 
             // Materialize remote metadata into local SQLite
             eprint!("{} local metadata...", s_err.step("Serializing"));
+            let started = std::time::Instant::now();
             let _ = ctx.session.serialize()?;
-            eprintln!(" {}", s_err.ok("done."));
+            eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 
             eprint!("{} remote metadata...", s_err.step("Materializing"));
+            let started = std::time::Instant::now();
             materialize::run(None, false, false, false)?;
-            eprintln!(" {}", s_err.ok("done."));
+            eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 
             // Index historical keys as promisor entries
             let tracking_ref_name = if side_ref {
@@ -446,19 +471,21 @@ pub(crate) fn run_add(
             };
             if let Ok(r) = repo.find_reference(&tracking_ref_name) {
                 if let Ok(tip_id) = r.into_fully_peeled_id() {
+                    eprint!("{} history...", s_err.step("Indexing"));
+                    let started = std::time::Instant::now();
                     let count = git_meta_lib::sync::insert_promisor_entries(
                         repo,
                         ctx.session.store(),
                         tip_id.detach(),
                         None,
                     )?;
-                    if count > 0 {
-                        eprintln!(
-                            "{} {count} keys from history {}",
-                            s_err.ok("Indexed"),
-                            s_err.dim("(available on demand)."),
-                        );
-                    }
+                    eprintln!(
+                        " {}",
+                        s_err.ok(&format!(
+                            "{count} keys indexed in {} (available on demand).",
+                            elapsed(started)
+                        ))
+                    );
                 }
             }
         }

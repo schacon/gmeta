@@ -80,6 +80,7 @@ pub(crate) fn run() -> Result<()> {
                         &target,
                         &change.key,
                         &ValueType::String,
+                        Some(&oid.to_string()),
                     )? {
                         commit_inserted += 1;
                         inserted += 1;
@@ -122,11 +123,12 @@ pub(crate) fn run() -> Result<()> {
                     } else {
                         git_meta_lib::types::Target::from_parts(tt, Some(target_value.clone()))
                     };
-                    if ctx
-                        .session
-                        .store()
-                        .insert_promised(&target, key, &ValueType::String)?
-                    {
+                    if ctx.session.store().insert_promised(
+                        &target,
+                        key,
+                        &ValueType::String,
+                        Some(&oid.to_string()),
+                    )? {
                         commit_inserted += 1;
                         inserted += 1;
                     } else {
