@@ -178,9 +178,6 @@ pub fn run_with_progress(
     // every entry, so the scoped read below would starve them.
     let filter_rules = parse_filter_rules(&session.store)?;
     let single_destination = filter_rules.is_empty();
-    // Auto-prune republishes the whole tree from the entries read below, so it
-    // needs to know when those entries are only the changed targets'.
-    let mut scoped_metadata_read = false;
 
     // Determine incremental vs full mode and collect entries + changes
     let (
@@ -199,7 +196,6 @@ pub fn run_with_progress(
         // every other subtree is reused from the existing tree by OID.
         let can_scope_read =
             single_destination && existing_tree_oid.is_some() && !modified.is_empty();
-        scoped_metadata_read = can_scope_read;
         let metadata = if can_scope_read {
             let mut targets: Vec<(TargetType, String)> = modified
                 .iter()
@@ -511,19 +507,29 @@ pub fn run_with_progress(
         if dest == MAIN_DEST {
             if let Some(ref prune_rules_val) = prune_rules {
                 if prune::should_prune(repo, &session.store, tree_oid, prune_rules_val, now)? {
-                    // Auto-prune rebuilds the tree from scratch, so it needs
-                    // every entry — not just the targets this serialize
-                    // touched. Re-read when the incremental path scoped them,
-                    // which costs a full read only on the runs that prune.
-                    let all_metadata = if scoped_metadata_read {
-                        Some(session.store.get_all_metadata()?)
+                    // Auto-prune rebuilds the tree from scratch, so it cannot
+                    // use the entries an incremental serialize read — those are
+                    // only the targets that changed. Ask the store for the most
+                    // recent entries instead, which is a bounded read: it stops
+                    // at the floor rather than walking everything.
+                    //
+                    // Filter routing needs the whole set, because a key routed
+                    // to a side destination must not take up the main tree's
+                    // budget. That case falls back to a full read.
+                    let (selected, oldest_retained) = if single_destination {
+                        session.store.get_most_recent_metadata(
+                            prune_rules_val.min_keys,
+                            prune_rules_val.min_size,
+                        )?
                     } else {
-                        None
+                        (session.store.get_all_metadata()?, i64::MIN)
                     };
                     let prune_tree_oid = auto_prune_tree(
                         repo,
                         &AutoPruneInputs {
-                            metadata_entries: all_metadata.as_deref().unwrap_or(&metadata_entries),
+                            metadata_entries: &selected,
+                            preselected: single_destination,
+                            oldest_retained,
                             tombstone_entries: &tombstone_entries,
                             set_tombstone_entries: &set_tombstone_entries,
                             list_tombstone_entries: &list_tombstone_entries,
@@ -986,6 +992,11 @@ struct AutoPruneInputs<'a> {
     list_tombstone_entries: &'a [ListTombstoneRecord],
     filter_rules: &'a [FilterRule],
     rules: &'a PruneRules,
+    /// Whether `metadata_entries` is already the retained set, chosen by the
+    /// store in recency order.
+    preselected: bool,
+    /// Timestamp of the oldest retained entry, when preselected.
+    oldest_retained: i64,
 }
 
 /// Rebuild the tree keeping only the most recently modified keys, down to the
@@ -996,13 +1007,16 @@ fn auto_prune_tree(repo: &gix::Repository, inputs: &AutoPruneInputs<'_>) -> Resu
             .is_some_and(|dests| dests.iter().any(|d| d == MAIN_DEST))
     };
 
-    let candidates: Vec<&SerializableEntry> = inputs
-        .metadata_entries
-        .iter()
-        .filter(|entry| is_main_dest(&entry.key))
-        .collect();
-
-    let (metadata, oldest_retained) = select_most_recent(&candidates, inputs.rules);
+    let (metadata, oldest_retained) = if inputs.preselected {
+        (inputs.metadata_entries.to_vec(), inputs.oldest_retained)
+    } else {
+        let candidates: Vec<&SerializableEntry> = inputs
+            .metadata_entries
+            .iter()
+            .filter(|entry| is_main_dest(&entry.key))
+            .collect();
+        select_most_recent(&candidates, inputs.rules)
+    };
 
     // Tombstones record removals, and a removal only means something next to
     // the keys it sits among. Keep the ones at least as recent as the oldest

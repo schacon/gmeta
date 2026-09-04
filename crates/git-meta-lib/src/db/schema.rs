@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
 
 /// Run all pending migrations on the database.
 pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
@@ -23,6 +23,10 @@ pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
     }
     if version < 4 {
         conn.execute_batch(MIGRATION_4)?;
+        conn.pragma_update(None, "user_version", 4)?;
+    }
+    if version < 5 {
+        conn.execute_batch(MIGRATION_5)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -129,4 +133,16 @@ CREATE TABLE IF NOT EXISTS tree_stats (
     last_used INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_tree_stats_last_used ON tree_stats(last_used);
+";
+
+/// Migration 5: Index metadata by recency.
+///
+/// Auto-prune keeps the most recently modified keys down to a floor. Without
+/// this index that means reading and sorting every row in the store, so the
+/// cost of publishing a bounded tree would grow with everything ever written.
+/// With it, the rows arrive in the order the prune wants and it can stop as
+/// soon as the floor is reached.
+const MIGRATION_5: &str = "
+CREATE INDEX IF NOT EXISTS idx_metadata_recency
+    ON metadata(last_timestamp DESC, target_type, target_value, key);
 ";

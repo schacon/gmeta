@@ -98,8 +98,6 @@ impl Store {
         params: impl rusqlite::Params,
         results: &mut Vec<super::types::SerializableEntry>,
     ) -> Result<()> {
-        use super::types::SerializableEntry;
-
         let rows = stmt.query_map(params, |row| {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -114,44 +112,131 @@ impl Store {
         })?;
 
         for row in rows {
-            let (
-                metadata_id,
-                target_type_str,
-                target_value,
-                key,
-                value,
-                value_type_str,
-                last_timestamp,
-                is_git_ref,
-            ) = row?;
-            let target_type = target_type_str.parse::<TargetType>()?;
-            let value_type = value_type_str.parse::<ValueType>()?;
-            let (value, is_git_ref) = match value_type {
-                ValueType::List => (
-                    encode_list_entries_by_metadata_id(
-                        &self.conn,
-                        self.repo.as_ref(),
-                        metadata_id,
-                    )?,
-                    false,
-                ),
-                ValueType::Set => (
-                    encode_set_values_by_metadata_id(&self.conn, metadata_id)?,
-                    false,
-                ),
-                ValueType::String => (value, is_git_ref),
-            };
-            results.push(SerializableEntry {
-                target_type,
-                target_value,
-                key,
-                value,
-                value_type,
-                last_timestamp,
-                is_git_ref,
-            });
+            let columns = row?;
+            self.push_serializable(columns, results)?;
         }
         Ok(())
+    }
+
+    /// Map one queried row into a serializable entry.
+    fn collect_serializable_row(
+        &self,
+        row: &rusqlite::Row<'_>,
+        results: &mut Vec<super::types::SerializableEntry>,
+    ) -> Result<()> {
+        let columns = (
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, String>(4)?,
+            row.get::<_, String>(5)?,
+            row.get::<_, i64>(6)?,
+            row.get::<_, bool>(7)?,
+        );
+        self.push_serializable(columns, results)
+    }
+
+    /// Expand a row's side-table values and append it.
+    fn push_serializable(
+        &self,
+        columns: (i64, String, String, String, String, String, i64, bool),
+        results: &mut Vec<super::types::SerializableEntry>,
+    ) -> Result<()> {
+        use super::types::SerializableEntry;
+        let (
+            metadata_id,
+            target_type_str,
+            target_value,
+            key,
+            value,
+            value_type_str,
+            last_timestamp,
+            is_git_ref,
+        ) = columns;
+        let target_type = target_type_str.parse::<TargetType>()?;
+        let value_type = value_type_str.parse::<ValueType>()?;
+        let (value, is_git_ref) = match value_type {
+            ValueType::List => (
+                encode_list_entries_by_metadata_id(&self.conn, self.repo.as_ref(), metadata_id)?,
+                false,
+            ),
+            ValueType::Set => (
+                encode_set_values_by_metadata_id(&self.conn, metadata_id)?,
+                false,
+            ),
+            ValueType::String => (value, is_git_ref),
+        };
+        results.push(SerializableEntry {
+            target_type,
+            target_value,
+            key,
+            value,
+            value_type,
+            last_timestamp,
+            is_git_ref,
+        });
+        Ok(())
+    }
+
+    /// Read the most recently modified entries, stopping at the first floor
+    /// that is reached.
+    ///
+    /// Auto-prune publishes a bounded tree, so it needs a bounded read. The
+    /// rows arrive in recency order via an index and iteration stops as soon as
+    /// a floor is hit, which makes the cost proportional to what is kept rather
+    /// than to everything the store holds.
+    ///
+    /// Project entries are always included and never counted against a floor:
+    /// they carry the prune rules themselves.
+    ///
+    /// Returns the entries and the timestamp of the oldest one retained.
+    pub fn get_most_recent_metadata(
+        &self,
+        min_keys: Option<u64>,
+        min_size: Option<u64>,
+    ) -> Result<(Vec<super::types::SerializableEntry>, i64)> {
+        let mut entries = Vec::new();
+
+        let project_sql = format!("{} AND target_type = 'project'", Self::SERIALIZABLE_SELECT);
+        let mut stmt = self.conn.prepare(&project_sql)?;
+        self.collect_serializable(&mut stmt, [], &mut entries)?;
+
+        let recent_sql = format!(
+            "{} AND target_type != 'project'
+             ORDER BY last_timestamp DESC, target_type, target_value, key",
+            Self::SERIALIZABLE_SELECT
+        );
+        let mut stmt = self.conn.prepare(&recent_sql)?;
+
+        let mut kept = 0u64;
+        let mut bytes = 0u64;
+        let mut oldest_retained = i64::MAX;
+        let mut batch = Vec::new();
+
+        // Pull one row at a time so the walk stops at the floor instead of
+        // materializing the whole table first.
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            if min_keys.is_some_and(|floor| kept + 1 > floor) {
+                break;
+            }
+            batch.clear();
+            self.collect_serializable_row(row, &mut batch)?;
+            let Some(entry) = batch.pop() else { continue };
+
+            let entry_bytes = entry.value.len() as u64;
+            if min_size.is_some_and(|floor| bytes + entry_bytes > floor) {
+                break;
+            }
+
+            kept += 1;
+            bytes += entry_bytes;
+            oldest_retained = oldest_retained.min(entry.last_timestamp);
+            entries.push(entry);
+        }
+
+        Ok((entries, oldest_retained))
     }
 
     /// Get entries modified since a given timestamp (for incremental serialization).
