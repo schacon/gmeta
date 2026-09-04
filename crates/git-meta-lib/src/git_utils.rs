@@ -282,7 +282,7 @@ fn consolidate_packs(workdir: &Path) -> Result<()> {
         .status();
 
     match status {
-        Ok(status) if status.success() => Ok(()),
+        Ok(status) if status.success() => {}
         // `--geometric` predates neither promisor packs nor every supported
         // Git; fall back to a full repack, and give up quietly if that fails.
         _ => {
@@ -292,9 +292,37 @@ fn consolidate_packs(workdir: &Path) -> Result<()> {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
-            Ok(())
         }
     }
+
+    invalidate_commit_graph(workdir);
+    Ok(())
+}
+
+/// Drop the commit-graph after repacking has moved objects around.
+///
+/// `git clone --filter` writes a commit-graph, and repacking can leave it
+/// naming objects the object database no longer holds. Git then refuses to
+/// fetch at all:
+///
+/// > fatal: You are attempting to fetch <oid>, which is in the commit graph
+/// > file but not in the object database. This is probably due to repo
+/// > corruption.
+///
+/// The graph is only a cache, so removing it is safe and Git rebuilds it when
+/// it wants one. Rewriting it instead would mean walking the whole history for
+/// something nothing has asked for yet.
+fn invalidate_commit_graph(workdir: &Path) {
+    let info = {
+        let in_worktree = workdir.join(".git").join("objects").join("info");
+        if in_worktree.exists() {
+            in_worktree
+        } else {
+            workdir.join("objects").join("info")
+        }
+    };
+    let _ = std::fs::remove_file(info.join("commit-graph"));
+    let _ = std::fs::remove_dir_all(info.join("commit-graphs"));
 }
 
 fn oid_batches<T>(oids: &[T]) -> impl Iterator<Item = &[T]> {
@@ -690,12 +718,23 @@ mod tests {
         };
         assert!(count_packs() >= 4, "test setup did not create packs");
 
+        // A commit-graph naming objects the repack moves would make Git refuse
+        // to fetch afterwards, so consolidation has to drop it.
+        run(&["commit", "--quiet", "--allow-empty", "-m", "graph"]);
+        run(&["commit-graph", "write", "--reachable"]);
+        let commit_graph = path.join(".git/objects/info/commit-graph");
+        assert!(commit_graph.exists(), "test setup wrote no commit-graph");
+
         consolidate_packs(path).expect("consolidate");
 
         assert!(
             count_packs() < 4,
             "packs were not consolidated, still {}",
             count_packs()
+        );
+        assert!(
+            !commit_graph.exists(),
+            "a commit-graph survived the repack that moved its objects"
         );
     }
 
