@@ -9,6 +9,7 @@ mod schema;
 mod sets;
 mod sync;
 mod tombstones;
+mod tree_stats;
 /// Named return types for database query methods.
 pub mod types;
 mod value_ops;

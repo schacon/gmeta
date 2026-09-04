@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 
 /// Run all pending migrations on the database.
 pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
@@ -19,6 +19,10 @@ pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
     }
     if version < 3 {
         conn.execute_batch(MIGRATION_3)?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+    if version < 4 {
+        conn.execute_batch(MIGRATION_4)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -107,4 +111,22 @@ CREATE INDEX IF NOT EXISTS idx_metadata_source_ref ON metadata(source_ref);
 const MIGRATION_3: &str = "
 CREATE INDEX IF NOT EXISTS idx_metadata_log_timestamp
     ON metadata_log(timestamp, target_type, target_value, key);
+";
+
+/// Migration 4: Cache per-tree key counts and sizes.
+///
+/// Auto-prune has to know how large the serialized tree is on every
+/// serialize, and walking it to find out costs more as it grows — exactly
+/// when it is asked most often. Git trees are content-addressed, so a count
+/// keyed by tree OID never goes stale, and an incremental serialize reuses
+/// most of its subtrees unchanged: only the subtrees on a changed path need
+/// recounting.
+const MIGRATION_4: &str = "
+CREATE TABLE IF NOT EXISTS tree_stats (
+    tree_oid TEXT PRIMARY KEY,
+    key_count INTEGER,
+    byte_size INTEGER,
+    last_used INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tree_stats_last_used ON tree_stats(last_used);
 ";
