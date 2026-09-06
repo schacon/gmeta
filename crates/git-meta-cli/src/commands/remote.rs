@@ -85,6 +85,56 @@ fn prompt_for_init(url: &str, ns: &str) -> Result<bool> {
     Ok(answer)
 }
 
+/// Give a brand-new metadata store a working auto-prune policy.
+///
+/// Without one the published tree grows without limit, and every consumer pays
+/// for that growth on every clone. A project that wants unbounded metadata can
+/// unset these; a project that never thinks about it gets a tree that stays a
+/// reasonable size.
+///
+/// Ten thousand keys is roughly a few megabytes of tree at typical value sizes
+/// — small enough to clone quickly, large enough that a project has to be
+/// genuinely busy before anything is dropped. Pruning back to five thousand
+/// buys room to grow again, so it happens occasionally rather than on every
+/// publish.
+///
+/// Existing configuration is never overwritten: these are defaults for a store
+/// that has none, not a policy imposed on one that does.
+///
+/// Returns whether defaults were written.
+fn write_default_prune_rules(ctx: &CommandContext) -> Result<bool> {
+    const DEFAULT_MAX_KEYS: &str = "10000";
+    const DEFAULT_MIN_KEYS: &str = "5000";
+
+    let project = git_meta_lib::types::Target::project();
+    let store = ctx.session.store();
+    if store.get(&project, "meta:prune:max-keys")?.is_some()
+        || store.get(&project, "meta:prune:max-size")?.is_some()
+    {
+        return Ok(false);
+    }
+
+    let handle = ctx.session.target(&project);
+    handle.set(
+        "meta:prune:max-keys",
+        git_meta_lib::types::MetaValue::String(DEFAULT_MAX_KEYS.to_string()),
+    )?;
+    handle.set(
+        "meta:prune:min-keys",
+        git_meta_lib::types::MetaValue::String(DEFAULT_MIN_KEYS.to_string()),
+    )?;
+
+    let s = Style::detect_stderr();
+    eprintln!(
+        "{} auto-prune {}",
+        s.ok("Configured"),
+        s.dim(&format!(
+            "(keep the published tree under {DEFAULT_MAX_KEYS} keys, pruning back to {DEFAULT_MIN_KEYS})"
+        )),
+    );
+    Ok(true)
+}
+
 /// Ensure `refs/{ns}/local/main` exists, creating it with a README commit if
 /// it does not. Returns the OID at the tip of that ref.
 ///
@@ -504,6 +554,13 @@ pub(crate) fn run_add(
             eprintln!("\n{}: initial fetch failed: {e}", s_err.warn("Warning"));
             eprintln!("You can fetch later with: git meta pull");
         }
+    }
+
+    // Last, so nothing in this command publishes them: the defaults are
+    // recorded locally and travel with the metadata ref on the first real
+    // publish, which is the first moment there is anything to prune anyway.
+    if should_init {
+        let _ = write_default_prune_rules(&ctx)?;
     }
 
     Ok(())

@@ -10,6 +10,19 @@ Auto-pruning is a **high-water / low-water** rule. When the serialized tree grow
 
 Age is deliberately not part of auto-pruning. A retention window cannot promise to bring a tree under a size limit — if every key is recent, nothing is dropped — so a tree over its limit would attempt a prune on every single serialize and never come down. Date-based pruning is available as the manual `git meta prune --since`, where the caller chooses the window and can see what it removes.
 
+## Defaults
+
+`git meta setup` configures `max-keys: 10000` and `min-keys: 5000` when it
+initializes a metadata store that has no auto-prune rules of its own. A project
+that has not thought about pruning therefore gets a published tree that stays a
+size a clone can afford, rather than one that grows without limit. An existing
+policy is never overwritten.
+
+The defaults are recorded locally and travel with the metadata ref on the first
+publish, which is the first moment there is anything to prune. Setup does not
+publish them itself, so initializing a remote still produces exactly the starter
+commit it describes.
+
 ## Configuration keys
 
 All keys are stored as `string` values on the `project` target. At least one of `meta:prune:max-keys` or `meta:prune:max-size` must be set for auto-pruning to activate.

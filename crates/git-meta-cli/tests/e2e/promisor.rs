@@ -579,3 +579,53 @@ fn count_all_keys(dir: &std::path::Path) -> i64 {
         .unwrap()
 }
 
+/// A brand-new metadata store should come with a working prune policy. Without
+/// one the published tree grows without limit and every consumer pays for it.
+#[test]
+fn initializing_a_fresh_remote_configures_auto_prune() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = TempDir::new().expect("temp dir");
+    gix::init_bare(bare_dir.path()).expect("init bare");
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_dir.path().to_str().unwrap(), "--init"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Configured auto-prune"));
+
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:max-keys"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("10000"));
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:min-keys"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("5000"));
+}
+
+/// Joining a store that already has a policy must not overwrite it.
+#[test]
+fn an_existing_prune_policy_is_left_alone() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = TempDir::new().expect("temp dir");
+    gix::init_bare(bare_dir.path()).expect("init bare");
+
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:max-keys", "42"])
+        .assert()
+        .success();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_dir.path().to_str().unwrap(), "--init"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Configured auto-prune").not());
+
+    harness::git_meta(dir.path())
+        .args(["config", "meta:prune:max-keys"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("42"));
+}

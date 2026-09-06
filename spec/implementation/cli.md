@@ -199,8 +199,30 @@ Behavior:
   fresh metadata remote the command will also create
   `refs/<namespace>/local/main` with a starter README and push it to
   `refs/<namespace>/main`
+- when it initializes a metadata store that has no auto-prune rules,
+  configures defaults of `meta:prune:max-keys 10000` and
+  `meta:prune:min-keys 5000`, so the published tree stays a size a clone
+  can afford. An existing policy is never overwritten.
 - intended to be the one command a teammate runs after cloning to opt
   in to the project's metadata exchange
+
+### Deepen a shallow metadata history
+
+```bash
+git meta deepen [--depth <n>]
+```
+
+Fetches further back into a metadata history that was cloned shallow, and
+indexes the keys those commits publish so they become fetchable.
+
+Keys published before a shallow boundary are not merely unfetched: the
+commits naming them were never transferred, so history indexing never saw
+them and they are absent from the local index entirely. Deepening is what
+makes them known.
+
+With `--depth`, fetches that many more commits. Without it, fetches the
+whole remaining history. On a history that is already complete, reports
+that and does nothing.
 
 ### Add a remote
 
