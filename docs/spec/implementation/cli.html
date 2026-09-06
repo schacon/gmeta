@@ -117,13 +117,21 @@ git meta push [&lt;remote&gt;] --readme</code></pre>
 <h3 id="setup">Setup</h3>
 <pre><code>git meta setup</code></pre>
 <p>Initializes a metadata remote for the current repository from a project-local <code>.git-meta</code> file at the repository root.</p>
-<p>The file is YAML with a required <code>url</code> key:</p>
-<pre><code>url: git@github.com:org/project-meta.git</code></pre>
+<p>The file is YAML with a required <code>url</code> key and an optional <code>depth</code>:</p>
+<pre><code>url: git@github.com:org/project-meta.git
+depth: 100000</code></pre>
 <p>Unknown keys are ignored, so future versions can add more project-local setup fields without breaking older clients.</p>
+<p><code>depth</code> asks new clones to fetch only that many metadata commits. A metadata history has one commit per publish and most of it describes keys that pruning has already dropped from the tip, so a long-lived project can suggest a recent slice rather than years of history. A clone that starts shallow can reach further back later with <code>git meta deepen</code>. Omit <code>depth</code> for the whole history; <code>depth: 0</code> is an error rather than a request for nothing.</p>
 <p>Behavior:</p>
 <p>fresh metadata remote the command will also create <code>refs/&lt;namespace&gt;/local/main</code> with a starter README and push it to <code>refs/&lt;namespace&gt;/main</code></p>
+<p>configures defaults of <code>meta:prune:max-keys 10000</code> and <code>meta:prune:min-keys 5000</code>, so the published tree stays a size a clone can afford. An existing policy is never overwritten.</p>
 <p>in to the project&#x27;s metadata exchange</p>
-<ul><li>reads <code>.git-meta</code> from the repository work tree</li><li>runs the equivalent of <code>git meta remote add &lt;url&gt; --init</code>, so on a</li><li>intended to be the one command a teammate runs after cloning to opt</li></ul>
+<ul><li>reads <code>.git-meta</code> from the repository work tree</li><li>runs the equivalent of <code>git meta remote add &lt;url&gt; --init</code>, so on a</li><li>when it initializes a metadata store that has no auto-prune rules,</li><li>intended to be the one command a teammate runs after cloning to opt</li></ul>
+<h3 id="deepen-a-shallow-metadata-history">Deepen a shallow metadata history</h3>
+<pre><code>git meta deepen [--depth &lt;n&gt;]</code></pre>
+<p>Fetches further back into a metadata history that was cloned shallow, and indexes the keys those commits publish so they become fetchable.</p>
+<p>Keys published before a shallow boundary are not merely unfetched: the commits naming them were never transferred, so history indexing never saw them and they are absent from the local index entirely. Deepening is what makes them known.</p>
+<p>With <code>--depth</code>, fetches that many more commits. Without it, fetches the whole remaining history. On a history that is already complete, reports that and does nothing.</p>
 <h3 id="add-a-remote">Add a remote</h3>
 <pre><code>git meta remote add &lt;url&gt; [--name &lt;name&gt;] [--namespace &lt;namespace&gt;] [--init]</code></pre>
 <p>Configures a new metadata remote for the current repository.</p>
@@ -164,7 +172,7 @@ project</code></pre>
 <p>The output model is documented in <a href="output.html">Output</a>.</p>
         </article>
       </main>
-      <aside class="toc-aside" aria-label="On this page"><div class="toc-title">On this page</div><ul class="toc-list"><li class="toc-h2"><a href="#core-commands">Core commands</a><ul class="toc-sub"><li class="toc-h3"><a href="#set-a-value">Set a value</a></li><li class="toc-h3"><a href="#get-values">Get values</a></li><li class="toc-h3"><a href="#remove-a-key">Remove a key</a></li></ul></li><li class="toc-h2"><a href="#list-operations">List operations</a></li><li class="toc-h2"><a href="#set-operations">Set operations</a></li><li class="toc-h2"><a href="#exchange-commands">Exchange commands</a><ul class="toc-sub"><li class="toc-h3"><a href="#serialize">Serialize</a></li><li class="toc-h3"><a href="#materialize">Materialize</a></li><li class="toc-h3"><a href="#dry-run-materialize">Dry-run materialize</a></li></ul></li><li class="toc-h2"><a href="#sync-commands">Sync commands</a><ul class="toc-sub"><li class="toc-h3"><a href="#push">Push</a></li><li class="toc-h3"><a href="#pull">Pull</a></li><li class="toc-h3"><a href="#sync">Sync</a></li></ul></li><li class="toc-h2"><a href="#setup-and-configuration">Setup and configuration</a><ul class="toc-sub"><li class="toc-h3"><a href="#setup">Setup</a></li><li class="toc-h3"><a href="#add-a-remote">Add a remote</a></li><li class="toc-h3"><a href="#teardown">Teardown</a></li></ul></li><li class="toc-h2"><a href="#target-syntax">Target syntax</a></li><li class="toc-h2"><a href="#value-encoding">Value encoding</a></li><li class="toc-h2"><a href="#output-modes">Output modes</a></li></ul></aside>
+      <aside class="toc-aside" aria-label="On this page"><div class="toc-title">On this page</div><ul class="toc-list"><li class="toc-h2"><a href="#core-commands">Core commands</a><ul class="toc-sub"><li class="toc-h3"><a href="#set-a-value">Set a value</a></li><li class="toc-h3"><a href="#get-values">Get values</a></li><li class="toc-h3"><a href="#remove-a-key">Remove a key</a></li></ul></li><li class="toc-h2"><a href="#list-operations">List operations</a></li><li class="toc-h2"><a href="#set-operations">Set operations</a></li><li class="toc-h2"><a href="#exchange-commands">Exchange commands</a><ul class="toc-sub"><li class="toc-h3"><a href="#serialize">Serialize</a></li><li class="toc-h3"><a href="#materialize">Materialize</a></li><li class="toc-h3"><a href="#dry-run-materialize">Dry-run materialize</a></li></ul></li><li class="toc-h2"><a href="#sync-commands">Sync commands</a><ul class="toc-sub"><li class="toc-h3"><a href="#push">Push</a></li><li class="toc-h3"><a href="#pull">Pull</a></li><li class="toc-h3"><a href="#sync">Sync</a></li></ul></li><li class="toc-h2"><a href="#setup-and-configuration">Setup and configuration</a><ul class="toc-sub"><li class="toc-h3"><a href="#setup">Setup</a></li><li class="toc-h3"><a href="#deepen-a-shallow-metadata-history">Deepen a shallow metadata history</a></li><li class="toc-h3"><a href="#add-a-remote">Add a remote</a></li><li class="toc-h3"><a href="#teardown">Teardown</a></li></ul></li><li class="toc-h2"><a href="#target-syntax">Target syntax</a></li><li class="toc-h2"><a href="#value-encoding">Value encoding</a></li><li class="toc-h2"><a href="#output-modes">Output modes</a></li></ul></aside>
     </div>
     <script>
       (() => {

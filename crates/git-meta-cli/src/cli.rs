@@ -371,6 +371,14 @@ pub(crate) enum Commands {
         since: Option<String>,
     },
 
+    /// Fetch more of a shallow metadata history, and index the keys it adds
+    #[command(display_order = 46)]
+    Deepen {
+        /// Metadata commits to add. Omit to fetch the whole remaining history.
+        #[arg(long)]
+        depth: Option<u32>,
+    },
+
     /// Walk metadata history recording which keys exist, for on-demand fetching
     #[command(name = "index-history", display_order = 45, hide = true)]
     IndexHistory {
@@ -471,6 +479,12 @@ pub(crate) enum RemoteAction {
         /// flag to skip the prompt (e.g. in CI).
         #[arg(long)]
         init: bool,
+
+        /// Fetch only the most recent N metadata commits.
+        ///
+        /// Reach further back later with `git meta deepen`.
+        #[arg(long)]
+        depth: Option<u32>,
     },
 
     /// Remove a metadata remote source

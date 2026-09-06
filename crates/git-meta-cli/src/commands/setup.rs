@@ -29,6 +29,24 @@ const DEFAULT_REMOTE_NAME: &str = "meta";
 struct SetupConfig {
     /// Metadata remote URL used by `git meta setup`.
     url: String,
+    /// How many metadata commits to fetch, if the project wants new clones to
+    /// start shallow.
+    ///
+    /// A metadata history is long — one commit per publish — and most of it
+    /// describes keys that pruning has already dropped from the tip. A project
+    /// can suggest a depth so a fresh clone fetches a recent slice instead of
+    /// years of it, and reach further back later with `git meta deepen`.
+    #[serde(default)]
+    depth: Option<u32>,
+}
+
+/// What `.git-meta` asks a fresh clone to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SetupHints {
+    /// Metadata remote URL.
+    pub url: String,
+    /// Metadata commits to fetch, or `None` for the whole history.
+    pub depth: Option<u32>,
 }
 
 /// Run `git meta setup`.
@@ -60,7 +78,7 @@ pub(crate) fn run() -> Result<()> {
         return interactive_setup(&ctx, &setup_path);
     }
 
-    let url = read_setup_url(&setup_path)?;
+    let hints = read_setup_hints(&setup_path)?;
 
     let s = Style::detect_stderr();
     eprintln!(
@@ -68,7 +86,16 @@ pub(crate) fn run() -> Result<()> {
         s.step("Using"),
         s.dim(&setup_path.display().to_string()),
     );
-    remote::run_add(&url, DEFAULT_REMOTE_NAME, None, true)
+    if let Some(depth) = hints.depth {
+        eprintln!(
+            "  {} {}",
+            s.dim("shallow metadata clone requested:"),
+            s.dim(&format!(
+                "{depth} commits (deepen later with `git meta deepen`)"
+            )),
+        );
+    }
+    remote::run_add(&hints.url, DEFAULT_REMOTE_NAME, None, true, hints.depth)
 }
 
 /// Interactively configure metadata exchange when no `.git-meta` file exists.
@@ -130,7 +157,7 @@ fn interactive_setup(ctx: &CommandContext, setup_path: &Path) -> Result<()> {
         s.dim(&setup_path.display().to_string()),
     );
 
-    remote::run_add(&origin_url, DEFAULT_REMOTE_NAME, None, true)
+    remote::run_add(&origin_url, DEFAULT_REMOTE_NAME, None, true, None)
 }
 
 /// Build the actionable error returned when `.git-meta` is missing and the
@@ -154,27 +181,31 @@ fn missing_setup_file_error(path: &Path) -> anyhow::Error {
 ///
 /// Returns an error if the file does not exist, cannot be read, or contains
 /// invalid YAML or no usable URL.
-fn read_setup_url(path: &Path) -> Result<String> {
+fn read_setup_hints(path: &Path) -> Result<SetupHints> {
     if !path.exists() {
         return Err(missing_setup_file_error(path));
     }
 
     let raw = std::fs::read_to_string(path)
         .with_context(|| format!("read {SETUP_FILE} at {}", path.display()))?;
-    parse_setup_url(&raw).with_context(|| format!("parse {SETUP_FILE} at {}", path.display()))
+    parse_setup_hints(&raw).with_context(|| format!("parse {SETUP_FILE} at {}", path.display()))
 }
 
-/// Pure parser used by [`read_setup_url`] and unit-tested in isolation.
-///
-/// Returns the `url` value trimmed of surrounding whitespace.
-fn parse_setup_url(contents: &str) -> Result<String> {
+/// Pure parser used by [`read_setup_hints`] and unit-tested in isolation.
+fn parse_setup_hints(contents: &str) -> Result<SetupHints> {
     let config = serde_yml::from_str::<Option<SetupConfig>>(contents)?
         .ok_or_else(|| anyhow!(".git-meta is empty or contains no metadata remote URL"))?;
     let url = config.url.trim();
     if url.is_empty() {
         bail!(".git-meta contains an empty url value");
     }
-    Ok(strip_optional_trailing_slash_owned(url.to_string()))
+    if config.depth == Some(0) {
+        bail!(".git-meta has depth: 0; omit depth for the whole history");
+    }
+    Ok(SetupHints {
+        url: strip_optional_trailing_slash_owned(url.to_string()),
+        depth: config.depth,
+    })
 }
 
 /// Trim a single trailing slash from the URL, so users can paste either
@@ -191,14 +222,16 @@ fn strip_optional_trailing_slash_owned(url: String) -> String {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
     #[test]
     fn parses_url_key() {
         assert_eq!(
-            parse_setup_url("url: git@github.com:org/repo.git\n").unwrap(),
+            parse_setup_hints("url: git@github.com:org/repo.git\n")
+                .unwrap()
+                .url,
             "git@github.com:org/repo.git",
         );
     }
@@ -213,14 +246,14 @@ mod tests {
                      future-key: ignored\n\
                      # trailing notes ignored\n";
         assert_eq!(
-            parse_setup_url(input).unwrap(),
+            parse_setup_hints(input).unwrap().url,
             "git@github.com:org/repo.git"
         );
     }
 
     #[test]
     fn errors_for_empty_input() {
-        let err = parse_setup_url("").unwrap_err();
+        let err = parse_setup_hints("").unwrap_err();
         assert!(
             err.to_string()
                 .contains("empty or contains no metadata remote URL"),
@@ -230,7 +263,7 @@ mod tests {
 
     #[test]
     fn errors_for_only_comments() {
-        let err = parse_setup_url("# only a comment\n\n# another\n").unwrap_err();
+        let err = parse_setup_hints("# only a comment\n\n# another\n").unwrap_err();
         assert!(
             err.to_string()
                 .contains("empty or contains no metadata remote URL"),
@@ -241,7 +274,9 @@ mod tests {
     #[test]
     fn trims_surrounding_whitespace() {
         assert_eq!(
-            parse_setup_url("url: '   git@github.com:org/repo.git   '\n").unwrap(),
+            parse_setup_hints("url: '   git@github.com:org/repo.git   '\n")
+                .unwrap()
+                .url,
             "git@github.com:org/repo.git",
         );
     }
@@ -251,7 +286,7 @@ mod tests {
         let input = "\
                      remote: https://example.com/first.git\n\
                      note: https://example.com/second.git\n";
-        let err = parse_setup_url(input).unwrap_err();
+        let err = parse_setup_hints(input).unwrap_err();
         assert!(
             err.to_string().contains("missing field `url`"),
             "got: {err}"
@@ -272,21 +307,45 @@ mod tests {
     }
 
     #[test]
-    fn read_setup_url_missing_file_errors_helpfully() {
+    fn depth_is_read_when_the_project_asks_for_a_shallow_clone() {
+        let hints = parse_setup_hints("url: git@github.com:org/repo.git\ndepth: 100000\n")
+            .expect("should parse");
+        assert_eq!(hints.url, "git@github.com:org/repo.git");
+        assert_eq!(hints.depth, Some(100_000));
+    }
+
+    #[test]
+    fn depth_is_optional_and_absent_means_the_whole_history() {
+        let hints = parse_setup_hints("url: git@github.com:org/repo.git\n").expect("should parse");
+        assert_eq!(hints.depth, None);
+    }
+
+    #[test]
+    fn a_depth_of_zero_is_rejected_rather_than_fetching_nothing() {
+        let err = parse_setup_hints("url: git@github.com:org/repo.git\ndepth: 0\n")
+            .expect_err("depth 0 should be refused");
+        assert!(
+            err.to_string().contains("omit depth"),
+            "unhelpful message: {err}"
+        );
+    }
+
+    #[test]
+    fn read_setup_hints_missing_file_errors_helpfully() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".git-meta");
-        let err = read_setup_url(&path).unwrap_err();
+        let err = read_setup_hints(&path).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("no .git-meta file found"), "got: {msg}");
         assert!(msg.contains("--init"), "got: {msg}");
     }
 
     #[test]
-    fn read_setup_url_empty_file_errors_helpfully() {
+    fn read_setup_hints_empty_file_errors_helpfully() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".git-meta");
         std::fs::write(&path, "# only a comment\n\n").unwrap();
-        let err = read_setup_url(&path).unwrap_err();
+        let err = read_setup_hints(&path).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
             msg.contains("empty or contains no metadata remote URL"),
@@ -299,7 +358,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".git-meta");
         std::fs::write(&path, "url: [").unwrap();
-        let err = read_setup_url(&path).unwrap_err();
+        let err = read_setup_hints(&path).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("parse .git-meta"), "got: {msg}");
     }

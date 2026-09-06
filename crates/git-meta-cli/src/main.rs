@@ -130,7 +130,8 @@ fn run_command(command: Commands) -> Result<()> {
                 name,
                 namespace,
                 init,
-            } => commands::remote::run_add(&url, &name, namespace.as_deref(), init),
+                depth,
+            } => commands::remote::run_add(&url, &name, namespace.as_deref(), init, depth),
             RemoteAction::Remove { name } => commands::remote::run_remove(&name),
             RemoteAction::List => commands::remote::run_list(),
         },
@@ -224,6 +225,8 @@ fn run_command(command: Commands) -> Result<()> {
             skip_date,
             since,
         } => commands::prune::local::run(dry_run, skip_date, since.as_deref()),
+
+        Commands::Deepen { depth } => commands::deepen::run(depth),
 
         Commands::IndexHistory { quiet } => commands::index_history::run(quiet),
 

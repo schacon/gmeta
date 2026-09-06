@@ -174,14 +174,23 @@ git meta setup
 Initializes a metadata remote for the current repository from a
 project-local `.git-meta` file at the repository root.
 
-The file is YAML with a required `url` key:
+The file is YAML with a required `url` key and an optional `depth`:
 
 ```yaml
 url: git@github.com:org/project-meta.git
+depth: 100000
 ```
 
 Unknown keys are ignored, so future versions can add more project-local
 setup fields without breaking older clients.
+
+`depth` asks new clones to fetch only that many metadata commits. A
+metadata history has one commit per publish and most of it describes keys
+that pruning has already dropped from the tip, so a long-lived project can
+suggest a recent slice rather than years of history. A clone that starts
+shallow can reach further back later with `git meta deepen`. Omit `depth`
+for the whole history; `depth: 0` is an error rather than a request for
+nothing.
 
 Behavior:
 

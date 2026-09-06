@@ -258,6 +258,7 @@ pub(crate) fn run_add(
     name: &str,
     namespace_override: Option<&str>,
     init: bool,
+    depth: Option<u32>,
 ) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.session.repo();
@@ -403,12 +404,23 @@ pub(crate) fn run_add(
         format!("refs/{ns}/remotes/main")
     };
     let fetch_refspec = format!("refs/{ns}/main:{tracking_ref}");
-    eprint!("{} metadata (blobless)...", s_err.step("Fetching"));
+    let depth_arg = depth.map(|depth| format!("--depth={depth}"));
+    match depth_arg.as_deref() {
+        Some(_) => eprint!(
+            "{} metadata (blobless, {} commits)...",
+            s_err.step("Fetching"),
+            depth.unwrap_or_default()
+        ),
+        None => eprint!("{} metadata (blobless)...", s_err.step("Fetching")),
+    }
     let started = std::time::Instant::now();
-    match git_meta_lib::git_utils::run_git(
-        repo,
-        &["fetch", "--filter=blob:none", name, &fetch_refspec],
-    ) {
+    let mut fetch_args = vec!["fetch", "--filter=blob:none"];
+    if let Some(arg) = depth_arg.as_deref() {
+        fetch_args.push(arg);
+    }
+    fetch_args.push(name);
+    fetch_args.push(&fetch_refspec);
+    match git_meta_lib::git_utils::run_git(repo, &fetch_args) {
         Ok(_) => {
             eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 

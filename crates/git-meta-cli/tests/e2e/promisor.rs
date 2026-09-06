@@ -504,3 +504,78 @@ fn count_promised(dir: &std::path::Path) -> i64 {
     )
     .unwrap()
 }
+
+/// A project can ask new clones to fetch only a recent slice of the metadata
+/// history. Keys published before that slice are not merely unfetched — the
+/// commits naming them were never transferred, so indexing cannot see them.
+/// `git meta deepen` fetches further back and indexes what that adds.
+#[test]
+fn a_shallow_setup_indexes_only_what_it_fetched_until_deepened() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_history();
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    // Depth 1 fetches the tip commit only; `old_key` lives in its parent.
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path, "--depth", "1"])
+        .assert()
+        .success();
+    wait_for_index(dir.path());
+
+    assert!(
+        dir.path().join(".git/shallow").exists(),
+        "a depth-limited fetch should leave a shallow marker"
+    );
+    let shallow_keys = count_all_keys(dir.path());
+    harness::git_meta(dir.path())
+        .args(["get", "project", "old_key"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("old_value").not());
+
+    // Deepening brings the older commit, and with it the key it published.
+    harness::git_meta(dir.path())
+        .args(["deepen"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Deepening"));
+
+    assert!(
+        count_all_keys(dir.path()) > shallow_keys,
+        "deepening indexed nothing: still {shallow_keys} keys"
+    );
+    harness::git_meta(dir.path())
+        .args(["get", "project", "old_key"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("old_value"));
+}
+
+/// Deepening a history that is already complete should say so rather than
+/// refetching it.
+#[test]
+fn deepening_a_complete_history_is_a_no_op() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_history();
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success();
+    wait_for_index(dir.path());
+
+    harness::git_meta(dir.path())
+        .args(["deepen"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("already complete"));
+}
+
+/// Every key the index knows about, promised or hydrated.
+fn count_all_keys(dir: &std::path::Path) -> i64 {
+    let conn = rusqlite::Connection::open(dir.join(".git/git-meta.sqlite")).unwrap();
+    conn.query_row("SELECT COUNT(*) FROM metadata", params![], |row| row.get(0))
+        .unwrap()
+}
+
