@@ -769,6 +769,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "git-meta-bench"
+version = "0.1.12"
+dependencies = [
+ "anyhow",
+ "clap",
+ "git-meta-lib",
+ "gix",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "time",
+]
+
+[[package]]
 name = "git-meta-cli"
 version = "0.1.12"
 dependencies = [
