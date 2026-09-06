@@ -58,3 +58,34 @@ Before finishing generated Rust, review it as if it came from an overeager AI:
 
 - Prefer repository/library APIs over shelling out to `git` in production code. In tests, use project test helpers where available. Use the `git` CLI only when testing CLI interoperability or behavior that specifically depends on Git’s command-line semantics.
 - When you are done making changes, always run `cargo fmt` and `cargo clippy --fix --allow-dirty` and ensure no warnings remain.
+
+## Benchmark fixtures
+
+`~/git-meta-fixtures/6m-history` is a generated metadata repository holding
+**6,426,841 key writes across 158,182 metadata commits** (~3.8 GB). It took
+about four hours to build and is the fixture the scale benchmarks measure
+against.
+
+**Do not delete it, and do not run `git meta teardown` or `git gc --prune` in
+it, unless explicitly asked.** Regenerating it is hours of work.
+
+It carries three refs marking equivalent histories at different depths, so
+measurements can compare scale without rebuilding anything:
+
+| ref | commits | key writes | tip keys |
+| --- | --- | --- | --- |
+| `refs/meta/sized/250k` | 6,252 | 250,000 | 5,832 |
+| `refs/meta/sized/1m` | 25,002 | 1,000,000 | 4,881 |
+| `refs/meta/sized/6m` | 158,184 | 6,426,841 | 6,023 |
+| `refs/meta/local/main` | 158,182 | 6,426,841 | 6,023 |
+
+The `sized/*` refs each end with a commit that publishes 1,000 keys on a single
+commit target (`commit:0000…424242`) followed by a prune commit that removes
+them from the tip, so the promisor fetch path can be exercised identically at
+every depth. The 250k and 1M tips are truncated to roughly the size of the real
+auto-pruned 6M tip: those cut points predate auto-pruning, and without
+truncation their tips would carry every key ever written, confounding tip size
+with history depth.
+
+Generate a replacement with `crates/git-meta-bench` if it is ever lost — see
+that crate's README.
