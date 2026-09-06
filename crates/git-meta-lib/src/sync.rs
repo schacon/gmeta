@@ -268,9 +268,17 @@ fn walk_and_index(
         .all()
         .map_err(|e| Error::Other(format!("rev_walk failed: {e}")))?;
 
+    /// Commits whose keys are inserted under one transaction.
+    ///
+    /// Each insert is otherwise its own transaction, which for a large history
+    /// means millions of them: slow to perform, and slower still to close, as
+    /// the write-ahead log has to be checkpointed at the end.
+    const WRITES_PER_TRANSACTION: usize = 2_000;
+
     let mut keys = 0usize;
     let mut walked = 0usize;
     let mut is_first = true;
+    let mut batch = Some(store.write_batch()?);
 
     for info_result in iter {
         let info = info_result.map_err(|e| Error::Other(format!("rev_walk iter: {e}")))?;
@@ -332,7 +340,17 @@ fn walk_and_index(
         }
 
         walked += 1;
+        if walked.is_multiple_of(WRITES_PER_TRANSACTION) {
+            if let Some(batch) = batch.take() {
+                batch.commit()?;
+            }
+            batch = Some(store.write_batch()?);
+        }
         observe(walked, keys, oid);
+    }
+
+    if let Some(batch) = batch {
+        batch.commit()?;
     }
 
     Ok(Indexed {

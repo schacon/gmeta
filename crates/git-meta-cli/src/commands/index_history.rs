@@ -92,27 +92,49 @@ pub(crate) fn run(quiet: bool) -> Result<()> {
     Ok(())
 }
 
-/// Start an indexer in the background if there is unfinished work and nothing
+/// Start an indexer in the background if there is history to index and nothing
 /// is already doing it.
 ///
-/// Called before every command, so a run that was interrupted resumes on the
-/// user's next interaction without them having to know it stopped.
-pub(crate) fn resume_in_background_if_needed() {
-    let Ok(ctx) = CommandContext::open(None) else {
+/// Called after every command rather than before, and only once the command has
+/// dropped its database connection. The indexer writes in transactions, and a
+/// foreground command still holding the database has to wait behind them to
+/// close.
+///
+/// Deliberately does not open the metadata store. Everything it needs is on
+/// disk — the tracking ref and the checkpoint file — and opening a connection
+/// straight after a bulk write means paying to recover a large write-ahead log
+/// twice over, which cost far more than the indexing it was deciding about.
+pub(crate) fn start_or_resume_in_background() {
+    let Ok(repo) = gix::discover(".") else {
         return;
     };
-    let repo = ctx.session.repo();
-    let Some(tip) = tracking_tip(&ctx) else {
+    let namespace = std::env::var("GIT_META_NAMESPACE").unwrap_or_else(|_| {
+        repo.config_snapshot()
+            .string("meta.namespace")
+            .map_or_else(|| "meta".to_string(), |value| value.to_string())
+    });
+
+    let tracking_ref = format!("refs/{namespace}/remotes/main");
+    let Some(tip) = repo
+        .find_reference(&tracking_ref)
+        .ok()
+        .and_then(|r| r.into_fully_peeled_id().ok())
+        .map(gix::Id::detach)
+    else {
         return;
     };
-    let Ok(Some(state)) = git_meta_lib::index_state::load(repo) else {
-        return;
+
+    let wanted = match git_meta_lib::index_state::load(&repo) {
+        // Never indexed this repository: there is a whole history waiting.
+        Ok(None) => true,
+        // Indexed, or being indexed right now, or aimed at a different tip.
+        Ok(Some(state)) => state.is_resumable(&tip, now_ms()),
+        Err(_) => false,
     };
-    if !state.is_resumable(&tip, now_ms()) {
-        return;
+
+    if wanted {
+        spawn_background();
     }
-    drop(ctx);
-    spawn_background();
 }
 
 /// Launch `git meta index-history` as a detached background process.

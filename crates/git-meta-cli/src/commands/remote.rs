@@ -538,7 +538,8 @@ pub(crate) fn run_add(
             // in the tip, and it checkpoints as it goes, so it survives the
             // terminal closing.
             if repo.find_reference(&tracking_ref_name).is_ok() {
-                crate::commands::index_history::spawn_background();
+                // Spawned by main once this command has closed the database;
+                // starting it here would make our own exit wait behind it.
                 eprintln!(
                     "{} history in the background {}",
                     s_err.step("Indexing"),

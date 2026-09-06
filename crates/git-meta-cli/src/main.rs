@@ -45,17 +45,20 @@ fn main() -> Result<()> {
             | Commands::Prune { .. }
     );
 
-    // History indexing runs in the background and checkpoints as it goes, so a
-    // run that was interrupted picks up here rather than starting over.
-    let resumes_indexing = !matches!(
+    let indexes_history = !matches!(
         cli.command,
         Commands::IndexHistory { .. } | Commands::Teardown
     );
-    if resumes_indexing {
-        commands::index_history::resume_in_background_if_needed();
-    }
 
     let result = run_command(cli.command);
+
+    // After the command, so its database connection is closed: the indexer
+    // writes in transactions, and a command still holding the database would
+    // have to wait behind them to exit. Indexing checkpoints as it goes, so
+    // this also resumes a run that was interrupted.
+    if indexes_history {
+        commands::index_history::start_or_resume_in_background();
+    }
 
     // Pack what was just written, now that the work is done and this process is
     // about to exit. Doing it while a session is still open would let Git
