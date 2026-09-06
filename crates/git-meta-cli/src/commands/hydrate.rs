@@ -156,7 +156,11 @@ pub(super) fn hydrate_promised_entries(
                 let Ok(content) = std::str::from_utf8(&blob.data) else {
                     continue;
                 };
-                db.resolve_promised(&entry_target, key, content, &ValueType::String, false)?;
+                // A serialized tree holds the raw string; the store holds it
+                // JSON-encoded, as `set_value` does. Writing the raw bytes
+                // straight in produces a row nothing can read back.
+                let encoded = serde_json::to_string(content)?;
+                db.resolve_promised(&entry_target, key, &encoded, &ValueType::String, false)?;
                 hydrated += 1;
             }
             ValueType::List => {

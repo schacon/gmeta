@@ -253,8 +253,9 @@ fn write_meta_tree(
 ) -> gix::ObjectId {
     let mut editor = repo.empty_tree().edit().expect("should create tree editor");
     for (target, key, value) in entries {
+        // Serialized trees hold the raw string, not a JSON-encoded one.
         let blob = repo
-            .write_blob(serde_json::to_string(value).unwrap().as_bytes())
+            .write_blob(value.as_bytes())
             .expect("should write metadata blob")
             .detach();
         let path = git_meta_lib::tree_paths::tree_path(target, key).unwrap();
@@ -264,7 +265,7 @@ fn write_meta_tree(
     }
     if include_tip_key {
         let blob = repo
-            .write_blob(b"\"hello\"")
+            .write_blob(b"hello")
             .expect("should write tip blob")
             .detach();
         editor
