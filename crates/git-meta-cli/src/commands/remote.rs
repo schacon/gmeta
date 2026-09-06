@@ -442,6 +442,7 @@ pub(crate) fn run_add(
             // Hydrate tip tree blobs so gix can read the metadata
             eprint!("{} tip blobs...", s_err.step("Hydrating"));
             let started = std::time::Instant::now();
+            eprint!(" {}", s_err.dim("(fetching, this can take a while)"));
             let blob_count =
                 git_meta_lib::git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
             eprintln!(
@@ -469,24 +470,22 @@ pub(crate) fn run_add(
             } else {
                 format!("refs/{ns}/remotes/main")
             };
-            if let Ok(r) = repo.find_reference(&tracking_ref_name) {
-                if let Ok(tip_id) = r.into_fully_peeled_id() {
-                    eprint!("{} history...", s_err.step("Indexing"));
-                    let started = std::time::Instant::now();
-                    let count = git_meta_lib::sync::insert_promisor_entries(
-                        repo,
-                        ctx.session.store(),
-                        tip_id.detach(),
-                        None,
-                    )?;
-                    eprintln!(
-                        " {}",
-                        s_err.ok(&format!(
-                            "{count} keys indexed in {} (available on demand).",
-                            elapsed(started)
-                        ))
-                    );
-                }
+            // Indexing walks every commit in the history, which on a
+            // long-lived project is minutes of work. Setup does not need to
+            // wait for it: the index only affects fetching keys that are not
+            // in the tip, and it checkpoints as it goes, so it survives the
+            // terminal closing.
+            if repo.find_reference(&tracking_ref_name).is_ok() {
+                crate::commands::index_history::spawn_background();
+                eprintln!(
+                    "{} history in the background {}",
+                    s_err.step("Indexing"),
+                    s_err.dim("(keys outside the current tip become fetchable as it runs;"),
+                );
+                eprintln!(
+                    "  {}",
+                    s_err.dim("check on it with: git meta index-history)"),
+                );
             }
         }
         Err(e) => {

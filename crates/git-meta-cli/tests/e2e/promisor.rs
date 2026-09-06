@@ -20,7 +20,13 @@ fn pull_inserts_promisor_entries() {
         .args(["remote", "add", bare_path])
         .assert()
         .success()
-        .stderr(predicate::str::contains("1 keys indexed"));
+        .stderr(predicate::str::contains(
+            "Indexing history in the background",
+        ));
+
+    // Indexing is backgrounded, so wait for it rather than racing it.
+    wait_for_index(dir.path());
+    assert_eq!(count_promised(dir.path()), 1);
 
     harness::git_meta(dir.path())
         .args(["get", "project", "testing"])
@@ -110,7 +116,12 @@ fn pull_indexes_omitted_change_commit_tree() {
         .args(["remote", "add", bare_path])
         .assert()
         .success()
-        .stderr(predicate::str::contains("2 keys indexed"));
+        .stderr(predicate::str::contains(
+            "Indexing history in the background",
+        ));
+
+    wait_for_index(dir.path());
+    assert_eq!(count_promised(dir.path()), 2);
 
     harness::git_meta(dir.path())
         .args(["inspect", "--promisor", "project"])
@@ -368,4 +379,128 @@ fn a_value_that_cannot_be_located_keeps_its_promisor_entry() {
         still_promised, 1,
         "the promisor entry was discarded when its value could not be found"
     );
+}
+
+/// Indexing a long history is minutes of work, so it must survive being
+/// interrupted: the next `git meta` command picks it up from the checkpoint
+/// rather than walking the whole history again.
+#[test]
+fn interrupted_indexing_resumes_from_its_checkpoint() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_history();
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success();
+
+    wait_for_index(dir.path());
+
+    let state_path = dir.path().join(".git/git-meta-index.json");
+    let complete: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert_eq!(
+        complete["complete"], true,
+        "indexing should have finished: {complete}"
+    );
+    let indexed_keys: i64 = count_promised(dir.path());
+    assert!(indexed_keys > 0, "nothing was indexed");
+
+    // Simulate a kill mid-walk: an unfinished checkpoint whose heartbeat is old
+    // enough that the process that wrote it is presumed gone.
+    let db_path = dir.path().join(".git/git-meta.sqlite");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute("DELETE FROM metadata WHERE is_promised = 1", params![])
+        .unwrap();
+    drop(conn);
+    assert_eq!(count_promised(dir.path()), 0);
+
+    let mut interrupted = complete;
+    interrupted["complete"] = serde_json::Value::Bool(false);
+    interrupted["resume_from"] = serde_json::Value::Null;
+    interrupted["commits_indexed"] = serde_json::json!(0);
+    interrupted["keys_indexed"] = serde_json::json!(0);
+    interrupted["heartbeat_ms"] = serde_json::json!(0);
+    std::fs::write(&state_path, interrupted.to_string()).unwrap();
+
+    // Any command should notice the unfinished work and restart it.
+    harness::git_meta(dir.path())
+        .args(["index-history"])
+        .assert()
+        .success();
+
+    let resumed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    assert_eq!(resumed["complete"], true, "resumed pass did not finish");
+    assert_eq!(
+        count_promised(dir.path()),
+        indexed_keys,
+        "resuming did not restore the same index"
+    );
+}
+
+/// A checkpoint whose heartbeat is fresh means another process is working; a
+/// second indexer must not duplicate the effort.
+#[test]
+fn indexing_does_not_start_while_another_indexer_is_live() {
+    let (dir, _sha) = setup_repo();
+    let bare_dir = setup_bare_with_history();
+    let bare_path = bare_dir.path().to_str().unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["remote", "add", bare_path])
+        .assert()
+        .success();
+    wait_for_index(dir.path());
+
+    let state_path = dir.path().join(".git/git-meta-index.json");
+    let mut state: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&state_path).unwrap()).unwrap();
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    state["complete"] = serde_json::Value::Bool(false);
+    state["heartbeat_ms"] = serde_json::json!(now_ms);
+    state["pid"] = serde_json::json!(999_999);
+    std::fs::write(&state_path, state.to_string()).unwrap();
+
+    harness::git_meta(dir.path())
+        .args(["index-history"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "Another indexer is already running",
+        ));
+}
+
+/// Block until background indexing reports itself finished.
+///
+/// Indexing is spawned detached, so a test that reads its results has to wait
+/// for it rather than assume it has run.
+fn wait_for_index(dir: &std::path::Path) {
+    let state_path = dir.join(".git/git-meta-index.json");
+    for _ in 0..200 {
+        if let Ok(contents) = std::fs::read_to_string(&state_path) {
+            if let Ok(state) = serde_json::from_str::<serde_json::Value>(&contents) {
+                if state["complete"] == true {
+                    return;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    panic!("background indexing did not finish within 10s");
+}
+
+/// Promisor entries currently recorded.
+fn count_promised(dir: &std::path::Path) -> i64 {
+    let conn = rusqlite::Connection::open(dir.join(".git/git-meta.sqlite")).unwrap();
+    conn.query_row(
+        "SELECT COUNT(*) FROM metadata WHERE is_promised = 1",
+        params![],
+        |row| row.get(0),
+    )
+    .unwrap()
 }

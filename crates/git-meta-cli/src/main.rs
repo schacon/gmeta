@@ -45,6 +45,16 @@ fn main() -> Result<()> {
             | Commands::Prune { .. }
     );
 
+    // History indexing runs in the background and checkpoints as it goes, so a
+    // run that was interrupted picks up here rather than starting over.
+    let resumes_indexing = !matches!(
+        cli.command,
+        Commands::IndexHistory { .. } | Commands::Teardown
+    );
+    if resumes_indexing {
+        commands::index_history::resume_in_background_if_needed();
+    }
+
     let result = run_command(cli.command);
 
     // Pack what was just written, now that the work is done and this process is
@@ -214,6 +224,8 @@ fn run_command(command: Commands) -> Result<()> {
             skip_date,
             since,
         } => commands::prune::local::run(dry_run, skip_date, since.as_deref()),
+
+        Commands::IndexHistory { quiet } => commands::index_history::run(quiet),
 
         Commands::Teardown => commands::teardown::run(),
     }

@@ -371,6 +371,14 @@ pub(crate) enum Commands {
         since: Option<String>,
     },
 
+    /// Walk metadata history recording which keys exist, for on-demand fetching
+    #[command(name = "index-history", display_order = 45, hide = true)]
+    IndexHistory {
+        /// Suppress progress output (used when running in the background)
+        #[arg(long)]
+        quiet: bool,
+    },
+
     /// Remove the git meta database and all meta refs
     #[command(display_order = 44)]
     Teardown,
