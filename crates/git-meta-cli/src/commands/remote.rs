@@ -85,6 +85,56 @@ fn prompt_for_init(url: &str, ns: &str) -> Result<bool> {
     Ok(answer)
 }
 
+/// Give a brand-new metadata store a working auto-prune policy.
+///
+/// Without one the published tree grows without limit, and every consumer pays
+/// for that growth on every clone. A project that wants unbounded metadata can
+/// unset these; a project that never thinks about it gets a tree that stays a
+/// reasonable size.
+///
+/// Ten thousand keys is roughly a few megabytes of tree at typical value sizes
+/// — small enough to clone quickly, large enough that a project has to be
+/// genuinely busy before anything is dropped. Pruning back to five thousand
+/// buys room to grow again, so it happens occasionally rather than on every
+/// publish.
+///
+/// Existing configuration is never overwritten: these are defaults for a store
+/// that has none, not a policy imposed on one that does.
+///
+/// Returns whether defaults were written.
+fn write_default_prune_rules(ctx: &CommandContext) -> Result<bool> {
+    const DEFAULT_MAX_KEYS: &str = "10000";
+    const DEFAULT_MIN_KEYS: &str = "5000";
+
+    let project = git_meta_lib::types::Target::project();
+    let store = ctx.session.store();
+    if store.get(&project, "meta:prune:max-keys")?.is_some()
+        || store.get(&project, "meta:prune:max-size")?.is_some()
+    {
+        return Ok(false);
+    }
+
+    let handle = ctx.session.target(&project);
+    handle.set(
+        "meta:prune:max-keys",
+        git_meta_lib::types::MetaValue::String(DEFAULT_MAX_KEYS.to_string()),
+    )?;
+    handle.set(
+        "meta:prune:min-keys",
+        git_meta_lib::types::MetaValue::String(DEFAULT_MIN_KEYS.to_string()),
+    )?;
+
+    let s = Style::detect_stderr();
+    eprintln!(
+        "{} auto-prune {}",
+        s.ok("Configured"),
+        s.dim(&format!(
+            "(keep the published tree under {DEFAULT_MAX_KEYS} keys, pruning back to {DEFAULT_MIN_KEYS})"
+        )),
+    );
+    Ok(true)
+}
+
 /// Ensure `refs/{ns}/local/main` exists, creating it with a README commit if
 /// it does not. Returns the OID at the tip of that ref.
 ///
@@ -238,11 +288,27 @@ git meta push
     )
 }
 
+/// Render an elapsed duration for progress output.
+///
+/// Setting up against a large metadata ref takes minutes, and which phase the
+/// time went to is the useful part.
+fn elapsed(started: std::time::Instant) -> String {
+    let seconds = started.elapsed().as_secs_f64();
+    if seconds < 1.0 {
+        format!("{:.0} ms", seconds * 1000.0)
+    } else if seconds < 60.0 {
+        format!("{seconds:.1} s")
+    } else {
+        format!("{:.0} m {:02.0} s", seconds / 60.0, seconds % 60.0)
+    }
+}
+
 pub(crate) fn run_add(
     url: &str,
     name: &str,
     namespace_override: Option<&str>,
     init: bool,
+    depth: Option<u32>,
 ) -> Result<()> {
     let ctx = CommandContext::open(None)?;
     let repo = ctx.session.repo();
@@ -388,13 +454,25 @@ pub(crate) fn run_add(
         format!("refs/{ns}/remotes/main")
     };
     let fetch_refspec = format!("refs/{ns}/main:{tracking_ref}");
-    eprint!("{} metadata (blobless)...", s_err.step("Fetching"));
-    match git_meta_lib::git_utils::run_git(
-        repo,
-        &["fetch", "--filter=blob:none", name, &fetch_refspec],
-    ) {
+    let depth_arg = depth.map(|depth| format!("--depth={depth}"));
+    match depth_arg.as_deref() {
+        Some(_) => eprint!(
+            "{} metadata (blobless, {} commits)...",
+            s_err.step("Fetching"),
+            depth.unwrap_or_default()
+        ),
+        None => eprint!("{} metadata (blobless)...", s_err.step("Fetching")),
+    }
+    let started = std::time::Instant::now();
+    let mut fetch_args = vec!["fetch", "--filter=blob:none"];
+    if let Some(arg) = depth_arg.as_deref() {
+        fetch_args.push(arg);
+    }
+    fetch_args.push(name);
+    fetch_args.push(&fetch_refspec);
+    match git_meta_lib::git_utils::run_git(repo, &fetch_args) {
         Ok(_) => {
-            eprintln!(" {}", s_err.ok("done."));
+            eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 
             // Verify the tracking ref was created
             let remote_ref = if side_ref {
@@ -425,18 +503,28 @@ pub(crate) fn run_add(
 
             // Hydrate tip tree blobs so gix can read the metadata
             eprint!("{} tip blobs...", s_err.step("Hydrating"));
+            let started = std::time::Instant::now();
+            eprint!(" {}", s_err.dim("(fetching, this can take a while)"));
             let blob_count =
                 git_meta_lib::git_utils::hydrate_tip_blobs_counted(repo, name, &remote_ref)?;
-            eprintln!(" {}", s_err.ok(&format!("{blob_count} blobs fetched.")));
+            eprintln!(
+                " {}",
+                s_err.ok(&format!(
+                    "{blob_count} blobs fetched in {}.",
+                    elapsed(started)
+                ))
+            );
 
             // Materialize remote metadata into local SQLite
             eprint!("{} local metadata...", s_err.step("Serializing"));
+            let started = std::time::Instant::now();
             let _ = ctx.session.serialize()?;
-            eprintln!(" {}", s_err.ok("done."));
+            eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 
             eprint!("{} remote metadata...", s_err.step("Materializing"));
+            let started = std::time::Instant::now();
             materialize::run(None, false, false, false)?;
-            eprintln!(" {}", s_err.ok("done."));
+            eprintln!(" {}", s_err.ok(&format!("done in {}.", elapsed(started))));
 
             // Index historical keys as promisor entries
             let tracking_ref_name = if side_ref {
@@ -444,28 +532,36 @@ pub(crate) fn run_add(
             } else {
                 format!("refs/{ns}/remotes/main")
             };
-            if let Ok(r) = repo.find_reference(&tracking_ref_name) {
-                if let Ok(tip_id) = r.into_fully_peeled_id() {
-                    let count = git_meta_lib::sync::insert_promisor_entries(
-                        repo,
-                        ctx.session.store(),
-                        tip_id.detach(),
-                        None,
-                    )?;
-                    if count > 0 {
-                        eprintln!(
-                            "{} {count} keys from history {}",
-                            s_err.ok("Indexed"),
-                            s_err.dim("(available on demand)."),
-                        );
-                    }
-                }
+            // Indexing walks every commit in the history, which on a
+            // long-lived project is minutes of work. Setup does not need to
+            // wait for it: the index only affects fetching keys that are not
+            // in the tip, and it checkpoints as it goes, so it survives the
+            // terminal closing.
+            if repo.find_reference(&tracking_ref_name).is_ok() {
+                // Spawned by main once this command has closed the database;
+                // starting it here would make our own exit wait behind it.
+                eprintln!(
+                    "{} history in the background {}",
+                    s_err.step("Indexing"),
+                    s_err.dim("(keys outside the current tip become fetchable as it runs;"),
+                );
+                eprintln!(
+                    "  {}",
+                    s_err.dim("check on it with: git meta index-history)"),
+                );
             }
         }
         Err(e) => {
             eprintln!("\n{}: initial fetch failed: {e}", s_err.warn("Warning"));
             eprintln!("You can fetch later with: git meta pull");
         }
+    }
+
+    // Last, so nothing in this command publishes them: the defaults are
+    // recorded locally and travel with the metadata ref on the first real
+    // publish, which is the first moment there is anything to prune anyway.
+    if should_init {
+        let _ = write_default_prune_rules(&ctx)?;
     }
 
     Ok(())

@@ -187,7 +187,7 @@ pub(crate) fn setup_bare_with_meta(ns: &str) -> TempDir {
 
     // Build tree: project/testing/__value (blob: "hello")
     let blob_oid = bare
-        .write_blob(b"\"hello\"")
+        .write_blob(b"hello")
         .expect("should create blob")
         .detach();
     let mut editor = bare.empty_tree().edit().expect("should create tree editor");
@@ -245,7 +245,7 @@ pub(crate) fn setup_bare_with_history() -> TempDir {
 
     // --- Commit 1: project/old_key/__value = "old_value" ---
     let blob1 = bare
-        .write_blob(b"\"old_value\"")
+        .write_blob(b"old_value")
         .expect("should create blob")
         .detach();
     let mut editor1 = bare.empty_tree().edit().expect("should create tree editor");
@@ -275,7 +275,7 @@ pub(crate) fn setup_bare_with_history() -> TempDir {
 
     // --- Commit 2 (tip): project/testing/__value = "hello" (old_key removed) ---
     let blob2 = bare
-        .write_blob(b"\"hello\"")
+        .write_blob(b"hello")
         .expect("should create blob")
         .detach();
     let mut editor2 = bare.empty_tree().edit().expect("should create tree editor");
@@ -328,7 +328,7 @@ pub(crate) fn setup_bare_with_omitted_history() -> TempDir {
     };
 
     let old_blob = bare
-        .write_blob(b"\"old_value\"")
+        .write_blob(b"old_value")
         .expect("should create old blob")
         .detach();
     let mut editor1 = bare.empty_tree().edit().expect("should create tree editor");
@@ -355,7 +355,7 @@ pub(crate) fn setup_bare_with_omitted_history() -> TempDir {
         .detach();
 
     let omitted_blob = bare
-        .write_blob(b"\"omitted_value\"")
+        .write_blob(b"omitted_value")
         .expect("should create omitted blob")
         .detach();
     let mut editor2 = bare.empty_tree().edit().expect("should create tree editor");
@@ -389,7 +389,7 @@ pub(crate) fn setup_bare_with_omitted_history() -> TempDir {
         .detach();
 
     let tip_blob = bare
-        .write_blob(b"\"hello\"")
+        .write_blob(b"hello")
         .expect("should create tip blob")
         .detach();
     let mut editor3 = bare.empty_tree().edit().expect("should create tree editor");
@@ -441,7 +441,7 @@ pub(crate) fn setup_bare_with_history_retained() -> TempDir {
 
     // --- Commit 1: project/old_key/__value = "old_value" ---
     let blob1 = bare
-        .write_blob(b"\"old_value\"")
+        .write_blob(b"old_value")
         .expect("should create blob")
         .detach();
     let mut editor1 = bare.empty_tree().edit().expect("should create tree editor");
@@ -471,7 +471,7 @@ pub(crate) fn setup_bare_with_history_retained() -> TempDir {
 
     // --- Commit 2 (tip): both old_key and testing ---
     let blob2 = bare
-        .write_blob(b"\"hello\"")
+        .write_blob(b"hello")
         .expect("should create blob")
         .detach();
     let mut editor2 = bare.empty_tree().edit().expect("should create tree editor");

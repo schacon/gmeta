@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/git-meta-lib", "crates/git-meta-cli"]
+members = ["crates/git-meta-lib", "crates/git-meta-cli", "crates/git-meta-bench"]
 resolver = "2"
 
 [workspace.package]

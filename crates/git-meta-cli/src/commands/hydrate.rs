@@ -25,6 +25,24 @@ pub(super) fn hydrate_promised_entries(
     };
     let tip_tree_id = tip_commit.object()?.into_commit().tree_id()?.detach();
 
+    // A key that pruning removed from the tip is no longer at its path there,
+    // and that is precisely the key a promisor exists to fetch. Indexing
+    // recorded the commit each key was last written in, so look in that tree
+    // when the tip does not have it.
+    let tree_for = |target: &Target, key: &str| -> Result<gix::ObjectId> {
+        let Some(commit) = db.promised_commit(target, key)? else {
+            return Ok(tip_tree_id);
+        };
+        let Ok(oid) = gix::ObjectId::from_hex(commit.as_bytes()) else {
+            return Ok(tip_tree_id);
+        };
+        match repo.find_object(oid) {
+            Ok(object) => Ok(object.into_commit().tree_id()?.detach()),
+            // The commit itself can be absent in a shallow or partial clone.
+            Err(_) => Ok(tip_tree_id),
+        }
+    };
+
     struct PendingEntry {
         idx: usize,
         oids: Vec<gix::ObjectId>,
@@ -36,10 +54,10 @@ pub(super) fn hydrate_promised_entries(
 
     for (idx, (target_value, key)) in entries.iter().enumerate() {
         let entry_target = entry_target(target_type, target_value);
+        let tree_id = tree_for(&entry_target, key)?;
 
         if let Ok(path) = tree_paths::tree_path(&entry_target, key) {
-            if let Some(oid) =
-                git_meta_lib::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
+            if let Some(oid) = git_meta_lib::git_utils::find_blob_oid_in_tree(repo, tree_id, &path)?
             {
                 pending.push(PendingEntry {
                     idx,
@@ -52,7 +70,7 @@ pub(super) fn hydrate_promised_entries(
 
         if let Ok(path) = tree_paths::list_dir_path(&entry_target, key) {
             if let Some(dir_oid) =
-                git_meta_lib::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &path)?
+                git_meta_lib::git_utils::find_blob_oid_in_tree(repo, tree_id, &path)?
             {
                 let list_tree = dir_oid.attach(repo).object()?.into_tree();
                 let oids = blob_oids_from_tree(&list_tree);
@@ -69,7 +87,7 @@ pub(super) fn hydrate_promised_entries(
 
         if let Ok(set_path) = tree_paths::set_dir_path(&entry_target, key) {
             if let Some(dir_oid) =
-                git_meta_lib::git_utils::find_blob_oid_in_tree(repo, tip_tree_id, &set_path)?
+                git_meta_lib::git_utils::find_blob_oid_in_tree(repo, tree_id, &set_path)?
             {
                 let set_tree = dir_oid.attach(repo).object()?.into_tree();
                 let oids = blob_oids_from_tree(&set_tree);
@@ -87,9 +105,15 @@ pub(super) fn hydrate_promised_entries(
         not_found.push(idx);
     }
 
-    for idx in &not_found {
-        let (target_value, key) = &entries[*idx];
-        db.delete_promised(&entry_target(target_type, target_value), key)?;
+    if !not_found.is_empty() {
+        // Leave these promised. A value can be temporarily unreachable — the
+        // commit holding it may not have been fetched yet — and forgetting the
+        // key would lose the only record that it ever existed.
+        eprintln!(
+            "{} value{} could not be located in the fetched history.",
+            not_found.len(),
+            if not_found.len() == 1 { "" } else { "s" }
+        );
     }
 
     if pending.is_empty() {
@@ -132,7 +156,11 @@ pub(super) fn hydrate_promised_entries(
                 let Ok(content) = std::str::from_utf8(&blob.data) else {
                     continue;
                 };
-                db.resolve_promised(&entry_target, key, content, &ValueType::String, false)?;
+                // A serialized tree holds the raw string; the store holds it
+                // JSON-encoded, as `set_value` does. Writing the raw bytes
+                // straight in produces a row nothing can read back.
+                let encoded = serde_json::to_string(content)?;
+                db.resolve_promised(&entry_target, key, &encoded, &ValueType::String, false)?;
                 hydrated += 1;
             }
             ValueType::List => {

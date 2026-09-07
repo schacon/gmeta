@@ -2,94 +2,94 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://git-meta.com/</loc>
-    <lastmod>2026-05-30</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/blog/</loc>
-    <lastmod>2026-05-30</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/blog/introducing-git-meta/</loc>
-    <lastmod>2026-05-29</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/blog/large-files-and-object-storage/</loc>
-    <lastmod>2026-05-31</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/blog/metadata-filters-public-and-private/</loc>
-    <lastmod>2026-05-31</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/</loc>
-    <lastmod>2026-05-30</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/exchange-format/targets.html</loc>
-    <lastmod>2026-04-19</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/exchange-format/exchange.html</loc>
-    <lastmod>2026-04-19</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/exchange-format/materialization.html</loc>
-    <lastmod>2026-03-25</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/exchange-format/strings.html</loc>
-    <lastmod>2026-04-19</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/exchange-format/lists.html</loc>
-    <lastmod>2026-04-19</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/exchange-format/sets.html</loc>
-    <lastmod>2026-03-25</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/overview.html</loc>
-    <lastmod>2026-05-30</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/api.html</loc>
-    <lastmod>2026-06-01</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/storage.html</loc>
-    <lastmod>2026-06-01</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/cli.html</loc>
-    <lastmod>2026-06-01</lastmod>
+    <lastmod>2026-09-06</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/output.html</loc>
-    <lastmod>2026-04-19</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/pruning.html</loc>
-    <lastmod>2026-04-19</lastmod>
+    <lastmod>2026-09-06</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/serialize-filters.html</loc>
-    <lastmod>2026-05-31</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/standard-keys.html</loc>
-    <lastmod>2026-05-31</lastmod>
+    <lastmod>2026-09-04</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/remotes.html</loc>
-    <lastmod>2026-06-01</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/auto-sync.html</loc>
-    <lastmod>2026-04-21</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
   <url>
     <loc>https://git-meta.com/spec/implementation/workflow.html</loc>
-    <lastmod>2026-06-01</lastmod>
+    <lastmod>2026-09-03</lastmod>
   </url>
 </urlset>

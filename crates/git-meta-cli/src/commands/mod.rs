@@ -1,9 +1,11 @@
 pub(crate) mod blame;
 pub(crate) mod clear;
 pub(crate) mod config;
+pub(crate) mod deepen;
 pub(crate) mod get;
 mod hydrate;
 pub(crate) mod import;
+pub(crate) mod index_history;
 pub(crate) mod inspect;
 pub(crate) mod list;
 pub(crate) mod log;

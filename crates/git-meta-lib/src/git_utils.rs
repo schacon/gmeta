@@ -247,11 +247,82 @@ fn fetch_oid_batches<T: Display>(
 
     // GitHub rejects very large smart-HTTP request bodies. Keep each
     // `fetch --stdin` want-list bounded while preserving sequential fetches.
+    let mut batches = 0;
     for batch in oid_batches(oids) {
         fetch_oid_batch(workdir, remote_name, batch, operation)?;
+        batches += 1;
+    }
+
+    if batches > 1 {
+        consolidate_packs(workdir)?;
     }
 
     Ok(())
+}
+
+/// Merge the packs a batched fetch just produced into fewer, larger ones.
+///
+/// Every `git fetch` writes its own pack, so hydrating a large tip leaves one
+/// pack per batch. That is not merely untidy: `gix` sizes its object-database
+/// slot map when a repository is opened, and once the packs outnumber the slots
+/// every subsequent open fails with "The slotmap turned out to be too small".
+/// A consumer of a large metadata history would be unable to read what it had
+/// just downloaded.
+///
+/// Geometric repacking keeps this proportional to what was added rather than
+/// rewriting the whole object store on every fetch. Older Git versions do not
+/// support it, and a repository that cannot be repacked is not a reason to fail
+/// the fetch that already succeeded, so failures here are ignored.
+fn consolidate_packs(workdir: &Path) -> Result<()> {
+    let status = Command::new("git")
+        .args(["repack", "--geometric=2", "-d", "-q"])
+        .current_dir(workdir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(status) if status.success() => {}
+        // `--geometric` predates neither promisor packs nor every supported
+        // Git; fall back to a full repack, and give up quietly if that fails.
+        _ => {
+            let _ = Command::new("git")
+                .args(["repack", "-a", "-d", "-q"])
+                .current_dir(workdir)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+    }
+
+    invalidate_commit_graph(workdir);
+    Ok(())
+}
+
+/// Drop the commit-graph after repacking has moved objects around.
+///
+/// `git clone --filter` writes a commit-graph, and repacking can leave it
+/// naming objects the object database no longer holds. Git then refuses to
+/// fetch at all:
+///
+/// > fatal: You are attempting to fetch <oid>, which is in the commit graph
+/// > file but not in the object database. This is probably due to repo
+/// > corruption.
+///
+/// The graph is only a cache, so removing it is safe and Git rebuilds it when
+/// it wants one. Rewriting it instead would mean walking the whole history for
+/// something nothing has asked for yet.
+fn invalidate_commit_graph(workdir: &Path) {
+    let info = {
+        let in_worktree = workdir.join(".git").join("objects").join("info");
+        if in_worktree.exists() {
+            in_worktree
+        } else {
+            workdir.join("objects").join("info")
+        }
+    };
+    let _ = std::fs::remove_file(info.join("commit-graph"));
+    let _ = std::fs::remove_dir_all(info.join("commit-graphs"));
 }
 
 fn oid_batches<T>(oids: &[T]) -> impl Iterator<Item = &[T]> {
@@ -460,6 +531,124 @@ pub(crate) fn resolve_commit_sha(repo: &gix::Repository, partial: &str) -> Resul
     }
 }
 
+/// Loose-object count above which maintenance is worth doing, when the
+/// repository does not set `gc.auto`. The same default Git uses.
+const DEFAULT_GC_AUTO: i64 = 6_700;
+
+/// Pack what serialization has written and drop what it has superseded.
+///
+/// Metadata is written straight through `gix`, and a metadata-only repository
+/// runs nothing else, so without this the object store only ever grows loose:
+/// a 25,000-commit history reached 1.4 million loose objects in 14 GB, for a
+/// history that packs to 801 MB, and a plain `git ls-tree -r` on it took over
+/// five minutes.
+///
+/// Repacking does nearly all of that work. Metadata commits form a linear
+/// chain, so every historical tree and blob stays reachable — superseded tree
+/// nodes are not garbage, they are the record the deep-history read path walks
+/// back through. On a 300-commit history only 208 of 36,245 objects were
+/// unreachable, and repacking took the rest from 36,037 loose to one.
+///
+/// Pruning is still worth doing, for a smaller reason. Building a tree writes
+/// intermediate trees that the finished commit never references, at roughly
+/// 0.7 objects per commit. Left alone they are what eventually trips `git gc`,
+/// which refuses to delete unreachable objects younger than two weeks, keeps
+/// them loose, and then declines to run at all:
+///
+/// > There are too many unreachable loose objects; run 'git prune' to remove
+/// > them. Automatic cleanup will not be performed until the file is removed.
+///
+/// That is why this does the work directly rather than deferring to
+/// `gc --auto`. Pruning first keeps the repack from packing objects about to
+/// be discarded, and geometric repacking keeps the work proportional to what
+/// was added rather than rewriting the whole store every time.
+///
+/// # This must not be called while a [`gix::Repository`] stays in use
+///
+/// Objects are deleted here. A `Repository` handle opened beforehand will find
+/// them gone and fail with "object ... could not be found". Call it where the
+/// process is about to exit, as the CLI does, or reopen every handle after.
+///
+/// Maintenance failing is never a reason to fail work that already succeeded,
+/// so errors are ignored.
+pub fn maintain_object_store(repo: &gix::Repository) {
+    let Ok(workdir) = repo_dir(repo) else {
+        return;
+    };
+    if !has_many_loose_objects(repo, workdir) {
+        return;
+    }
+
+    let run = |args: &[&str]| {
+        let _ = Command::new("git")
+            .args(args)
+            .current_dir(workdir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    };
+
+    run(&["prune", "--expire=now"]);
+    run(&["repack", "-d", "--geometric=2", "--quiet"]);
+}
+
+/// Whether the object store holds enough loose objects to be worth packing.
+///
+/// The threshold comes from the repository's `gc.auto`, so a project that has
+/// tuned Git's own maintenance gets the same answer here, and `gc.auto = 0`
+/// disables maintenance exactly as it does for Git.
+///
+/// Counting stops as soon as the threshold is passed, which bounds the work
+/// either way: a store below the threshold has few objects to count, and one
+/// far above it is answered after the first few thousand. Git samples a single
+/// fan-out directory instead, which is cheaper still but reads as zero when
+/// that one directory happens to be empty.
+fn has_many_loose_objects(repo: &gix::Repository, workdir: &Path) -> bool {
+    let threshold = repo
+        .config_snapshot()
+        .integer("gc.auto")
+        .unwrap_or(DEFAULT_GC_AUTO);
+    let Ok(threshold) = usize::try_from(threshold) else {
+        return false;
+    };
+    if threshold == 0 {
+        return false;
+    }
+
+    let objects = {
+        let in_worktree = workdir.join(".git").join("objects");
+        if in_worktree.exists() {
+            in_worktree
+        } else {
+            // Bare repositories keep `objects` at the top level.
+            workdir.join("objects")
+        }
+    };
+    let Ok(fanout) = std::fs::read_dir(objects) else {
+        return false;
+    };
+
+    let mut counted = 0usize;
+    for directory in fanout.flatten() {
+        let name = directory.file_name();
+        let name = name.to_string_lossy();
+        if name.len() != 2 || !name.chars().all(|c| c.is_ascii_hexdigit()) {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(directory.path()) else {
+            continue;
+        };
+        for _ in entries.flatten() {
+            counted += 1;
+            if counted > threshold {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -474,6 +663,79 @@ mod tests {
         assert!(!is_list_entry_name("123-toolong"));
         assert!(!is_list_entry_name("123-abc")); // 3 chars, not 5
         assert!(!is_list_entry_name("-23c0f")); // empty timestamp
+    }
+
+    /// Each batched fetch lands its own pack. Once those outnumber the slots
+    /// gix sizes its object database with, opening the repository fails
+    /// outright — so a multi-batch fetch has to leave the packs consolidated.
+    #[test]
+    fn consolidate_packs_merges_the_packs_a_batched_fetch_leaves_behind() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let path = dir.path();
+        let run = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .current_dir(path)
+                .args(args)
+                .output()
+                .expect("git");
+            assert!(
+                output.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8_lossy(&output.stdout).trim().to_string()
+        };
+
+        run(&["init", "--quiet"]);
+        run(&["config", "user.email", "test@example.com"]);
+        run(&["config", "user.name", "Test User"]);
+
+        // Build several single-object packs, the shape a batched fetch leaves.
+        for index in 0..4 {
+            std::fs::write(path.join("f"), format!("content {index}")).expect("write");
+            let oid = run(&["hash-object", "-w", "f"]);
+            let mut child = std::process::Command::new("git")
+                .current_dir(path)
+                .args(["pack-objects", "--quiet", ".git/objects/pack/pack"])
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::null())
+                .spawn()
+                .expect("pack-objects");
+            {
+                use std::io::Write;
+                let stdin = child.stdin.as_mut().expect("stdin");
+                writeln!(stdin, "{oid}").expect("write oid");
+            }
+            assert!(child.wait().expect("wait").success());
+        }
+
+        let count_packs = || {
+            std::fs::read_dir(path.join(".git/objects/pack"))
+                .expect("pack dir")
+                .flatten()
+                .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+                .count()
+        };
+        assert!(count_packs() >= 4, "test setup did not create packs");
+
+        // A commit-graph naming objects the repack moves would make Git refuse
+        // to fetch afterwards, so consolidation has to drop it.
+        run(&["commit", "--quiet", "--allow-empty", "-m", "graph"]);
+        run(&["commit-graph", "write", "--reachable"]);
+        let commit_graph = path.join(".git/objects/info/commit-graph");
+        assert!(commit_graph.exists(), "test setup wrote no commit-graph");
+
+        consolidate_packs(path).expect("consolidate");
+
+        assert!(
+            count_packs() < 4,
+            "packs were not consolidated, still {}",
+            count_packs()
+        );
+        assert!(
+            !commit_graph.exists(),
+            "a commit-graph survived the repack that moved its objects"
+        );
     }
 
     #[test]

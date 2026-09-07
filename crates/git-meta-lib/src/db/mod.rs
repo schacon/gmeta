@@ -9,6 +9,7 @@ mod schema;
 mod sets;
 mod sync;
 mod tombstones;
+mod tree_stats;
 /// Named return types for database query methods.
 pub mod types;
 mod value_ops;
@@ -131,6 +132,7 @@ impl Store {
 ///
 /// Rolls back on drop unless [`commit()`](Self::commit) is called.
 /// Uses unique names so multiple savepoints can nest.
+#[derive(Debug)]
 struct AutoSavepoint<'a> {
     conn: &'a Connection,
     name: String,
@@ -164,6 +166,44 @@ impl Drop for AutoSavepoint<'_> {
                 .execute_batch(&format!("ROLLBACK TO {}", self.name));
             let _ = self.conn.execute_batch(&format!("RELEASE {}", self.name));
         }
+    }
+}
+
+/// A transaction spanning many writes.
+///
+/// Every write is otherwise its own implicit transaction. That is right for
+/// interactive use and ruinous in bulk: indexing a large history performed
+/// millions of single-statement transactions, which grew the write-ahead log
+/// until closing the database had to spend longer checkpointing it than the
+/// indexing itself took.
+#[derive(Debug)]
+pub struct WriteBatch<'a> {
+    savepoint: AutoSavepoint<'a>,
+}
+
+impl WriteBatch<'_> {
+    /// Commit the writes made so far.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction cannot be committed.
+    pub fn commit(self) -> Result<()> {
+        self.savepoint.commit()
+    }
+}
+
+impl Store {
+    /// Group the writes that follow into one transaction.
+    ///
+    /// Dropping the returned batch without committing rolls those writes back.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transaction cannot be opened.
+    pub fn write_batch(&self) -> Result<WriteBatch<'_>> {
+        Ok(WriteBatch {
+            savepoint: self.savepoint()?,
+        })
     }
 }
 
@@ -310,6 +350,45 @@ fn escape_like_pattern(input: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
+
+    /// Bulk writes must be able to share a transaction. One transaction per
+    /// row is what a write-ahead log handles worst: indexing a large history
+    /// built a log that took longer to checkpoint on close than the indexing
+    /// itself took.
+    #[test]
+    fn a_write_batch_groups_its_writes_and_rolls_back_when_dropped() {
+        let db = Store::open_in_memory().unwrap();
+        let target = Target::commit("00112233445566778899aabbccddeeff00112233").unwrap();
+
+        let batch = db.write_batch().unwrap();
+        for round in 0..50 {
+            db.set_value(
+                &target,
+                &format!("agent:step-{round}"),
+                &crate::types::MetaValue::String("v".into()),
+                "test@example.com",
+                1_000,
+            )
+            .unwrap();
+        }
+        batch.commit().unwrap();
+        assert_eq!(db.get_all(&target, Some("agent")).unwrap().len(), 50);
+
+        let batch = db.write_batch().unwrap();
+        db.set_value(
+            &target,
+            "agent:rolled-back",
+            &crate::types::MetaValue::String("v".into()),
+            "test@example.com",
+            1_000,
+        )
+        .unwrap();
+        drop(batch);
+        assert!(
+            db.get(&target, "agent:rolled-back").unwrap().is_none(),
+            "an uncommitted batch should not survive being dropped"
+        );
+    }
     use super::*;
     use std::collections::BTreeMap;
 
@@ -845,7 +924,7 @@ mod tests {
         let target = commit_target("abc123");
         db.set_add(&target, "local:sessions", "s1", "a@b.com", 1000)
             .unwrap();
-        db.insert_promised(&target, "sessions", &ValueType::Set)
+        db.insert_promised(&target, "sessions", &ValueType::Set, None)
             .unwrap();
         let members = vec!["s1".to_string()];
 
@@ -872,7 +951,7 @@ mod tests {
     fn test_publish_local_rejects_promised_set_member_source() {
         let db = Store::open_in_memory().unwrap();
         let target = commit_target("abc123");
-        db.insert_promised(&target, "local:sessions", &ValueType::Set)
+        db.insert_promised(&target, "local:sessions", &ValueType::Set, None)
             .unwrap();
         let members = vec!["s1".to_string()];
 
@@ -894,7 +973,7 @@ mod tests {
     fn test_publish_local_rejects_promised_key_prefix_rows() {
         let db = Store::open_in_memory().unwrap();
         let target = commit_target("abc123");
-        db.insert_promised(&target, "local:summary:title", &ValueType::String)
+        db.insert_promised(&target, "local:summary:title", &ValueType::String, None)
             .unwrap();
 
         let result = db.publish_local(
@@ -916,7 +995,7 @@ mod tests {
             1000,
         )
         .unwrap();
-        db.insert_promised(&target, "summary:title", &ValueType::String)
+        db.insert_promised(&target, "summary:title", &ValueType::String, None)
             .unwrap();
 
         let result = db.publish_local(

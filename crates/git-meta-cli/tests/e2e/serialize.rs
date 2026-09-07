@@ -312,26 +312,30 @@ fn serialize_writes_full_tree_before_pruning() {
 }
 
 #[test]
-fn serialize_auto_prune_drops_old_string_metadata() {
+fn serialize_auto_prune_keeps_the_most_recent_keys() {
     let (dir, _sha) = setup_repo();
 
+    // Three keys, oldest first. Auto-prune works to a key ceiling and floor,
+    // not a date, so the two oldest are the ones that go.
+    for (timestamp, key) in [(1000, "first"), (2000, "second"), (3000, "third")] {
+        harness::git_meta(dir.path())
+            .args([
+                "set",
+                "--timestamp",
+                &timestamp.to_string(),
+                "branch:legacy",
+                &format!("historical:{key}"),
+                key,
+            ])
+            .assert()
+            .success();
+    }
     harness::git_meta(dir.path())
-        .args([
-            "set",
-            "--timestamp",
-            "1000",
-            "branch:legacy",
-            "historical:key",
-            "beta",
-        ])
+        .args(["config", "meta:prune:max-keys", "2"])
         .assert()
         .success();
     harness::git_meta(dir.path())
-        .args(["config", "meta:prune:since", "14d"])
-        .assert()
-        .success();
-    harness::git_meta(dir.path())
-        .args(["config", "meta:prune:max-keys", "1"])
+        .args(["config", "meta:prune:min-keys", "1"])
         .assert()
         .success();
 
@@ -349,11 +353,18 @@ fn serialize_auto_prune_drops_old_string_metadata() {
     let mut results = Vec::new();
     walk_tree(&repo, tree.id, "", &mut results);
     let fanout = target_fanout("legacy");
-    let pruned_path = format!("branch/{fanout}/legacy/historical/key/__value");
+    let path_for = |key: &str| format!("branch/{fanout}/legacy/historical/{key}/__value");
+
     assert!(
-        !results.iter().any(|(path, _)| path == &pruned_path),
-        "expected auto-prune to remove old historical:key, got: {results:?}"
+        results.iter().any(|(path, _)| path == &path_for("third")),
+        "auto-prune dropped the most recent key, got: {results:?}"
     );
+    for dropped in ["first", "second"] {
+        assert!(
+            !results.iter().any(|(path, _)| path == &path_for(dropped)),
+            "auto-prune kept {dropped}, which is older than the floor allows: {results:?}"
+        );
+    }
 }
 
 #[test]

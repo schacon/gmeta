@@ -480,3 +480,386 @@ fn serialize_detects_historical_writes_after_prior_serialize() {
     assert_eq!(output3.changes, 0, "unchanged tree should be a no-op");
     assert!(output3.refs_written.is_empty());
 }
+
+/// The scoped read that incremental serialize uses must produce exactly the
+/// tree a full serialize would. This is the safety net for reading only the
+/// changed targets' rows instead of the whole metadata table.
+#[test]
+fn incremental_serialize_matches_a_full_rebuild() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+
+    // Seed several targets of different types, each with a mix of value types.
+    let targets = [
+        Target::commit(&sha).unwrap(),
+        Target::commit("00112233445566778899aabbccddeeff00112233").unwrap(),
+        Target::path("crates/lib/src/main.rs"),
+        Target::branch("feature/scoped-reads"),
+    ];
+    for (index, target) in targets.iter().enumerate() {
+        let handle = session.target(target);
+        handle.set("agent:model", format!("model-{index}")).unwrap();
+        handle.set("review:status", "pending").unwrap();
+        handle.list_push("agent:transcript", "first line").unwrap();
+        handle.set_add("review:owners", "alice").unwrap();
+    }
+    let _ = session.serialize().unwrap();
+
+    // Touch a subset, the way a real session would between publishes.
+    let handle = session.target(&targets[1]);
+    handle.set("review:status", "approved").unwrap();
+    handle.list_push("agent:transcript", "second line").unwrap();
+    session.target(&targets[2]).remove("agent:model").unwrap();
+    let _ = session.serialize().unwrap();
+
+    let incremental_tree = local_tree(&dir);
+
+    // A forced full serialize reads every row and rebuilds from scratch.
+    let session = reopen_session(dir.path(), 0);
+    let _ = session.serialize_full().unwrap();
+    let full_tree = local_tree(&dir);
+
+    assert_eq!(
+        incremental_tree, full_tree,
+        "incremental serialize diverged from a full rebuild"
+    );
+}
+
+/// A commit that only removes keys leaves no metadata rows for its target, so
+/// serialize must still rebuild that subtree rather than treating the empty
+/// read as "nothing to do".
+#[test]
+fn incremental_serialize_applies_a_removal_only_change() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+
+    let kept = Target::commit(&sha).unwrap();
+    let emptied = Target::commit("00112233445566778899aabbccddeeff00112233").unwrap();
+
+    session.target(&kept).set("agent:model", "keep-me").unwrap();
+    session
+        .target(&emptied)
+        .set("agent:model", "remove-me")
+        .unwrap();
+    let _ = session.serialize().unwrap();
+
+    assert!(session.target(&emptied).remove("agent:model").unwrap());
+    let _ = session.serialize().unwrap();
+
+    let tree = local_tree(&dir);
+    let emptied_sha = "00112233445566778899aabbccddeeff00112233";
+    let removed_path = format!("commit/00/{emptied_sha}/agent/model/__value");
+    let kept_path = format!("commit/{}/{sha}/agent/model/__value", &sha[..2]);
+
+    assert!(
+        blob_at(dir.path(), tree, &removed_path).is_none(),
+        "removed key is still in the serialized tree"
+    );
+    assert!(
+        blob_at(dir.path(), tree, &kept_path).is_some(),
+        "unrelated key was dropped"
+    );
+}
+
+/// Resolve a slash-separated path inside a tree, if every segment exists.
+fn blob_at(dir: &std::path::Path, tree: gix::ObjectId, path: &str) -> Option<gix::ObjectId> {
+    let repo = gix::open(dir).unwrap();
+    let mut current = tree;
+    let segments: Vec<&str> = path.split('/').collect();
+    for (index, segment) in segments.iter().enumerate() {
+        let tree = repo.find_tree(current).ok()?;
+        let entry = tree.find_entry(*segment)?;
+        if index == segments.len() - 1 {
+            return Some(entry.object_id());
+        }
+        if !entry.mode().is_tree() {
+            return None;
+        }
+        current = entry.object_id();
+    }
+    None
+}
+
+/// Read the tree of `refs/meta/local/main`.
+fn local_tree(dir: &tempfile::TempDir) -> gix::ObjectId {
+    let repo = gix::open(dir.path()).unwrap();
+    let commit = repo
+        .find_reference("refs/meta/local/main")
+        .unwrap()
+        .into_fully_peeled_id()
+        .unwrap()
+        .object()
+        .unwrap()
+        .into_commit();
+    commit.tree_id().unwrap().detach()
+}
+
+/// Maintenance must not run while the session that wrote the objects is still
+/// in use. `gc.autoDetach` defaults to true, so `git gc --auto` returns
+/// immediately and keeps packing in the background, deleting the loose objects
+/// it packs — and a `Repository` handle opened before that finishes then fails
+/// with "object ... could not be found".
+///
+/// This asserts the safe order: serialize repeatedly with a live session and
+/// nothing disappears, then maintain once the work is done.
+#[test]
+fn serializing_repeatedly_does_not_lose_objects_to_maintenance() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+
+    // Enough rounds to pass the default loose-object threshold, so the test
+    // does not depend on gc.auto being configured. gc.autoDetach is left at
+    // its default, so a background gc would race if serialize triggered one.
+    let target = Target::commit(&sha).unwrap();
+    for round in 0..900 {
+        session
+            .target(&target)
+            .set(&format!("agent:step-{round}"), format!("value-{round}"))
+            .unwrap();
+        let _ = session.serialize().unwrap();
+        // Read back through the same session, which is what a background gc
+        // would break.
+        assert_eq!(
+            session
+                .target(&target)
+                .get_value(&format!("agent:step-{round}"))
+                .unwrap(),
+            Some(MetaValue::String(format!("value-{round}")))
+        );
+    }
+
+    let before = loose_object_count(dir.path());
+    assert!(before > 0, "expected loose objects before maintenance");
+
+    // Maintenance is safe here: the work is finished.
+    session.maintain_object_store();
+
+    assert!(
+        loose_object_count(dir.path()) < before,
+        "maintenance packed nothing: {before} loose before, {} after",
+        loose_object_count(dir.path())
+    );
+}
+
+/// Count loose objects in a repository's object store.
+fn loose_object_count(dir: &std::path::Path) -> usize {
+    let objects = dir.join(".git").join("objects");
+    let Ok(entries) = std::fs::read_dir(&objects) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.len() == 2 && name.chars().all(|c| c.is_ascii_hexdigit())
+        })
+        .filter_map(|entry| std::fs::read_dir(entry.path()).ok())
+        .map(|inner| inner.flatten().count())
+        .sum()
+}
+
+const AUTO_PRUNE_DAY_MS: i64 = 24 * 60 * 60 * 1000;
+const AUTO_PRUNE_T0: i64 = 1_700_000_000_000;
+/// Auto-prune rebuilds the whole tree from the entries serialize read. An
+/// incremental serialize that only reads the changed targets' rows would
+/// therefore publish a tree containing only those targets — and, with a floor
+/// of one key, would keep the wrong one for the wrong reason.
+#[test]
+fn auto_prune_after_an_incremental_serialize_keeps_untouched_targets() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+
+    // A target old enough to age out, so the prune has real work to do.
+    let stale_sha = "aabbccddeeff00112233445566778899aabbccdd";
+    let stale = Target::commit(stale_sha).unwrap();
+    let session = reopen_session(dir.path(), AUTO_PRUNE_T0 - 100 * AUTO_PRUNE_DAY_MS);
+    session.target(&stale).set("agent:model", "old").unwrap();
+    drop(session);
+
+    let session = reopen_session(dir.path(), AUTO_PRUNE_T0);
+    let project = Target::project();
+    // Retention far wider than the ages involved; max-keys forces the trigger.
+    session
+        .target(&project)
+        .set("meta:prune:max-keys", "2")
+        .unwrap();
+    session
+        .target(&project)
+        .set("meta:prune:min-keys", "1")
+        .unwrap();
+
+    let untouched_sha = "00112233445566778899aabbccddeeff00112233";
+    let touched = Target::commit(&sha).unwrap();
+    let untouched = Target::commit(untouched_sha).unwrap();
+    session.target(&touched).set("agent:model", "a").unwrap();
+    session.target(&untouched).set("agent:model", "b").unwrap();
+    let first = session.serialize().unwrap();
+    drop(session);
+
+    // One day later: touch only one target, so serialize goes incremental.
+    let session = reopen_session(dir.path(), AUTO_PRUNE_T0 + AUTO_PRUNE_DAY_MS);
+    session.target(&touched).set("agent:model", "a2").unwrap();
+    let second = session.serialize().unwrap();
+    eprintln!(
+        "first: changes={} pruned={} | second: changes={} pruned={}",
+        first.changes, first.pruned, second.changes, second.pruned
+    );
+    // The first serialize proves auto-prune is wired up: three keys over a
+    // ceiling of two, cut back to a floor of one. The second runs it again on
+    // an incremental read, where the entries it rebuilds from must still be the
+    // complete set rather than just the target that changed.
+    assert!(first.pruned > 0, "auto-prune did not run");
+    drop(session);
+
+    let repo = gix::open(dir.path()).unwrap();
+    let tree = repo
+        .find_reference("refs/meta/local/main")
+        .unwrap()
+        .into_fully_peeled_id()
+        .unwrap()
+        .object()
+        .unwrap()
+        .into_commit()
+        .tree_id()
+        .unwrap()
+        .detach();
+
+    let find = |path: &str| -> bool {
+        let segments: Vec<&str> = path.split('/').collect();
+        let mut current = tree;
+        for (index, segment) in segments.iter().enumerate() {
+            let Ok(found) = repo.find_tree(current) else {
+                return false;
+            };
+            let Some(entry) = found.find_entry(*segment) else {
+                return false;
+            };
+            if index == segments.len() - 1 {
+                return true;
+            }
+            current = entry.object_id();
+        }
+        false
+    };
+
+    // The most recently modified key is the one that survives, and it is the
+    // one the incremental serialize touched.
+    assert!(
+        find(&format!("commit/{}/{sha}/agent/model/__value", &sha[..2])),
+        "auto-prune dropped the most recently modified key"
+    );
+    // The oldest key is the one that goes.
+    assert!(
+        !find(&format!(
+            "commit/{}/{stale_sha}/agent/model/__value",
+            &stale_sha[..2]
+        )),
+        "auto-prune kept the oldest key over more recent ones"
+    );
+}
+
+/// The point of a floor: a prune has to buy room, or the very next serialize
+/// triggers again and the tree never settles.
+#[test]
+fn auto_prune_cuts_to_the_floor_and_then_leaves_the_tree_alone() {
+    let (dir, repo) = setup_repo();
+    let session = open_session(repo);
+    let project = Target::project();
+    session
+        .target(&project)
+        .set("meta:prune:max-keys", "20")
+        .unwrap();
+    session
+        .target(&project)
+        .set("meta:prune:min-keys", "10")
+        .unwrap();
+
+    let write = |index: usize, at: i64| {
+        let session = reopen_session(dir.path(), at);
+        let sha = format!("{index:040x}");
+        session
+            .target(&Target::commit(&sha).unwrap())
+            .set("agent:model", format!("m{index}"))
+            .unwrap();
+        session.serialize().unwrap()
+    };
+
+    // Fill past the ceiling; the prune that fires must land on the floor.
+    let mut pruned_at = Vec::new();
+    for index in 0..24 {
+        let output = write(index, AUTO_PRUNE_T0 + index as i64 * 1000);
+        if output.pruned > 0 {
+            pruned_at.push(index);
+        }
+    }
+
+    assert!(!pruned_at.is_empty(), "auto-prune never fired");
+    let tip_keys = count_tip_keys(dir.path());
+    assert!(
+        (10..=20).contains(&tip_keys),
+        "tree settled at {tip_keys} keys, outside the 10..=20 band"
+    );
+
+    // Having cut to 10, the next few writes must not each trigger another
+    // prune — that was the old behaviour this design replaces.
+    assert!(
+        pruned_at.len() <= 2,
+        "pruned on {} of 24 serializes: {pruned_at:?}",
+        pruned_at.len()
+    );
+}
+
+/// The tree measurements auto-prune depends on are cached by tree OID, so a
+/// repeated check does not re-walk the tree.
+#[test]
+fn tree_measurements_are_cached_by_oid() {
+    let (dir, repo) = setup_repo();
+    let sha = head_sha(&repo);
+    let session = open_session(repo);
+    let project = Target::project();
+    session
+        .target(&project)
+        .set("meta:prune:max-keys", "100000")
+        .unwrap();
+
+    let target = Target::commit(&sha).unwrap();
+    for round in 0..20 {
+        session
+            .target(&target)
+            .set(&format!("agent:step-{round}"), "v")
+            .unwrap();
+        let _ = session.serialize().unwrap();
+    }
+
+    let cached = count_tree_stats(dir.path());
+    assert!(
+        cached > 0,
+        "no tree measurements were cached, so every check re-walked the tree"
+    );
+}
+
+/// Rows in the tree-measurement cache.
+fn count_tree_stats(dir: &std::path::Path) -> i64 {
+    let connection = rusqlite::Connection::open(dir.join(".git/git-meta.sqlite")).unwrap();
+    connection
+        .query_row("SELECT COUNT(*) FROM tree_stats", [], |row| row.get(0))
+        .unwrap()
+}
+
+/// Count the metadata keys in the published tip.
+fn count_tip_keys(dir: &std::path::Path) -> usize {
+    let output = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(["ls-tree", "-r", "--name-only", "refs/meta/local/main"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.starts_with("project/"))
+        .filter(|line| line.ends_with("/__value"))
+        .count()
+}

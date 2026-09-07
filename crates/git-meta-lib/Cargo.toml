@@ -26,6 +26,7 @@ time = { workspace = true }
 
 [dev-dependencies]
 gix = { workspace = true }
+rusqlite = { workspace = true }
 tempfile = "3"
 
 [lints]

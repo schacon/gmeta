@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use crate::error::Result;
 
 /// Current schema version.
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 6;
 
 /// Run all pending migrations on the database.
 pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
@@ -15,6 +15,22 @@ pub(super) fn run_migrations(conn: &Connection) -> Result<()> {
     }
     if version < 2 {
         conn.execute_batch(MIGRATION_2)?;
+        conn.pragma_update(None, "user_version", 2)?;
+    }
+    if version < 3 {
+        conn.execute_batch(MIGRATION_3)?;
+        conn.pragma_update(None, "user_version", 3)?;
+    }
+    if version < 4 {
+        conn.execute_batch(MIGRATION_4)?;
+        conn.pragma_update(None, "user_version", 4)?;
+    }
+    if version < 5 {
+        conn.execute_batch(MIGRATION_5)?;
+        conn.pragma_update(None, "user_version", 5)?;
+    }
+    if version < 6 {
+        conn.execute_batch(MIGRATION_6)?;
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
 
@@ -91,4 +107,57 @@ CREATE INDEX IF NOT EXISTS idx_set_values_metadata ON set_values(metadata_id);
 const MIGRATION_2: &str = "
 ALTER TABLE metadata ADD COLUMN source_ref TEXT;
 CREATE INDEX IF NOT EXISTS idx_metadata_source_ref ON metadata(source_ref);
+";
+
+/// Migration 3: Index `metadata_log` by timestamp.
+///
+/// Incremental serialization asks for everything written since the last
+/// materialization marker. Without this index that predicate cannot seek, so
+/// every serialize scans a table that gains a row per key write and is never
+/// pruned in normal operation — making publish cost grow with the total number
+/// of writes a repository has ever seen.
+const MIGRATION_3: &str = "
+CREATE INDEX IF NOT EXISTS idx_metadata_log_timestamp
+    ON metadata_log(timestamp, target_type, target_value, key);
+";
+
+/// Migration 4: Cache per-tree key counts and sizes.
+///
+/// Auto-prune has to know how large the serialized tree is on every
+/// serialize, and walking it to find out costs more as it grows — exactly
+/// when it is asked most often. Git trees are content-addressed, so a count
+/// keyed by tree OID never goes stale, and an incremental serialize reuses
+/// most of its subtrees unchanged: only the subtrees on a changed path need
+/// recounting.
+const MIGRATION_4: &str = "
+CREATE TABLE IF NOT EXISTS tree_stats (
+    tree_oid TEXT PRIMARY KEY,
+    key_count INTEGER,
+    byte_size INTEGER,
+    last_used INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tree_stats_last_used ON tree_stats(last_used);
+";
+
+/// Migration 5: Index metadata by recency.
+///
+/// Auto-prune keeps the most recently modified keys down to a floor. Without
+/// this index that means reading and sorting every row in the store, so the
+/// cost of publishing a bounded tree would grow with everything ever written.
+/// With it, the rows arrive in the order the prune wants and it can stop as
+/// soon as the floor is reached.
+const MIGRATION_5: &str = "
+CREATE INDEX IF NOT EXISTS idx_metadata_recency
+    ON metadata(last_timestamp DESC, target_type, target_value, key);
+";
+
+/// Migration 6: Remember which commit last wrote a promised key.
+///
+/// Indexing history records every key a repository has ever published, but a
+/// key that has been pruned out of the tip is no longer at its path in the tip
+/// tree — and that is exactly the key a promisor exists to fetch. Recording the
+/// commit the key was last written in turns fetching it into a single tree
+/// lookup, instead of a walk back through history with nothing to aim at.
+const MIGRATION_6: &str = "
+ALTER TABLE metadata ADD COLUMN promised_commit TEXT;
 ";

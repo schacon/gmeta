@@ -259,15 +259,22 @@ The `meta:` namespace is reserved for git-meta protocol configuration (auto-prun
 
 ```key meta:prune:since
 type: string
-meaning: retention window used when auto-pruning is triggered during serialization
+meaning: default retention window for the manual `git meta prune --since`; has no effect on auto-pruning
 format: ISO-8601 date (e.g. `2025-01-01`) or relative duration (`90d`, `6m`, `1y`)
 ```
 
 ```key meta:prune:max-keys
 type: string
-meaning: integer threshold; when the total number of metadata keys in the serialized tree exceeds this value, an auto-prune is triggered
+meaning: integer threshold; when the number of metadata keys in the serialized tree exceeds this value, an auto-prune is triggered
 examples:
   - "10000"
+```
+
+```key meta:prune:min-keys
+type: string
+meaning: integer; the key count an auto-prune reduces the tree to, keeping the most recently modified keys. Must be below `max-keys`; defaults to half of it
+examples:
+  - "5000"
 ```
 
 ```key meta:prune:max-size
@@ -278,8 +285,8 @@ format: integer with optional human-friendly suffix (`512k`, `10m`, `1g`)
 
 ```key meta:prune:min-size
 type: string
-meaning: minimum subtree size threshold passed through to the prune operation; target subtrees smaller than this are kept in full regardless of age
-format: integer with optional human-friendly suffix (`512k`, `10m`)
+meaning: the total blob size an auto-prune reduces the tree to, keeping the most recently modified keys. Must be below `max-size`; defaults to half of it
+format: integer with optional human-friendly suffix (`512k`, `10m`, `1g`)
 ```
 
 ```key meta:sqlite:object-max-size

@@ -75,6 +75,12 @@ pub mod types;
 // Modules that are `pub(crate)` by default, `pub` with the `internal` feature.
 // The CLI enables this feature; library consumers do not.
 
+/// Resumable state for background history indexing.
+#[cfg(feature = "internal")]
+pub mod index_state;
+#[cfg(not(feature = "internal"))]
+pub(crate) mod index_state;
+
 #[cfg(not(feature = "internal"))]
 pub(crate) mod db;
 #[cfg(feature = "internal")]

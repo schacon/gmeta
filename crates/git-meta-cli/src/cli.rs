@@ -347,6 +347,11 @@ pub(crate) enum Commands {
         /// Show what would be pruned without committing
         #[arg(long = "dry-run")]
         dry_run: bool,
+
+        /// Retention window, e.g. 90d, 6m, 1y, or 2025-01-01.
+        /// Defaults to the project's meta:prune:since if set.
+        #[arg(long)]
+        since: Option<String>,
     },
 
     /// Prune old metadata from the local SQLite database
@@ -359,6 +364,27 @@ pub(crate) enum Commands {
         /// Ignore the date rule and prune all non-project metadata
         #[arg(long = "skip-date")]
         skip_date: bool,
+
+        /// Retention window, e.g. 90d, 6m, 1y, or 2025-01-01.
+        /// Defaults to the project's meta:prune:since if set.
+        #[arg(long)]
+        since: Option<String>,
+    },
+
+    /// Fetch more of a shallow metadata history, and index the keys it adds
+    #[command(display_order = 46)]
+    Deepen {
+        /// Metadata commits to add. Omit to fetch the whole remaining history.
+        #[arg(long)]
+        depth: Option<u32>,
+    },
+
+    /// Walk metadata history recording which keys exist, for on-demand fetching
+    #[command(name = "index-history", display_order = 45, hide = true)]
+    IndexHistory {
+        /// Suppress progress output (used when running in the background)
+        #[arg(long)]
+        quiet: bool,
     },
 
     /// Remove the git meta database and all meta refs
@@ -453,6 +479,12 @@ pub(crate) enum RemoteAction {
         /// flag to skip the prompt (e.g. in CI).
         #[arg(long)]
         init: bool,
+
+        /// Fetch only the most recent N metadata commits.
+        ///
+        /// Reach further back later with `git meta deepen`.
+        #[arg(long)]
+        depth: Option<u32>,
     },
 
     /// Remove a metadata remote source

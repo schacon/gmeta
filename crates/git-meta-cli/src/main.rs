@@ -35,8 +35,45 @@ fn main() -> Result<()> {
     }
 
     let cli = Cli::parse();
+    let writes_objects = matches!(
+        cli.command,
+        Commands::Serialize { .. }
+            | Commands::Push { .. }
+            | Commands::Pull { .. }
+            | Commands::Materialize { .. }
+            | Commands::Sync { .. }
+            | Commands::Prune { .. }
+    );
 
-    match cli.command {
+    let indexes_history = !matches!(
+        cli.command,
+        Commands::IndexHistory { .. } | Commands::Teardown
+    );
+
+    let result = run_command(cli.command);
+
+    // After the command, so its database connection is closed: the indexer
+    // writes in transactions, and a command still holding the database would
+    // have to wait behind them to exit. Indexing checkpoints as it goes, so
+    // this also resumes a run that was interrupted.
+    if indexes_history {
+        commands::index_history::start_or_resume_in_background();
+    }
+
+    // Pack what was just written, now that the work is done and this process is
+    // about to exit. Doing it while a session is still open would let Git
+    // delete objects from underneath that session's repository handle.
+    if writes_objects {
+        if let Ok(session) = git_meta_lib::Session::discover() {
+            session.maintain_object_store();
+        }
+    }
+
+    result
+}
+
+fn run_command(command: Commands) -> Result<()> {
+    match command {
         Commands::Set {
             file,
             json,
@@ -96,7 +133,8 @@ fn main() -> Result<()> {
                 name,
                 namespace,
                 init,
-            } => commands::remote::run_add(&url, &name, namespace.as_deref(), init),
+                depth,
+            } => commands::remote::run_add(&url, &name, namespace.as_deref(), init, depth),
             RemoteAction::Remove { name } => commands::remote::run_remove(&name),
             RemoteAction::List => commands::remote::run_list(),
         },
@@ -183,11 +221,17 @@ fn main() -> Result<()> {
 
         Commands::ConfigPrune => commands::prune::config::run(),
 
-        Commands::Prune { dry_run } => commands::prune::tree::run(dry_run),
+        Commands::Prune { dry_run, since } => commands::prune::tree::run(dry_run, since.as_deref()),
 
-        Commands::LocalPrune { dry_run, skip_date } => {
-            commands::prune::local::run(dry_run, skip_date)
-        }
+        Commands::LocalPrune {
+            dry_run,
+            skip_date,
+            since,
+        } => commands::prune::local::run(dry_run, skip_date, since.as_deref()),
+
+        Commands::Deepen { depth } => commands::deepen::run(depth),
+
+        Commands::IndexHistory { quiet } => commands::index_history::run(quiet),
 
         Commands::Teardown => commands::teardown::run(),
     }

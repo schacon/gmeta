@@ -1,4 +1,4 @@
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::error::Result;
 
@@ -24,15 +24,37 @@ impl Store {
         target: &Target,
         key: &str,
         value_type: &ValueType,
+        source_commit: Option<&str>,
     ) -> Result<bool> {
         let target_type_str = target.target_type().as_str();
         let target_value = target.value().unwrap_or("");
         let rows = self.conn.execute(
-            "INSERT OR IGNORE INTO metadata (target_type, target_value, key, value, value_type, last_timestamp, is_git_ref, is_promised)
-             VALUES (?1, ?2, ?3, '', ?4, 0, 0, 1)",
-            params![target_type_str, target_value, key, value_type.as_str()],
+            "INSERT OR IGNORE INTO metadata (target_type, target_value, key, value, value_type, last_timestamp, is_git_ref, is_promised, promised_commit)
+             VALUES (?1, ?2, ?3, '', ?4, 0, 0, 1, ?5)",
+            params![target_type_str, target_value, key, value_type.as_str(), source_commit],
         )?;
         Ok(rows > 0)
+    }
+
+    /// The commit a promised key was last written in, if one was recorded.
+    ///
+    /// History indexing walks newest first, so this is the most recent commit
+    /// that published the key — the one whose tree still holds its value even
+    /// after pruning removed it from the tip.
+    #[cfg(feature = "internal")]
+    pub fn promised_commit(&self, target: &Target, key: &str) -> Result<Option<String>> {
+        let target_type_str = target.target_type().as_str();
+        let target_value = target.value().unwrap_or("");
+        let found: Option<Option<String>> = self
+            .conn
+            .query_row(
+                "SELECT promised_commit FROM metadata
+                 WHERE target_type = ?1 AND target_value = ?2 AND key = ?3 AND is_promised = 1",
+                params![target_type_str, target_value, key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.flatten())
     }
 
     /// Resolve a promised entry by filling in the real value and clearing the flag.
@@ -67,23 +89,6 @@ impl Store {
                 value_type.as_str(),
                 git_ref_val
             ],
-        )?;
-        Ok(())
-    }
-
-    /// Delete a promised entry (e.g. if the key no longer exists in the tip tree).
-    ///
-    /// # Parameters
-    ///
-    /// - `target`: the metadata target
-    /// - `key`: the metadata key name
-    #[cfg(feature = "internal")]
-    pub fn delete_promised(&self, target: &Target, key: &str) -> Result<()> {
-        let target_type_str = target.target_type().as_str();
-        let target_value = target.value().unwrap_or("");
-        self.conn.execute(
-            "DELETE FROM metadata WHERE target_type = ?1 AND target_value = ?2 AND key = ?3 AND is_promised = 1",
-            params![target_type_str, target_value, key],
         )?;
         Ok(())
     }

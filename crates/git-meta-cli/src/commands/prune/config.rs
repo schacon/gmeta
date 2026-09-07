@@ -1,5 +1,5 @@
 use anyhow::Result;
-use dialoguer::{Confirm, Input, Select};
+use dialoguer::{Confirm, Input};
 
 use crate::context::CommandContext;
 use git_meta_lib::prune::{parse_size, read_prune_rules};
@@ -12,149 +12,109 @@ pub(crate) fn run() -> Result<()> {
 
     if let Some(ref rules) = existing {
         println!("Current auto-prune configuration:");
-        println!("  since:    {}", rules.since);
-        if let Some(max_keys) = rules.max_keys {
-            println!("  max-keys: {max_keys}");
-        }
-        if let Some(max_size) = rules.max_size {
-            println!("  max-size: {max_size} bytes");
-        }
-        if let Some(min_size) = rules.min_size {
-            println!("  min-size: {min_size} bytes");
-        }
+        print_pair("keys", rules.max_keys, rules.min_keys, |value| {
+            value.to_string()
+        });
+        print_pair("size", rules.max_size, rules.min_size, format_size);
         println!();
     } else {
         println!("No auto-prune rules configured yet.");
         println!();
     }
 
-    // -- since --
-    println!("Retention window (meta:prune:since)");
-    println!("How far back should metadata be kept?");
-    println!("Examples: 90d, 6m, 1y, or a date like 2025-01-01");
-
-    let since_options = ["90d", "6m", "1y", "Custom"];
-    let since_default = existing
-        .as_ref()
-        .and_then(|r| since_options.iter().position(|&o| o == r.since))
-        .unwrap_or(1);
-
-    let since_idx = Select::new()
-        .with_prompt("Retention window")
-        .items(&since_options)
-        .default(since_default)
-        .interact()?;
-
-    let since = if since_idx == since_options.len() - 1 {
-        Input::<String>::new()
-            .with_prompt("Enter retention value (e.g. 180d, 2025-01-01)")
-            .interact_text()?
-    } else {
-        since_options[since_idx].to_string()
-    };
-
-    // -- max-keys --
+    println!("Auto-prune keeps the published tree between a maximum and a minimum.");
+    println!("When it grows past the maximum, the oldest keys are dropped until it");
+    println!("reaches the minimum, and it is left alone until it grows past the");
+    println!("maximum again. Pruning by date is a separate, manual operation:");
+    println!("  git meta prune --since 90d");
     println!();
-    println!("Key count trigger (meta:prune:max-keys)");
-    println!("Auto-prune runs when total metadata keys exceed this count.");
 
-    let want_max_keys = Confirm::new()
-        .with_prompt("Set a max-keys trigger?")
+    // -- key limits --
+    let want_keys = Confirm::new()
+        .with_prompt("Limit the number of keys in the tree?")
         .default(existing.as_ref().is_none_or(|r| r.max_keys.is_some()))
         .interact()?;
 
-    let max_keys: Option<String> = if want_max_keys {
-        let default = existing
-            .as_ref()
-            .and_then(|r| r.max_keys)
-            .unwrap_or(10000)
-            .to_string();
-        let val = Input::<String>::new()
-            .with_prompt("Max keys")
-            .default(default)
+    let (max_keys, min_keys) = if want_keys {
+        let max: String = Input::new()
+            .with_prompt("  Maximum keys before pruning")
+            .default(
+                existing
+                    .as_ref()
+                    .and_then(|r| r.max_keys)
+                    .unwrap_or(10_000)
+                    .to_string(),
+            )
+            .validate_with(|input: &String| validate_count(input))
             .interact_text()?;
-        // Validate
-        val.parse::<u64>()
-            .map_err(|_| anyhow::anyhow!("invalid number: {val}"))?;
-        Some(val)
+        let max_value: u64 = max.parse().unwrap_or(10_000);
+        let min: String = Input::new()
+            .with_prompt("  Prune back down to")
+            .default(
+                existing
+                    .as_ref()
+                    .and_then(|r| r.min_keys)
+                    .unwrap_or(max_value / 2)
+                    .to_string(),
+            )
+            .validate_with(|input: &String| validate_below(input, max_value, validate_count))
+            .interact_text()?;
+        (Some(max), Some(min))
     } else {
-        None
+        (None, None)
     };
 
-    // -- max-size --
-    println!();
-    println!("Size trigger (meta:prune:max-size)");
-    println!("Auto-prune runs when total serialized tree size exceeds this.");
-    println!("Examples: 512k, 10m, 1g");
-
-    let want_max_size = Confirm::new()
-        .with_prompt("Set a max-size trigger?")
-        .default(existing.as_ref().is_none_or(|r| r.max_size.is_some()))
+    // -- size limits --
+    let want_size = Confirm::new()
+        .with_prompt("Limit the total size of the tree?")
+        .default(existing.as_ref().is_some_and(|r| r.max_size.is_some()))
         .interact()?;
 
-    let max_size: Option<String> = if want_max_size {
-        let default = existing
-            .as_ref()
-            .and_then(|r| r.max_size)
-            .map_or_else(|| "10m".to_string(), format_size);
-        let val = Input::<String>::new()
-            .with_prompt("Max size")
-            .default(default)
+    let (max_size, min_size) = if want_size {
+        let max: String = Input::new()
+            .with_prompt("  Maximum size before pruning (e.g. 50m)")
+            .default(
+                existing
+                    .as_ref()
+                    .and_then(|r| r.max_size)
+                    .map_or_else(|| "50m".to_string(), format_size),
+            )
+            .validate_with(|input: &String| validate_size(input))
             .interact_text()?;
-        // Validate
-        parse_size(&val)?;
-        Some(val)
+        let max_value = parse_size(&max)?;
+        let min: String = Input::new()
+            .with_prompt("  Prune back down to")
+            .default(
+                existing
+                    .as_ref()
+                    .and_then(|r| r.min_size)
+                    .map_or_else(|| format_size(max_value / 2), format_size),
+            )
+            .validate_with(|input: &String| validate_below(input, max_value, validate_size))
+            .interact_text()?;
+        (Some(max), Some(min))
     } else {
-        None
+        (None, None)
     };
 
-    // Need at least one trigger
     if max_keys.is_none() && max_size.is_none() {
         println!();
-        println!(
-            "Warning: at least one trigger (max-keys or max-size) is required for auto-prune."
-        );
-        println!("Auto-prune will not activate without a trigger.");
-        println!("Saving retention window only.");
+        println!("At least one limit is needed for auto-pruning. Nothing saved.");
+        return Ok(());
     }
-
-    // -- min-size --
-    println!();
-    println!("Minimum subtree size (meta:prune:min-size)");
-    println!("Subtrees smaller than this are exempt from pruning.");
-
-    let want_min_size = Confirm::new()
-        .with_prompt("Set a min-size exemption?")
-        .default(existing.as_ref().is_some_and(|r| r.min_size.is_some()))
-        .interact()?;
-
-    let min_size: Option<String> = if want_min_size {
-        let default = existing
-            .as_ref()
-            .and_then(|r| r.min_size)
-            .map_or_else(|| "1k".to_string(), format_size);
-        let val = Input::<String>::new()
-            .with_prompt("Min size")
-            .default(default)
-            .interact_text()?;
-        parse_size(&val)?;
-        Some(val)
-    } else {
-        None
-    };
 
     // -- summary --
     println!();
     println!("Configuration to save:");
-    println!("  meta:prune:since    = {since}");
-    if let Some(ref v) = max_keys {
-        println!("  meta:prune:max-keys = {v}");
-    }
-    if let Some(ref v) = max_size {
-        println!("  meta:prune:max-size = {v}");
-    }
-    if let Some(ref v) = min_size {
-        println!("  meta:prune:min-size = {v}");
+    for (key, value) in [
+        ("meta:prune:max-keys", &max_keys),
+        ("meta:prune:min-keys", &min_keys),
+        ("meta:prune:max-size", &max_size),
+        ("meta:prune:min-size", &min_size),
+    ] {
+        if let Some(value) = value {
+            println!("  {key} = {value}");
+        }
     }
 
     let confirm = Confirm::new()
@@ -168,31 +128,64 @@ pub(crate) fn run() -> Result<()> {
     }
 
     // -- write --
-    set_config(&ctx, "meta:prune:since", &since)?;
-
     let project = project_target();
     let handle = ctx.session.target(&project);
-
-    match max_keys {
-        Some(ref v) => set_config(&ctx, "meta:prune:max-keys", v)?,
-        None => {
-            handle.remove("meta:prune:max-keys")?;
-        }
-    }
-    match max_size {
-        Some(ref v) => set_config(&ctx, "meta:prune:max-size", v)?,
-        None => {
-            handle.remove("meta:prune:max-size")?;
-        }
-    }
-    match min_size {
-        Some(ref v) => set_config(&ctx, "meta:prune:min-size", v)?,
-        None => {
-            handle.remove("meta:prune:min-size")?;
+    for (key, value) in [
+        ("meta:prune:max-keys", &max_keys),
+        ("meta:prune:min-keys", &min_keys),
+        ("meta:prune:max-size", &max_size),
+        ("meta:prune:min-size", &min_size),
+    ] {
+        match value {
+            Some(value) => set_config(&ctx, key, value)?,
+            None => {
+                handle.remove(key)?;
+            }
         }
     }
 
     println!("Auto-prune rules saved.");
+    Ok(())
+}
+
+/// Show a configured maximum with the minimum it prunes back to.
+fn print_pair(what: &str, max: Option<u64>, min: Option<u64>, render: impl Fn(u64) -> String) {
+    if let Some(max) = max {
+        let min = min.map_or_else(|| "half".to_string(), &render);
+        println!("  max-{what}: {} (prunes back to {min})", render(max));
+    }
+}
+
+#[allow(clippy::ptr_arg)]
+fn validate_count(input: &String) -> std::result::Result<(), String> {
+    match input.trim().parse::<u64>() {
+        Ok(value) if value > 0 => Ok(()),
+        Ok(_) => Err("must be greater than zero".to_string()),
+        Err(_) => Err("must be a whole number".to_string()),
+    }
+}
+
+#[allow(clippy::ptr_arg)]
+fn validate_size(input: &String) -> std::result::Result<(), String> {
+    parse_size(input)
+        .map(|_| ())
+        .map_err(|_| "use a size like 512k, 10m or 1g".to_string())
+}
+
+#[allow(clippy::ptr_arg)]
+fn validate_below(
+    input: &String,
+    max: u64,
+    validate: impl Fn(&String) -> std::result::Result<(), String>,
+) -> std::result::Result<(), String> {
+    validate(input)?;
+    let value = input
+        .trim()
+        .parse::<u64>()
+        .or_else(|_| parse_size(input).map_err(|_| "invalid value".to_string()))?;
+    if value >= max {
+        return Err(format!("must be below the maximum ({max})"));
+    }
     Ok(())
 }
 
