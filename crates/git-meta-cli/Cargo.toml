@@ -15,7 +15,7 @@ name = "git-meta"
 path = "src/main.rs"
 
 [dependencies]
-git-meta-lib = { path = "../git-meta-lib", version = "0.1.12", features = ["internal"] }
+git-meta-lib = { path = "../git-meta-lib", version = "0.1.13", features = ["internal"] }
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.11"
